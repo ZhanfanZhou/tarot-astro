@@ -2,8 +2,8 @@ import json
 import aiofiles
 from pathlib import Path
 from typing import List, Optional
-from backend.models import User, Conversation
-from backend.config import USERS_FILE, CONVERSATIONS_FILE
+from models import User, Conversation
+from config import USERS_FILE, CONVERSATIONS_FILE
 
 
 class StorageService:

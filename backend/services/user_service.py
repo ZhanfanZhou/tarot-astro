@@ -1,7 +1,7 @@
 import uuid
 from passlib.context import CryptContext
-from backend.models import User, UserType, UserProfile, UserRegister
-from backend.services.storage_service import StorageService
+from models import User, UserType, UserProfile, UserRegister
+from services.storage_service import StorageService
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 

@@ -1,10 +1,10 @@
 from fastapi import APIRouter, HTTPException
 from typing import List
-from backend.models import (
+from models import (
     Conversation, CreateConversationRequest, 
     UpdateConversationTitleRequest
 )
-from backend.services.conversation_service import ConversationService
+from services.conversation_service import ConversationService
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 

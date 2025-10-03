@@ -1,14 +1,14 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from typing import List
-from backend.models import (
+from models import (
     SendMessageRequest, DrawCardsRequest, DrawCardsResponse,
     TarotCard, MessageRole
 )
-from backend.services.conversation_service import ConversationService
-from backend.services.gemini_service import GeminiService
-from backend.services.tarot_service import TarotService
-from backend.services.user_service import UserService
+from services.conversation_service import ConversationService
+from services.gemini_service import GeminiService
+from services.tarot_service import TarotService
+from services.user_service import UserService
 import json
 
 router = APIRouter(prefix="/api/tarot", tags=["tarot"])

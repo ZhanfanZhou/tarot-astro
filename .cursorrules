@@ -65,6 +65,14 @@ Note that the way to run bash command are different in different operating syste
 - Python 命令使用 `python` 而非 `python3`
 - 使用 PowerShell 而非 bash
 
+### macOS 特定注意事项
+
+- **Python 模块导入路径**：在 macOS 上运行 Python 时，当前工作目录是项目根目录，因此不需要 `backend.` 前缀
+  - 错误：`from backend.config import CORS_ORIGINS`
+  - 正确：`from config import CORS_ORIGINS`
+- **端口占用处理**：使用 `lsof -ti:8000 | xargs kill -9` 清理占用端口的进程
+- **启动脚本权限**：使用 `chmod +x run_backend.sh` 给脚本添加执行权限
+
 # Scratchpad
 
 

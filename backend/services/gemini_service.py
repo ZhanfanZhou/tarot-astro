@@ -1,8 +1,8 @@
 import json
 import google.generativeai as genai
 from typing import AsyncGenerator, Optional, Dict, List
-from backend.config import GEMINI_API_KEY, GEMINI_MODEL
-from backend.models import Message, MessageRole, TarotCard, User
+from config import GEMINI_API_KEY, GEMINI_MODEL
+from models import Message, MessageRole, TarotCard, User
 
 # 配置Gemini API
 genai.configure(api_key=GEMINI_API_KEY)

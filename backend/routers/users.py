@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
-from backend.models import User, UserProfile, UserRegister, UserLogin, UserType
-from backend.services.user_service import UserService
+from models import User, UserProfile, UserRegister, UserLogin, UserType
+from services.user_service import UserService
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 

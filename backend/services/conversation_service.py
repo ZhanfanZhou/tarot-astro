@@ -1,11 +1,11 @@
 import uuid
 from datetime import datetime
 from typing import List, Optional
-from backend.models import (
+from models import (
     Conversation, Message, MessageRole, SessionType,
     TarotCard, DrawCardsRequest
 )
-from backend.services.storage_service import StorageService
+from services.storage_service import StorageService
 
 
 class ConversationService:

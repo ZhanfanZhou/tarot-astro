@@ -1,7 +1,10 @@
+from dotenv import load_dotenv
+load_dotenv()  # 加载.env文件
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from backend.config import CORS_ORIGINS
-from backend.routers import users, conversations, tarot
+from config import CORS_ORIGINS
+from routers import users, conversations, tarot
 
 app = FastAPI(
     title="塔罗占卜API",

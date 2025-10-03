@@ -1107,9 +1107,35 @@ Conversation (对话)
 
 ---
 
-**文档版本：** 1.0.0  
-**最后更新：** 2025-10-02  
+**文档版本：** 1.0.1  
+**最后更新：** 2025-10-03  
 **维护者：** Cursor AI Assistant
+
+## 更新日志
+
+### 2025-10-03 - macOS 启动修复
+
+**问题：** 在 macOS 上启动后端时出现模块导入错误
+```
+ModuleNotFoundError: No module named 'backend'
+```
+
+**解决方案：** 修复所有 Python 模块的导入路径
+- 将 `from backend.xxx import xxx` 改为 `from xxx import xxx`
+- 影响文件：`main.py`, `services/*.py`, `routers/*.py`
+- 原因：在 macOS 上运行 Python 时，当前工作目录是项目根目录，不需要 `backend.` 前缀
+
+**测试结果：**
+- ✅ 后端成功启动在 http://localhost:8000
+- ✅ 前端成功启动在 http://localhost:5173  
+- ✅ API 健康检查通过
+- ✅ 用户创建 API 测试通过
+
+**技术细节：**
+- 使用 `source venv/bin/activate` 激活虚拟环境
+- 使用 `python backend/main.py` 启动后端
+- 使用 `npm run dev` 启动前端
+- 端口占用问题通过 `lsof -ti:8000 | xargs kill -9` 解决
 
 
 

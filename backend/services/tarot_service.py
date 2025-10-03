@@ -1,7 +1,7 @@
 import random
 from typing import List
-from backend.models import TarotCard, DrawCardsRequest
-from backend.config import TAROT_CARDS
+from models import TarotCard, DrawCardsRequest
+from config import TAROT_CARDS
 
 
 class TarotService:
