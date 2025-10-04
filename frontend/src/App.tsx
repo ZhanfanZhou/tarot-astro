@@ -105,10 +105,34 @@ const App: React.FC = () => {
         ];
         const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
         
-        // 等待状态更新后再发送消息
-        setTimeout(() => {
-          handleSendMessage(randomGreeting);
-        }, 100);
+        // 直接使用 newConv 发送消息，避免状态更新延迟问题
+        setIsLoading(true);
+        setStreamingMessage('');
+
+        try {
+          await tarotApi.sendMessage(
+            newConv.conversation_id,
+            randomGreeting,
+            (chunk) => {
+              setStreamingMessage((prev) => prev + chunk);
+            },
+            (drawRequest) => {
+              setPendingDrawRequest(drawRequest);
+              setShowCardDrawer(true);
+            }
+          );
+
+          // 刷新对话
+          const updatedConv = await conversationApi.get(newConv.conversation_id);
+          updateConversation(updatedConv);
+          setCurrentConversation(updatedConv);
+          setStreamingMessage('');
+        } catch (error) {
+          console.error('发送初始消息失败:', error);
+          alert('发送失败，请重试');
+        } finally {
+          setIsLoading(false);
+        }
       }
     } catch (error) {
       console.error('创建对话失败:', error);

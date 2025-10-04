@@ -4,30 +4,48 @@
 
 # 更新日志
 
-## 2025-10-04 - 修复开场白显示问题
+## 2025-10-04 - 修复开场白显示问题（最终版）
 
-**问题：** 点击"塔罗占卜"按钮后，对话界面没有出现开场白
+**问题：** 点击"塔罗占卜"按钮后，对话界面没有出现开场白，AI 没有回复
 
-**原因分析：**
+**根本原因：**
 - React 状态更新是异步的
-- `setCurrentConversation(newConv)` 调用后，状态还未立即更新
-- `handleSendMessage` 被立即调用时，`currentConversation` 仍然是 null
-- 导致 `handleSendMessage` 中的检查 `if (!currentConversation)` 直接返回
+- 使用 setTimeout 延迟仍然无法解决问题
+- 闭包捕获了旧的 `currentConversation` 状态（null）
+- `handleSendMessage` 中的检查 `if (!currentConversation)` 直接返回
 
-**解决方案：**
-- 在调用 `handleSendMessage` 前添加 100ms 延迟
-- 使用 `setTimeout(() => { handleSendMessage(randomGreeting); }, 100);`
-- 确保 React 状态更新完成后再发送消息
+**正确的解决方案：**
+- ❌ ~~使用 setTimeout 延迟~~（无效，闭包问题）
+- ✅ **直接使用 `newConv.conversation_id` 发送消息**
+- 不依赖 React 状态更新，直接使用创建后的对话对象
+- 将消息发送逻辑内联到 `handleSelectSession` 中
+
+**代码变更：**
+```typescript
+// 之前：依赖状态 + setTimeout（无效）
+setCurrentConversation(newConv);
+setTimeout(() => handleSendMessage(randomGreeting), 100);
+
+// 现在：直接使用 newConv
+const newConv = await conversationApi.create(...);
+await tarotApi.sendMessage(
+  newConv.conversation_id,  // 直接使用，不依赖状态
+  randomGreeting,
+  ...
+);
+```
 
 **技术细节：**
 - 修改文件：`frontend/src/App.tsx`
 - 修改方法：`handleSelectSession`
-- 这是一个常见的 React 状态更新时序问题
+- 避免 JavaScript 闭包捕获旧状态的问题
+- 这是处理 React 异步状态更新的正确方式
 
-**测试建议：**
-- 点击"塔罗占卜"按钮
-- 确认自动发送开场白
-- 确认 AI 正常回复
+**测试结果：**
+- ✅ 点击"塔罗占卜"按钮
+- ✅ 立即发送随机开场白
+- ✅ AI 正常响应欢迎消息
+- ✅ 流式输出正常显示
 
 ---
 

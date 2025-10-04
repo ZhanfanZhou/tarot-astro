@@ -643,15 +643,18 @@ choice (选择) → guest (游客)
 
 **handleSelectSession(sessionType):**
 ```
-1. 创建新对话
+1. 创建新对话（API 调用）
 2. 添加到对话列表
 3. 设置为当前对话（React 状态更新）
 4. 如果是塔罗占卜：
    a. 随机选择一种开场白（5种）
-   b. 延迟100ms后发送消息（等待状态更新完成）
+   b. 直接使用 newConv.conversation_id 发送消息
+   c. 设置 loading 状态
+   d. 调用 tarotApi.sendMessage（流式接收）
+   e. 刷新对话并更新状态
 ```
 
-**注意**：使用 setTimeout 延迟是为了确保 React 状态 `currentConversation` 更新完成后再调用 `handleSendMessage`，避免因状态未更新导致消息发送失败。
+**重要**：直接使用 `newConv.conversation_id` 而不是依赖 `currentConversation` 状态，避免 JavaScript 闭包捕获旧状态的问题。这是处理 React 异步状态更新的正确方式。
 
 **handleSendMessage(content):**
 ```
