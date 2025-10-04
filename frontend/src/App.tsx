@@ -94,9 +94,17 @@ const App: React.FC = () => {
       addConversation(newConv);
       setCurrentConversation(newConv);
 
-      // 自动发送初始消息
+      // 自动发送初始消息（使用随机开场白）
       if (sessionType === 'tarot') {
-        handleSendMessage('你好');
+        const greetings = [
+          '你好，我想进行一次塔罗占卜',
+          '晚上好，能帮我看看塔罗牌吗？',
+          '我想请教一些问题，可以帮我占卜一下吗？',
+          '最近有些迷茫，希望塔罗牌能给我一些指引',
+          '你好呀，想通过塔罗牌了解一下自己的运势'
+        ];
+        const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
+        handleSendMessage(randomGreeting);
       }
     } catch (error) {
       console.error('创建对话失败:', error);
