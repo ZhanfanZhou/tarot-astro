@@ -645,9 +645,13 @@ choice (选择) → guest (游客)
 ```
 1. 创建新对话
 2. 添加到对话列表
-3. 设置为当前对话
-4. 如果是塔罗占卜，自动发送"你好"
+3. 设置为当前对话（React 状态更新）
+4. 如果是塔罗占卜：
+   a. 随机选择一种开场白（5种）
+   b. 延迟100ms后发送消息（等待状态更新完成）
 ```
+
+**注意**：使用 setTimeout 延迟是为了确保 React 状态 `currentConversation` 更新完成后再调用 `handleSendMessage`，避免因状态未更新导致消息发送失败。
 
 **handleSendMessage(content):**
 ```
@@ -699,7 +703,7 @@ choice (选择) → guest (游客)
 ```
 前端                     后端                      存储
  │                        │                         │
- │  POST /api/users/register                       │
+ │  POST /api/users/register                        │
  ├───────────────────────>│                         │
  │                        │  hash_password          │
  │                        │  check_username_exists  │
@@ -720,8 +724,8 @@ choice (选择) → guest (游客)
 ```
 前端                     后端                      存储
  │                        │                         │
- │  选择会话类型          │                         │
- │  POST /api/conversations?user_id=xxx            │
+ │  选择会话类型           │                         │
+ │  POST /api/conversations?user_id=xxx             │
  ├───────────────────────>│                         │
  │                        │  generate_conv_id       │
  │                        │  create_conversation    │
@@ -739,8 +743,8 @@ choice (选择) → guest (游客)
 ```
 前端                         后端                      Gemini API
  │                            │                          │
- │  1. 用户点击"塔罗占卜"     │                          │
- │  随机选择开场白发送        │                          │
+ │  1. 用户点击"塔罗占卜"      │                          │
+ │  随机选择开场白发送         │                          │
  │  (5种不同风格的问候语)      │                          │
  │  POST /api/tarot/message   │                          │
  ├───────────────────────────>│                          │
@@ -748,9 +752,9 @@ choice (选择) → guest (游客)
  │                            │  stream_response         │
  │                            ├─────────────────────────>│
  │<────────────streaming──────│<─────────streaming───────│
- │  "欢迎...请告诉我你的问题" │                          │
+ │  "欢迎...请告诉我你的问题"   │                          │
  │                            │                          │
- │  2. 用户输入具体问题       │                          │
+ │  2. 用户输入具体问题        │                          │
  │  POST /api/tarot/message   │                          │
  ├───────────────────────────>│                          │
  │                            │  add_user_message        │
@@ -1111,39 +1115,3 @@ Conversation (对话)
 4. **移动端**：响应式布局、触摸优化
 5. **测试**：单元测试、集成测试
 6. **部署**：Docker化、CI/CD
-
----
-
-**文档版本：** 1.0.1  
-**最后更新：** 2025-10-03  
-**维护者：** Cursor AI Assistant
-
-## 更新日志
-
-### 2025-10-03 - macOS 启动修复
-
-**问题：** 在 macOS 上启动后端时出现模块导入错误
-```
-ModuleNotFoundError: No module named 'backend'
-```
-
-**解决方案：** 修复所有 Python 模块的导入路径
-- 将 `from backend.xxx import xxx` 改为 `from xxx import xxx`
-- 影响文件：`main.py`, `services/*.py`, `routers/*.py`
-- 原因：在 macOS 上运行 Python 时，当前工作目录是项目根目录，不需要 `backend.` 前缀
-
-**测试结果：**
-- ✅ 后端成功启动在 http://localhost:8000
-- ✅ 前端成功启动在 http://localhost:5173  
-- ✅ API 健康检查通过
-- ✅ 用户创建 API 测试通过
-
-**技术细节：**
-- 使用 `source venv/bin/activate` 激活虚拟环境
-- 使用 `python backend/main.py` 启动后端
-- 使用 `npm run dev` 启动前端
-- 端口占用问题通过 `lsof -ti:8000 | xargs kill -9` 解决
-
-
-
-

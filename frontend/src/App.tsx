@@ -104,7 +104,11 @@ const App: React.FC = () => {
           '你好呀，想通过塔罗牌了解一下自己的运势'
         ];
         const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
-        handleSendMessage(randomGreeting);
+        
+        // 等待状态更新后再发送消息
+        setTimeout(() => {
+          handleSendMessage(randomGreeting);
+        }, 100);
       }
     } catch (error) {
       console.error('创建对话失败:', error);
