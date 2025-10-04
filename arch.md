@@ -942,7 +942,64 @@ choice (选择) → guest (游客)
 - 当前仅支持桌面端
 - 移动端需要增加响应式断点和侧边栏折叠
 
-### 7. 安全机制
+### 7. React 状态更新机制（重要）
+
+**问题背景：**
+- React 的 `setState` 是异步的，不会立即更新状态
+- JavaScript 闭包会捕获定义时的变量值，而非执行时的值
+- 组合使用会导致闭包捕获旧的状态值
+
+**错误模式（避免）：**
+```typescript
+// ❌ 错误：闭包捕获旧状态
+const [currentConv, setCurrentConv] = useState(null);
+
+const handleCreate = async () => {
+  const newConv = await createConversation();
+  setCurrentConv(newConv);  // 异步更新，不会立即生效
+  
+  // 错误方式1：直接使用状态
+  sendMessage(currentConv.id);  // currentConv 仍然是 null！
+  
+  // 错误方式2：使用 setTimeout
+  setTimeout(() => {
+    sendMessage(currentConv.id);  // 闭包捕获的仍是旧值 null！
+  }, 100);
+};
+```
+
+**正确模式（推荐）：**
+```typescript
+// ✅ 正确：直接使用局部变量
+const handleCreate = async () => {
+  const newConv = await createConversation();
+  setCurrentConv(newConv);  // 更新状态（异步）
+  
+  // 方式1：直接使用局部变量（推荐）
+  await sendMessage(newConv.id);  // 使用 newConv，不依赖状态
+  
+  // 方式2：内联逻辑
+  await api.sendMessage(newConv.id, content);  // 不调用依赖状态的函数
+};
+```
+
+**设计原则：**
+1. **优先使用局部变量/函数参数** - 避免依赖 React 状态
+2. **内联逻辑而非函数调用** - 减少状态依赖链
+3. **使用 useEffect 监听状态变化** - 需要响应状态更新时使用
+4. **避免 setTimeout 处理状态问题** - 治标不治本
+
+**适用场景：**
+- 创建资源后立即操作该资源
+- 状态更新后立即执行依赖该状态的操作
+- 表单提交、对话创建等场景
+
+**本项目应用：**
+- `handleSelectSession`：创建对话后立即发送消息
+- 使用 `newConv.conversation_id` 而非 `currentConversation.conversation_id`
+- 避免了闭包捕获 null 值的问题
+
+### 8. 安全机制
 
 **密码安全：**
 - 使用 bcrypt 加密密码
@@ -954,7 +1011,7 @@ choice (选择) → guest (游客)
 - API Key 通过环境变量配置
 - 敏感配置不提交到版本控制
 
-### 8. 性能优化机制
+### 9. 性能优化机制
 
 **后端：**
 - 使用异步操作（async/await）提高并发性能

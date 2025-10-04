@@ -53,3 +53,38 @@ During your interaction with the user, if you find anything reusable in this pro
   - 正确：`from config import CORS_ORIGINS`
 - **端口占用处理**：使用 `lsof -ti:8000 | xargs kill -9` 清理占用端口的进程
 - **启动脚本权限**：使用 `chmod +x run_backend.sh` 给脚本添加执行权限
+
+### React 状态更新和闭包问题
+
+**问题：** React 状态更新是异步的，闭包会捕获旧的状态值
+
+**错误做法：**
+```typescript
+// ❌ 错误：闭包捕获旧状态
+setCurrentConversation(newConv);
+setTimeout(() => {
+  handleSendMessage(greeting);  // currentConversation 仍然是 null
+}, 100);
+```
+
+**正确做法：**
+```typescript
+// ✅ 正确：直接使用函数参数/局部变量
+const newConv = await conversationApi.create(...);
+await tarotApi.sendMessage(
+  newConv.conversation_id,  // 直接使用，不依赖状态
+  greeting,
+  ...
+);
+```
+
+**核心原则：**
+1. **避免在闭包中依赖 React 状态** - 闭包捕获的是定义时的值
+2. **直接使用函数参数或局部变量** - 确保使用最新的值
+3. **不要用 setTimeout 解决状态更新问题** - 治标不治本
+4. **内联逻辑而非调用依赖状态的函数** - 减少状态依赖链
+
+**适用场景：**
+- 创建对话后立即发送消息
+- 状态更新后立即执行依赖该状态的操作
+- 任何涉及异步状态更新的场景
