@@ -18,7 +18,7 @@ gemini_service = GeminiService()
 
 @router.post("/message")
 async def send_message(request: SendMessageRequest):
-    """发送消息并获取AI流式回复"""
+    """发送消息并获取AI流式回复（支持Function Calling）"""
     try:
         # 获取对话
         conversation = await ConversationService.get_conversation(request.conversation_id)
@@ -39,39 +39,252 @@ async def send_message(request: SendMessageRequest):
         except:
             pass
         
-        # 流式生成AI回复
+        # 流式生成AI回复（使用Agent Loop）
         async def generate():
-            full_response = ""
-            async for chunk in gemini_service.stream_response(conversation.messages, user):
-                full_response += chunk
-                yield f"data: {json.dumps({'content': chunk})}\n\n"
+            full_text_response = ""
+            has_function_call = False
+            function_call_data = None
             
-            # 检查是否包含抽牌指令
-            draw_instruction = GeminiService.extract_draw_cards_instruction(full_response)
-            
-            if draw_instruction:
-                # 移除抽牌标签后保存AI消息
-                clean_response = GeminiService.remove_draw_cards_tags(full_response)
+            # 第一阶段：获取AI响应（可能包含function call）
+            async for event in gemini_service.stream_response(
+                conversation.messages, 
+                user,
+                session_type=conversation.session_type
+            ):
+                if "content" in event:
+                    # 流式输出文本内容
+                    full_text_response += event["content"]
+                    yield f"data: {json.dumps({'content': event['content']})}\n\n"
                 
-                # 创建DrawCardsRequest对象
-                draw_request = DrawCardsRequest(**draw_instruction)
+                elif "function_call" in event:
+                    # 检测到函数调用
+                    has_function_call = True
+                    function_call_data = event["function_call"]
+                    func_name = function_call_data["name"]
+                    func_args = function_call_data["args"]
+                    
+                    print(f"\n[Tarot Router] 🔧 执行函数调用: {func_name}")
+                    print(f"[Tarot Router] 参数: {func_args}")
+                    
+                    # 保存AI的文本回复（如果有）
+                    if full_text_response.strip():
+                        await ConversationService.add_message(
+                            request.conversation_id,
+                            MessageRole.ASSISTANT,
+                            full_text_response
+                        )
+                    
+                    # 执行函数
+                    if func_name == "draw_tarot_cards":
+                        # 抽塔罗牌 - 保留原有的用户交互体验（显示抽牌动画窗口）
+                        # 检查是否已经抽过牌
+                        updated_conv = await ConversationService.get_conversation(request.conversation_id)
+                        if updated_conv.has_drawn_cards:
+                            # 已经抽过牌，返回错误
+                            function_result = {
+                                "success": False,
+                                "error": "已经抽过牌，不能再次抽牌"
+                            }
+                            
+                            print(f"[Tarot Router] ⚠️ 已经抽过牌，拒绝请求")
+                            
+                            # 告诉AI结果
+                            final_response = ""
+                            async for event2 in gemini_service.continue_with_function_result(
+                                updated_conv.messages,
+                                user,
+                                session_type=updated_conv.session_type,
+                                function_name=func_name,
+                                function_result=function_result
+                            ):
+                                if "content" in event2:
+                                    final_response += event2["content"]
+                                    yield f"data: {json.dumps({'content': event2['content']})}\n\n"
+                            
+                            if final_response.strip():
+                                await ConversationService.add_message(
+                                    request.conversation_id,
+                                    MessageRole.ASSISTANT,
+                                    final_response
+                                )
+                        else:
+                            # 🎴 通知前端显示抽牌器（保留用户体验）
+                            print(f"[Tarot Router] 🎴 通知前端显示抽牌器，参数: {func_args}")
+                            yield f"data: {json.dumps({'draw_cards': func_args})}\n\n"
+                            
+                            # 告诉AI：已通知用户抽牌，等待用户完成
+                            # 注意：实际的抽牌和解读会在用户完成抽牌后由前端触发
+                            function_result = {
+                                "success": True,
+                                "message": "已通知用户打开抽牌器，用户正在选择塔罗牌。用户完成选牌后，我会立即为您解读。请稍候..."
+                            }
+                            
+                            print(f"[Tarot Router] ✅ 函数执行完成: {func_name}")
+                            print(f"[Tarot Router] 📋 等待用户在抽牌器中完成选牌...")
+                            
+                            # 告诉AI当前状态
+                            final_response = ""
+                            async for event2 in gemini_service.continue_with_function_result(
+                                updated_conv.messages,
+                                user,
+                                session_type=updated_conv.session_type,
+                                function_name=func_name,
+                                function_result=function_result
+                            ):
+                                if "content" in event2:
+                                    final_response += event2["content"]
+                                    yield f"data: {json.dumps({'content': event2['content']})}\n\n"
+                            
+                            # 保存AI的提示消息
+                            if final_response.strip():
+                                await ConversationService.add_message(
+                                    request.conversation_id,
+                                    MessageRole.ASSISTANT,
+                                    final_response
+                                )
+                    
+                    elif func_name == "get_astrology_chart":
+                        # 获取星盘数据
+                        # 检查用户资料是否完整
+                        if not user or not user.profile:
+                            function_result = {
+                                "success": False,
+                                "error": "用户信息不完整，请先补充个人资料"
+                            }
+                        else:
+                            profile = user.profile
+                            
+                            # 检查是否有完整的出生信息
+                            if not all([
+                                profile.birth_year,
+                                profile.birth_month,
+                                profile.birth_day,
+                                profile.birth_hour is not None,
+                                profile.birth_minute is not None,
+                                profile.birth_city
+                            ]):
+                                function_result = {
+                                    "success": False,
+                                    "error": "出生信息不完整，需要：出生年月日、出生时间（小时和分钟）、出生城市"
+                                }
+                            else:
+                                # 调用星盘API
+                                from services.astrology_service import AstrologyService
+                                chart_data = await AstrologyService.fetch_natal_chart(
+                                    birth_year=profile.birth_year,
+                                    birth_month=profile.birth_month,
+                                    birth_day=profile.birth_day,
+                                    birth_hour=profile.birth_hour,
+                                    birth_minute=profile.birth_minute,
+                                    city=profile.birth_city
+                                )
+                                
+                                if not chart_data:
+                                    function_result = {
+                                        "success": False,
+                                        "error": "获取星盘数据失败，请稍后重试"
+                                    }
+                                else:
+                                    # 格式化星盘数据为文字
+                                    user_info = {
+                                        "birth_year": profile.birth_year,
+                                        "birth_month": profile.birth_month,
+                                        "birth_day": profile.birth_day,
+                                        "birth_hour": profile.birth_hour,
+                                        "birth_minute": profile.birth_minute,
+                                        "city": profile.birth_city
+                                    }
+                                    chart_text = AstrologyService.format_chart_data_to_text(chart_data, user_info)
+                                    
+                                    # 保存星盘数据到对话
+                                    chart_message = f"[星盘数据]\n{chart_text}"
+                                    await ConversationService.add_message(
+                                        request.conversation_id,
+                                        MessageRole.SYSTEM,
+                                        chart_message
+                                    )
+                                    
+                                    function_result = {
+                                        "success": True,
+                                        "chart_data": chart_text
+                                    }
+                        
+                        print(f"[Tarot Router] ✅ 函数执行完成: {func_name}")
+                        print(f"[Tarot Router] 结果: {function_result.get('success', False)}")
+                        
+                        # 将函数结果喂回AI，获取最终解读
+                        print(f"[Tarot Router] 🔄 将函数结果喂回AI...")
+                        conversation = await ConversationService.get_conversation(request.conversation_id)
+                        
+                        final_response = ""
+                        async for event2 in gemini_service.continue_with_function_result(
+                            conversation.messages,
+                            user,
+                            session_type=conversation.session_type,
+                            function_name=func_name,
+                            function_result=function_result
+                        ):
+                            if "content" in event2:
+                                final_response += event2["content"]
+                                yield f"data: {json.dumps({'content': event2['content']})}\n\n"
+                        
+                        # 保存AI的最终解读
+                        if final_response.strip():
+                            await ConversationService.add_message(
+                                request.conversation_id,
+                                MessageRole.ASSISTANT,
+                                final_response
+                            )
+                    
+                    elif func_name == "request_user_profile":
+                        # 请求用户补充个人信息
+                        print(f"[Tarot Router] 📋 请求用户补充信息: {func_args}")
+                        
+                        # 通知前端显示弹窗
+                        yield f"data: {json.dumps({'need_profile': func_args})}\n\n"
+                        
+                        # 构造函数结果（告诉AI已经请求用户填写）
+                        function_result = {
+                            "success": True,
+                            "message": "已向用户显示资料补充表单，等待用户填写"
+                        }
+                        
+                        print(f"[Tarot Router] ✅ 函数执行完成: {func_name}")
+                        
+                        # 将函数结果喂回AI
+                        print(f"[Tarot Router] 🔄 将函数结果喂回AI...")
+                        conversation = await ConversationService.get_conversation(request.conversation_id)
+                        
+                        final_response = ""
+                        async for event2 in gemini_service.continue_with_function_result(
+                            conversation.messages,
+                            user,
+                            session_type=conversation.session_type,
+                            function_name=func_name,
+                            function_result=function_result
+                        ):
+                            if "content" in event2:
+                                final_response += event2["content"]
+                                yield f"data: {json.dumps({'content': event2['content']})}\n\n"
+                        
+                        # 保存AI的最终回复
+                        if final_response.strip():
+                            await ConversationService.add_message(
+                                request.conversation_id,
+                                MessageRole.ASSISTANT,
+                                final_response
+                            )
                 
-                await ConversationService.add_message(
-                    request.conversation_id,
-                    MessageRole.ASSISTANT,
-                    clean_response,
-                    draw_request=draw_request
-                )
-                
-                # 发送抽牌指令
-                yield f"data: {json.dumps({'draw_cards': draw_instruction})}\n\n"
-            else:
-                # 保存完整的AI回复
-                await ConversationService.add_message(
-                    request.conversation_id,
-                    MessageRole.ASSISTANT,
-                    full_response
-                )
+                elif "done" in event:
+                    # 对话完成
+                    if not has_function_call:
+                        # 没有函数调用，保存AI回复
+                        if full_text_response.strip():
+                            await ConversationService.add_message(
+                                request.conversation_id,
+                                MessageRole.ASSISTANT,
+                                full_text_response
+                            )
             
             yield "data: [DONE]\n\n"
         
@@ -83,6 +296,9 @@ async def send_message(request: SendMessageRequest):
     except HTTPException:
         raise
     except Exception as e:
+        print(f"[Tarot Router] ❌ 错误: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 

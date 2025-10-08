@@ -22,9 +22,9 @@ const SessionButtons: React.FC<SessionButtonsProps> = ({
     {
       type: 'astrology' as SessionType,
       icon: Star,
-      label: '星盘解读',
+      label: '星座',
       gradient: 'from-blue-500 to-cyan-500',
-      comingSoon: true,
+      comingSoon: false,
     },
     {
       type: 'chat' as SessionType,

@@ -4,7 +4,7 @@ load_dotenv()  # 加载.env文件
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from config import CORS_ORIGINS
-from routers import users, conversations, tarot
+from routers import users, conversations, tarot, astrology
 
 app = FastAPI(
     title="塔罗占卜API",
@@ -25,6 +25,7 @@ app.add_middleware(
 app.include_router(users.router)
 app.include_router(conversations.router)
 app.include_router(tarot.router)
+app.include_router(astrology.router)
 
 
 @app.get("/")

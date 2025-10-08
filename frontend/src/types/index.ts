@@ -18,6 +18,7 @@ export interface UserProfile {
   birth_day?: number;
   birth_hour?: number;
   birth_minute?: number;
+  birth_city?: string;  // 出生城市（用于星盘解读）
 }
 
 export interface User {

@@ -16,6 +16,10 @@ CONVERSATIONS_FILE = DATA_DIR / "conversations.json"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = "gemini-2.0-flash-exp"  # 使用Gemini 2.0 Flash
 
+# 星盘API配置
+ASTROLOGY_API_URL = "http://www.xingpan.vip/astrology/chart/natal"
+ASTROLOGY_ACCESS_TOKEN = os.getenv("ASTROLOGY_ACCESS_TOKEN", "")  # 需要从环境变量设置
+
 # JWT配置
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
 ALGORITHM = "HS256"

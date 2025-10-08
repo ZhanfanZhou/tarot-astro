@@ -24,6 +24,7 @@ class UserProfile(BaseModel):
     birth_day: Optional[int] = None
     birth_hour: Optional[int] = None
     birth_minute: Optional[int] = None
+    birth_city: Optional[str] = None  # 出生地城市（用于星盘解读）
 
 
 class User(BaseModel):

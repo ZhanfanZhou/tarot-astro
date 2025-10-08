@@ -20,6 +20,15 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   if (isUser && message.content === '请根据抽牌结果进行解读') {
     return null;
   }
+  
+  // 隐藏自动触发星盘解读的消息
+  if (isUser && (
+    message.content === '资料补充好了，我的星盘信息已经准备好了' ||
+    message.content === '星盘数据已准备好，请继续解读' ||
+    message.content === '我已经填写好出生信息了'
+  )) {
+    return null;
+  }
 
   return (
     <motion.div

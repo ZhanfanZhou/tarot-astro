@@ -13,8 +13,8 @@ During your interaction with the user, if you find anything reusable in this pro
 # Tools & Resources
 
 `arch.md`是程序架构设计说明文档，需要根据编码任务的完成情况，及时更新。每次编码修改前，如有必要，找到要修改的模块对应的章节参考，避免引入新的bug！！！NOTE: arch.md内容很多，你只关注需要修改模块，不要修改不属于你负责的模块！！！
-`Lessons` section in the `.cursorrules` 是编码经验总结，需要根据编码任务的完成情况，及时更新。
-`update_log.md`是更新日志，你每次完成编码任务后的总结同步输入到这个文件中。
+`Lessons` section in the `.cursorrules` 是编码经验总结，需要根据编码任务的完成情况，精炼地总结关键点。
+`update_log.md`是更新日志，你每次完成编码任务后的总结同步输入到这个文件中，该文件只写改动点，不记录经验，经验总结都写在`.cursorrules`中。
 
 # Lessons
 
@@ -31,6 +31,7 @@ During your interaction with the user, if you find anything reusable in this pro
 2. **自定义 AI 指令传递**：使用 XML 标签（如 `<draw_cards>...</draw_cards>`）在 AI 回复中嵌入结构化指令，然后用正则表达式提取
 3. **FastAPI 流式响应**：使用 `StreamingResponse` + Server-Sent Events (SSE) 格式（`data: {JSON}\n\n`）
 4. **Zustand 持久化**：使用 `persist()` 中间件，配置 `name` 属性指定 localStorage 键名
+5. **星盘API JSON格式**：使用 `json=params` 而非 `data=params` 发送请求，确保数组参数正确传递
 
 ### 文件路径和命名规范
 
@@ -54,29 +55,11 @@ During your interaction with the user, if you find anything reusable in this pro
 - **端口占用处理**：使用 `lsof -ti:8000 | xargs kill -9` 清理占用端口的进程
 - **启动脚本权限**：使用 `chmod +x run_backend.sh` 给脚本添加执行权限
 
-### React 状态更新和闭包问题
+### 编码类问题记录
+
+#### 1. React 状态异步更新与闭包问题
 
 **问题：** React 状态更新是异步的，闭包会捕获旧的状态值
-
-**错误做法：**
-```typescript
-// ❌ 错误：闭包捕获旧状态
-setCurrentConversation(newConv);
-setTimeout(() => {
-  handleSendMessage(greeting);  // currentConversation 仍然是 null
-}, 100);
-```
-
-**正确做法：**
-```typescript
-// ✅ 正确：直接使用函数参数/局部变量
-const newConv = await conversationApi.create(...);
-await tarotApi.sendMessage(
-  newConv.conversation_id,  // 直接使用，不依赖状态
-  greeting,
-  ...
-);
-```
 
 **核心原则：**
 1. **避免在闭包中依赖 React 状态** - 闭包捕获的是定义时的值
@@ -88,3 +71,24 @@ await tarotApi.sendMessage(
 - 创建对话后立即发送消息
 - 状态更新后立即执行依赖该状态的操作
 - 任何涉及异步状态更新的场景
+
+#### 2. 外部API数据请求与格式化的同步性
+
+**问题：** 扩展外部API请求参数后，忘记同步更新数据格式化函数，导致新数据无法传递给AI
+
+
+**核心原则：**
+1. **API请求扩展时，必须同步更新数据处理链** - 从获取到格式化到传递，三个环节都要更新
+2. **数据流完整性检查** - 通过日志验证数据在每个环节都正确处理
+3. **添加调试日志** - 在关键节点打印数据，方便追踪数据流向
+
+**检查清单（扩展外部API数据时）：**
+- [ ] 更新API请求参数（如 `params` 字典）
+- [ ] 更新数据格式化函数（如 `format_chart_data_to_text()`）
+- [ ] 确认数据正确传递给下游（如传递给AI）
+- [ ] 添加日志输出，验证每个环节的数据
+
+**适用场景：**
+- 扩展星盘API请求的星体、宫位等数据
+- 集成任何外部API时扩展请求参数
+- 多层数据处理流程的修改

@@ -163,43 +163,118 @@ mark_cards_drawn → get_conversation → set flag → save_conversation
 
 #### 1.6 Gemini AI 服务层 (services/gemini_service.py)
 
-**功能：** 与 Gemini API 交互，实现 AI 对话和塔罗解读
+**功能：** 与 Gemini API 交互，实现 AI 对话、塔罗解读和星盘分析，支持 Function Calling Agent Loop
 
 **核心方法：**
 - `_build_user_context(user)` - 构建用户上下文信息
-- `_format_messages_for_gemini(messages, user)` - 格式化消息
-- `stream_response(messages, user)` - 流式生成回复（异步生成器）
-- `extract_draw_cards_instruction(text)` - 提取抽牌指令
-- `remove_draw_cards_tags(text)` - 移除抽牌标签
+- `_format_messages_for_gemini(messages, user, session_type)` - 格式化消息
+- `stream_response(messages, user, session_type)` - 流式生成回复（支持Function Calling的Agent Loop）
+- `continue_with_function_result(messages, user, session_type, function_name, function_result)` - 在收到函数执行结果后继续Agent Loop
+
+**Function Calling 工具定义：**
+
+1. **draw_tarot_cards** - 塔罗抽牌工具
+   ```python
+   参数:
+   - spread_type: 牌阵类型 (single/three_card/celtic_cross/custom)
+   - card_count: 抽牌数量 (1-10张)
+   - positions: 牌阵位置含义 (可选)
+   ```
+
+2. **get_astrology_chart** - 获取星盘数据工具
+   ```python
+   参数:
+   - reason: 调用原因说明
+   ```
 
 **系统提示词（TAROT_SYSTEM_PROMPT）：**
 ```
 你是一位专业的塔罗占卜师和命理师...
 1. 首次对话时，引导用户说出问题
 2. 分析问题，决定牌阵和牌数
-3. 在<draw_cards>标签中返回抽牌指令
+3. 使用 draw_tarot_cards 工具为用户抽牌（每次对话只能抽一次）
 4. 收到抽牌结果后，进行专业解读
 5. 解读完毕后，询问是否继续探讨
 6. 不能再次抽牌
 ```
 
-**调用关系：**
+**系统提示词（ASTROLOGY_SYSTEM_PROMPT）：**
+```
+你是一位专业的占星师和星座分析师...
+1. 首次对话时，引导用户提问
+2. 判断问题是否需要星盘资料
+3. 如需星盘且用户资料完整，使用 get_astrology_chart 工具获取数据
+4. 收到星盘数据后，进行深入解读
+5. 如不需要星盘，直接回答星座知识问题
+```
+
+**Agent Loop 调用关系：**
 ```
 stream_response → _format_messages_for_gemini → _build_user_context
-              → model.start_chat → send_message_async → yield chunks
-              
-extract_draw_cards_instruction → regex search → parse JSON
+              → create GenerativeModel with tools
+              → start_chat → send_message_async (non-stream)
+              → check for function_call
+              → yield {"function_call": {...}} if found
+              → yield {"content": text} for text chunks
+              → yield {"done": True} when complete
+
+路由层执行函数 → 调用实际服务（TarotService/AstrologyService）
+              → 构造 function_result
+
+continue_with_function_result → format messages with function result
+                              → send function_response to AI
+                              → stream final AI response
+                              → yield {"content": text} chunks
+                              → yield {"done": True}
 ```
 
 **设计机制：**
-- 使用自定义标签 `<draw_cards>...</draw_cards>` 传递抽牌指令
-- 抽牌指令使用 JSON 格式，包含 spread_type、card_count、positions
+- **Agent Loop架构**：AI可以主动调用工具，工具执行后将结果喂回AI继续处理
+- **Function Calling协议**：使用Gemini标准的Function Calling机制，符合API规范
+- **可扩展性**：工具定义与业务逻辑分离，易于添加新工具
+- **多会话支持**：塔罗和星座会话各自配置不同的工具集
+- **流式输出**：支持流式返回文本和函数调用事件
+- **错误处理**：函数执行失败时返回错误信息，AI会据此调整回复
 - 用户资料（昵称、性别、生日）会被添加到系统提示中，用于个性化
-- 使用流式输出（AsyncGenerator），实现打字机效果
 - 历史消息会被完整传递给 AI，保持上下文连贯性
-- 抽牌结果会被格式化添加到消息中，包含位置、牌名、正逆位
+- 函数结果会被保存为SYSTEM消息，供AI参考
 
-#### 1.7 塔罗牌服务层 (services/tarot_service.py)
+#### 1.7 星盘服务层 (services/astrology_service.py)
+
+**功能：** 处理星盘数据获取和格式化
+
+**核心方法：**
+- `fetch_natal_chart(birth_info)` - 调用外部星盘API获取本命盘数据
+- `format_chart_data_to_text(chart_data, user_info)` - 将星盘数据格式化为文字描述
+- `get_city_coordinates(city)` - 获取城市经纬度
+- `get_current_zodiac_sign()` - 获取当前时间对应的星座
+
+**星盘API集成：**
+```python
+1. 使用 httpx 异步调用外部星盘API
+2. 传递用户出生信息（年月日时分、城市）
+3. 城市名转换为经纬度和时区
+4. 获取行星位置、宫位、星座等信息
+5. 格式化为易读的文字描述
+```
+
+**城市坐标数据：**
+- 内置主要城市（北京、上海、广州等18个城市）的经纬度和时区
+- 如果城市不在列表，使用北京作为默认值
+- 未来可扩展为完整的地理编码服务
+
+**星盘数据格式化：**
+- 基本信息：出生日期、时间、地点
+- 行星落座：太阳、月亮、水星等10颗行星的星座和宫位
+- 四轴点：上升点(ASC)、天底(IC)、下降点(DSC)、天顶(MC)
+
+**设计机制：**
+- 使用外部星盘API（http://www.xingpan.vip）
+- Access Token 通过环境变量配置
+- 异步HTTP请求，设置30秒超时
+- 错误处理：API失败返回None，由调用方处理
+
+#### 1.8 塔罗牌服务层 (services/tarot_service.py)
 
 **功能：** 处理塔罗牌抽牌逻辑
 
@@ -274,27 +349,59 @@ POST /api/conversations
 #### 2.3 塔罗路由 (routers/tarot.py)
 
 **端点：**
-- `POST /api/tarot/message` - 发送消息并获取AI流式回复
-- `POST /api/tarot/draw?conversation_id={id}` - 抽取塔罗牌
+- `POST /api/tarot/message` - 发送消息并获取AI流式回复（塔罗占卜，支持Function Calling）
+- `POST /api/tarot/draw?conversation_id={id}` - 抽取塔罗牌（保留用于手动抽牌）
 - `GET /api/tarot/cards` - 获取所有塔罗牌
 
-**核心功能 - 流式消息：**
+#### 2.4 星盘路由 (routers/astrology.py)
+
+**端点：**
+- `POST /api/astrology/message` - 发送消息并获取AI流式回复（星盘解读，支持Function Calling）
+- `POST /api/astrology/fetch-chart?conversation_id={id}` - 获取用户星盘数据（保留用于手动获取）
+- `GET /api/astrology/check-profile/{user_id}` - 检查用户星盘资料完整性
+- `GET /api/astrology/current-zodiac` - 获取当前时间对应的星座
+
+**核心功能 - Agent Loop流式消息（支持Function Calling）：**
 
 ```python
-POST /api/tarot/message
-  1. 获取对话
+POST /api/tarot/message (新架构)
+  1. 获取对话和用户信息
   2. 添加用户消息
-  3. 调用 GeminiService.stream_response
-  4. 流式返回 AI 回复（SSE 格式）
-  5. 检测是否包含抽牌指令
-  6. 如果有抽牌指令，发送 draw_cards 事件
-  7. 保存 AI 消息
+  3. 调用 GeminiService.stream_response（返回事件流）
+  4. 处理事件流：
+     a. {"content": "..."} - 流式输出文本
+     b. {"function_call": {...}} - 检测到函数调用
+        → 执行对应的函数（draw_tarot_cards）
+        → 调用 TarotService.draw_cards
+        → 保存抽牌结果到对话（SYSTEM消息）
+        → 调用 GeminiService.continue_with_function_result
+        → 流式输出AI的最终解读
+     c. {"done": True} - 对话完成
+  5. 保存所有AI消息
+
+POST /api/astrology/message (新架构)
+  1. 获取对话和用户信息
+  2. 添加用户消息
+  3. 调用 GeminiService.stream_response（返回事件流）
+  4. 处理事件流：
+     a. {"content": "..."} - 流式输出文本
+     b. {"function_call": {...}} - 检测到函数调用
+        → 执行对应的函数（get_astrology_chart）
+        → 检查用户资料完整性
+        → 调用 AstrologyService.fetch_natal_chart
+        → 格式化星盘数据为文字
+        → 保存星盘数据到对话（SYSTEM消息）
+        → 调用 GeminiService.continue_with_function_result
+        → 流式输出AI的最终解读
+     c. {"done": True} - 对话完成
+  5. 保存所有AI消息
 ```
 
 **流式响应格式（Server-Sent Events）：**
 ```
 data: {"content": "文本内容"}\n\n
-data: {"draw_cards": {...}}\n\n
+data: {"draw_cards": {...}, "cards": [...]}\n\n  # 塔罗抽牌结果
+data: {"need_profile": {...}}\n\n  # 需要补充资料
 data: [DONE]\n\n
 ```
 
@@ -570,7 +677,55 @@ AI消息（左侧）:
 - 使用半透明黑色背景+模糊效果
 - 卡槽显示位置名称或序号
 
-#### 3.6 认证弹窗组件 (AuthModal.tsx)
+#### 3.6 星盘资料填写弹窗组件 (AstrologyProfileModal.tsx)
+
+**功能：** 用户填写星盘所需的出生资料
+
+**Props：**
+- `isOpen` - 是否打开
+- `currentProfile` - 当前用户资料
+- `onClose` - 关闭回调
+- `onSubmit(profile)` - 提交资料回调
+- `onSkip()` - 跳过填写回调
+
+**UI 结构：**
+```
+┌──────────────────────────────┐
+│  完善星盘资料            [X]  │  <- Header
+│  提供准确的出生信息...        │
+├──────────────────────────────┤
+│  性别：[男] [女] [其他] [保密]│
+│                              │
+│  出生日期：*                 │
+│  [年份▼] [月份▼] [日期▼]     │
+│                              │
+│  出生时间：*                 │
+│  [小时▼] [分钟▼]             │
+│  准确的出生时间对星盘解读很重要│
+│                              │
+│  出生城市：*                 │
+│  [请选择城市▼]               │
+│  北京、上海、广州...         │
+│                              │
+│  [保存并继续] [暂时跳过]      │
+└──────────────────────────────┘
+```
+
+**交互：**
+- 性别为可选项，其他为必填项
+- 年份范围：1950-2024
+- 时间：0-23小时，0-59分钟
+- 城市：18个主要城市下拉选择
+- 提交前验证必填项
+- 跳过后进入无资料模式
+
+**设计机制：**
+- 使用下拉选择器简化输入
+- 日期和时间使用数字选择器
+- 城市列表与后端保持一致
+- 表单验证提示友好
+
+#### 3.7 认证弹窗组件 (AuthModal.tsx)
 
 **功能：** 用户登录/注册
 
@@ -819,7 +974,109 @@ choice (选择) → guest (游客)
 5. **AI 识别机制**：系统提示词明确告诉 AI 看到 `[抽牌结果]` 后直接解读，不要再次返回抽牌指令
 6. **继续对话**：解读完成后，用户仍可继续提问和深入探讨
 
-### 4. 抽牌动画流程
+### 4. 星座咨询完整流程（AI智能判断）
+
+```
+前端                         后端                      外部API / Gemini API
+ │                            │                          │
+ │  1. 用户点击"星座"按钮      │                          │
+ │  创建对话，发送空消息       │                          │
+ │  POST /api/astrology/message (content="")            │
+ ├───────────────────────────>│                          │
+ │                            │  不添加用户消息           │
+ │                            │  stream_response         │
+ │                            │  (session_type=ASTROLOGY)│
+ │                            ├─────────────────────────>│
+ │                            │  ASTROLOGY_SYSTEM_PROMPT │
+ │                            │  "首次对话，主动开场"     │
+ │<────────────streaming──────│<─────────────streaming───│
+ │  "你好，我是你的星座顾问..." │  AI 主动开场             │
+ │  "你可以问我关于星座、运势、星盘等任何问题"           │
+ │                            │                          │
+ │  2. 用户提出问题            │                          │
+ │  POST /api/astrology/message                         │
+ │  "我的上升星座是什么？"     │                          │
+ ├───────────────────────────>│                          │
+ │                            │  add_user_message        │
+ │                            │  stream_response         │
+ │                            ├─────────────────────────>│
+ │                            │  AI 判断：需要星盘资料   │
+ │                            │  检查用户资料：不完整     │
+ │<────────────streaming──────│<─────────────streaming───│
+ │  "这个问题需要根据您的本命盘来分析..."                │
+ │  <need_profile>{...}</need_profile>                  │
+ │                            │  检测到 need_profile 标签│
+ │<───────────────────────────│                          │
+ │  data: {"need_profile":{}}  │                          │
+ │                            │                          │
+ │  3. 前端弹出资料填写窗口    │                          │
+ │  用户填写：性别、出生年月日  │                          │
+ │  时分、出生城市             │                          │
+ │                            │                          │
+ │  4. 提交资料                │                          │
+ │  PUT /api/users/{id}/profile                         │
+ ├───────────────────────────>│                          │
+ │                            │  save_user               │
+ │<───────────────────────────│                          │
+ │                            │                          │
+ │  5. 获取星盘数据            │                          │
+ │  POST /api/astrology/fetch-chart                     │
+ ├───────────────────────────>│                          │
+ │                            │  fetch_natal_chart       │
+ │                            ├─────────────────────────>│
+ │                            │  POST xingpan.vip API   │
+ │                            │<─────────────────────────│
+ │                            │  format_chart_to_text    │
+ │                            │  add_system_message      │
+ │<───────────────────────────│  ([星盘数据])            │
+ │                            │                          │
+ │  6. 通知AI资料已补充        │                          │
+ │  POST /api/astrology/message                         │
+ │  "我已经填写好出生信息了"   │                          │
+ ├───────────────────────────>│                          │
+ │                            │  add_user_message        │
+ │                            │  stream_response         │
+ │                            │  (携带星盘数据)           │
+ │                            ├─────────────────────────>│
+ │                            │  AI 看到星盘数据          │
+ │<────────────streaming──────│<─────────streaming───────│
+ │  "太好了！根据您的星盘..."  │  AI 基于星盘解读         │
+ │  "您的上升星座是..."        │                          │
+ │                            │                          │
+ │  【情况2：不需要星盘的问题】│                          │
+ │  POST /api/astrology/message                         │
+ │  "双子座今天运势如何？"     │                          │
+ ├───────────────────────────>│                          │
+ │                            │  add_user_message        │
+ │                            │  stream_response         │
+ │                            ├─────────────────────────>│
+ │                            │  AI 判断：不需要星盘资料 │
+ │<────────────streaming──────│<─────────streaming───────│
+ │  "双子座今天运势..."        │  AI 直接回答             │
+ │  （不触发资料收集）         │                          │
+ │                            │                          │
+ │  【情况3：用户跳过填写资料】│                          │
+ │  用户点击"暂时跳过"         │                          │
+ │  关闭弹窗，继续对话         │                          │
+ │  AI 可以基于一般星座知识回答                          │
+ │                            │                          │
+```
+
+**关键机制说明：**
+1. **AI主动开场**：点击星座按钮后，发送空消息触发AI主动说话，无需用户开场白
+2. **AI智能判断**：AI根据用户问题自动判断是否需要星盘资料
+   - 需要星盘资料的问题：本命盘、上升星座、月亮星座、个人行星落座、宫位、相位等
+   - 不需要星盘资料的问题：星座性格、一般运势、星座配对、星座知识等
+3. **按需触发资料收集**：
+   - AI通过 `<need_profile>` 标签告知前端需要用户资料
+   - 前端检测到标签后弹出资料填写窗口
+   - 不需要星盘资料的问题，AI直接回答，不触发弹窗
+4. **自动获取星盘**：AI也可以通过 `<fetch_chart>` 标签触发星盘数据获取（如果用户资料完整但星盘未获取）
+5. **星盘数据传递**：SYSTEM消息携带星盘数据，在发送给AI时转换为带`[星盘数据]`标记的用户消息
+6. **灵活对话**：用户可以先咨询一般星座问题，需要时再补充资料获取精准星盘解读
+7. **游客模式**：游客用户填写的资料同样会保存到 profile 中（但不会持久化到注册账号）
+
+### 5. 抽牌动画流程
 
 ```
 1. 初始状态
@@ -941,8 +1198,6 @@ choice (选择) → guest (游客)
 **适配：**
 - 当前仅支持桌面端
 - 移动端需要增加响应式断点和侧边栏折叠
-
-### 7. React 状态更新机制（重要）
 
 **问题背景：**
 - React 的 `setState` 是异步的，不会立即更新状态
@@ -1088,15 +1343,7 @@ Conversation (对话)
 - 密码重置
 - OAuth 第三方登录
 
-### 3. 星盘解读功能
-
-**需要：**
-- 集成星座计算库
-- 设计星盘 Prompt
-- 实现星盘绘制（SVG/Canvas）
-- 复用对话和流式输出机制
-
-### 4. 移动端适配
+### 3. 移动端适配
 
 **需要：**
 - 响应式布局（Tailwind 断点）
@@ -1104,7 +1351,7 @@ Conversation (对话)
 - 触摸手势支持
 - 移动端抽牌交互优化
 
-### 5. 导出功能
+### 4. 导出功能
 
 **可导出：**
 - 对话历史（PDF/Markdown）
@@ -1164,8 +1411,10 @@ Conversation (对话)
 
 1. **流式 AI 对话**：使用 SSE 实现打字机效果
 2. **塔罗牌动画**：扇形展开、洗牌、选牌全流程
-3. **状态管理**：Zustand 轻量级且易用
-4. **异步架构**：后端全异步，性能优秀
+3. **星盘解读**：集成外部星盘API，智能判断用户资料完整性
+4. **状态管理**：Zustand 轻量级且易用
+5. **异步架构**：后端全异步，性能优秀
+6. **多会话类型**：支持塔罗占卜、星盘解读，易于扩展
 
 ### 改进方向
 
@@ -1175,3 +1424,8 @@ Conversation (对话)
 4. **移动端**：响应式布局、触摸优化
 5. **测试**：单元测试、集成测试
 6. **部署**：Docker化、CI/CD
+7. **星盘功能增强**：
+   - 扩展城市列表或集成地理编码服务
+   - 添加星盘图形化展示（SVG/Canvas）
+   - 支持合盘、流年等更多星盘类型
+8. **聊愈功能**：添加心理咨询对话模式

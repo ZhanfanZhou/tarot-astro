@@ -6,10 +6,11 @@ import ChatInput from './components/ChatInput';
 import SessionButtons from './components/SessionButtons';
 import TarotCardDrawer from './components/TarotCardDrawer';
 import AuthModal from './components/AuthModal';
+import AstrologyProfileModal from './components/AstrologyProfileModal';
 import { useAuthStore } from './stores/useAuthStore';
 import { useConversationStore } from './stores/useConversationStore';
-import { userApi, conversationApi, tarotApi } from './services/api';
-import type { SessionType, DrawCardsRequest, Message, MessageRole } from './types';
+import { userApi, conversationApi, tarotApi, astrologyApi } from './services/api';
+import type { SessionType, DrawCardsRequest, Message, MessageRole, UserProfile } from './types';
 
 const App: React.FC = () => {
   const { user, setUser, logout } = useAuthStore();
@@ -29,6 +30,9 @@ const App: React.FC = () => {
   const [streamingMessage, setStreamingMessage] = useState('');
   const [showCardDrawer, setShowCardDrawer] = useState(false);
   const [pendingDrawRequest, setPendingDrawRequest] = useState<DrawCardsRequest | null>(null);
+  const [showAstrologyProfileModal, setShowAstrologyProfileModal] = useState(false);
+  const [pendingAstrologyConversation, setPendingAstrologyConversation] = useState<string | null>(null);
+  const [chartJustFetched, setChartJustFetched] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -94,7 +98,7 @@ const App: React.FC = () => {
       addConversation(newConv);
       setCurrentConversation(newConv);
 
-      // 自动发送初始消息（使用随机开场白）
+      // 处理塔罗占卜
       if (sessionType === 'tarot') {
         const greetings = [
           '你好，我想进行一次塔罗占卜',
@@ -105,7 +109,6 @@ const App: React.FC = () => {
         ];
         const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
         
-        // 直接使用 newConv 发送消息，避免状态更新延迟问题
         setIsLoading(true);
         setStreamingMessage('');
 
@@ -122,7 +125,6 @@ const App: React.FC = () => {
             }
           );
 
-          // 刷新对话
           const updatedConv = await conversationApi.get(newConv.conversation_id);
           updateConversation(updatedConv);
           setCurrentConversation(updatedConv);
@@ -130,6 +132,79 @@ const App: React.FC = () => {
         } catch (error) {
           console.error('发送初始消息失败:', error);
           alert('发送失败，请重试');
+        } finally {
+          setIsLoading(false);
+        }
+      }
+      // 处理星座咨询
+      else if (sessionType === 'astrology') {
+        setIsLoading(true);
+        setStreamingMessage('');
+        setPendingAstrologyConversation(newConv.conversation_id);
+
+        try {
+          // 发送空消息，让AI主动开场
+          await astrologyApi.sendMessage(
+            newConv.conversation_id,
+            '', // 空内容，触发AI主动说话
+            (chunk) => {
+              setStreamingMessage((prev) => prev + chunk);
+            },
+            (instruction) => {
+              // AI检测到需要资料
+              console.log('AI请求用户资料:', instruction);
+              setShowAstrologyProfileModal(true);
+            },
+            async (instruction) => {
+              // AI请求获取星盘数据
+              console.log('AI请求获取星盘:', instruction);
+              if (user) {
+                try {
+                  await astrologyApi.fetchChart(newConv.conversation_id);
+                  // 标记星盘数据已获取，流式完成后自动触发AI继续
+                  setChartJustFetched(true);
+                } catch (error) {
+                  console.error('获取星盘数据失败:', error);
+                }
+              }
+            }
+          );
+
+          const updatedConv = await conversationApi.get(newConv.conversation_id);
+          updateConversation(updatedConv);
+          setCurrentConversation(updatedConv);
+          setStreamingMessage('');
+          
+          // 如果星盘数据刚被获取，自动触发AI继续解读
+          if (chartJustFetched) {
+            setChartJustFetched(false);
+            setIsLoading(true);
+            setStreamingMessage('');
+            
+            try {
+              // 自动发送触发消息让AI基于星盘数据继续
+              await astrologyApi.sendMessage(
+                newConv.conversation_id,
+                '星盘数据已准备好，请继续解读',
+                (chunk) => {
+                  setStreamingMessage((prev) => prev + chunk);
+                }
+              );
+              
+              // 刷新对话
+              const finalConv = await conversationApi.get(newConv.conversation_id);
+              updateConversation(finalConv);
+              setCurrentConversation(finalConv);
+              setStreamingMessage('');
+            } catch (error) {
+              console.error('AI继续解读失败:', error);
+            } finally {
+              setIsLoading(false);
+            }
+          }
+        } catch (error) {
+          console.error('AI开场失败:', error);
+          alert('初始化失败，请重试');
         } finally {
           setIsLoading(false);
         }
@@ -165,6 +240,65 @@ const App: React.FC = () => {
     }
   };
 
+  const handleAstrologyProfileSubmit = async (profile: UserProfile) => {
+    if (!user || !pendingAstrologyConversation) return;
+
+    setIsLoading(true);
+
+    try {
+      // 更新用户资料
+      await userApi.updateProfile(user.user_id, profile);
+      
+      // 更新本地用户状态
+      const updatedUser = await userApi.getUser(user.user_id);
+      setUser(updatedUser);
+
+      // 关闭弹窗
+      setShowAstrologyProfileModal(false);
+
+      // 获取星盘数据
+      await astrologyApi.fetchChart(pendingAstrologyConversation);
+      
+      // 发送简单的通知消息，让AI知道资料已补充
+      setStreamingMessage('');
+      const triggerMessage = '我已经填写好出生信息了';
+      
+      await astrologyApi.sendMessage(
+        pendingAstrologyConversation,
+        triggerMessage,
+        (chunk) => {
+          setStreamingMessage((prev) => prev + chunk);
+        },
+        (instruction) => {
+          // 理论上不应该再触发，但保留处理
+          console.log('AI再次请求用户资料:', instruction);
+        },
+        async (instruction) => {
+          // 理论上星盘数据已获取，但保留处理
+          console.log('AI再次请求获取星盘:', instruction);
+        }
+      );
+
+      // 刷新对话
+      const updatedConv = await conversationApi.get(pendingAstrologyConversation);
+      updateConversation(updatedConv);
+      setCurrentConversation(updatedConv);
+      setStreamingMessage('');
+      setPendingAstrologyConversation(null);
+    } catch (error) {
+      console.error('更新资料失败:', error);
+      alert('更新资料失败，请重试');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAstrologyProfileSkip = async () => {
+    // 用户跳过填写资料，关闭弹窗，让用户继续自由对话
+    setShowAstrologyProfileModal(false);
+    // 不清空 pendingAstrologyConversation，以便用户后续想填写时还可以使用
+  };
+
   const handleSendMessage = async (content: string) => {
     if (!currentConversation || isLoading) return;
 
@@ -172,27 +306,80 @@ const App: React.FC = () => {
     setStreamingMessage('');
 
     try {
-      // 立即显示用户消息
-      const updatedConv = await conversationApi.get(currentConversation.conversation_id);
-      updateConversation(updatedConv);
-
-      await tarotApi.sendMessage(
-        currentConversation.conversation_id,
-        content,
-        (chunk) => {
-          setStreamingMessage((prev) => prev + chunk);
-        },
-        (drawRequest) => {
-          setPendingDrawRequest(drawRequest);
-          setShowCardDrawer(true);
-        }
-      );
+      // 根据会话类型选择API
+      if (currentConversation.session_type === 'astrology') {
+        await astrologyApi.sendMessage(
+          currentConversation.conversation_id,
+          content,
+          (chunk) => {
+            setStreamingMessage((prev) => prev + chunk);
+          },
+          (instruction) => {
+            // AI检测到需要资料
+            console.log('AI请求用户资料:', instruction);
+            setShowAstrologyProfileModal(true);
+          },
+          async (instruction) => {
+            // AI请求获取星盘数据
+            console.log('AI请求获取星盘:', instruction);
+            if (user) {
+              try {
+                await astrologyApi.fetchChart(currentConversation.conversation_id);
+                // 标记星盘数据已获取，流式完成后自动触发AI继续
+                setChartJustFetched(true);
+              } catch (error) {
+                console.error('获取星盘数据失败:', error);
+              }
+            }
+          }
+        );
+      } else {
+        await tarotApi.sendMessage(
+          currentConversation.conversation_id,
+          content,
+          (chunk) => {
+            setStreamingMessage((prev) => prev + chunk);
+          },
+          (drawRequest) => {
+            setPendingDrawRequest(drawRequest);
+            setShowCardDrawer(true);
+          }
+        );
+      }
 
       // 刷新对话
       const finalConv = await conversationApi.get(currentConversation.conversation_id);
       updateConversation(finalConv);
       setCurrentConversation(finalConv);
       setStreamingMessage('');
+      
+      // 如果星盘数据刚被获取，自动触发AI继续解读
+      if (chartJustFetched && currentConversation.session_type === 'astrology') {
+        setChartJustFetched(false);
+        setIsLoading(true);
+        setStreamingMessage('');
+        
+        try {
+          // 自动发送触发消息让AI基于星盘数据继续
+          await astrologyApi.sendMessage(
+            currentConversation.conversation_id,
+            '星盘数据已准备好，请继续解读',
+            (chunk) => {
+              setStreamingMessage((prev) => prev + chunk);
+            }
+          );
+          
+          // 刷新对话
+          const continuedConv = await conversationApi.get(currentConversation.conversation_id);
+          updateConversation(continuedConv);
+          setCurrentConversation(continuedConv);
+          setStreamingMessage('');
+        } catch (error) {
+          console.error('AI继续解读失败:', error);
+        } finally {
+          setIsLoading(false);
+        }
+      }
     } catch (error) {
       console.error('发送消息失败:', error);
       alert('发送失败，请重试');
@@ -351,6 +538,17 @@ const App: React.FC = () => {
           setPendingDrawRequest(null);
         }}
         onCardsDrawn={handleCardsDrawn}
+      />
+
+      <AstrologyProfileModal
+        isOpen={showAstrologyProfileModal}
+        currentProfile={user?.profile}
+        onClose={() => {
+          setShowAstrologyProfileModal(false);
+          setPendingAstrologyConversation(null);
+        }}
+        onSubmit={handleAstrologyProfileSubmit}
+        onSkip={handleAstrologyProfileSkip}
       />
 
       {/* Settings Modal */}
