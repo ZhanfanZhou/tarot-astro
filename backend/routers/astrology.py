@@ -1,9 +1,14 @@
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from models import SendMessageRequest, MessageRole, SessionType
+from typing import List
+from models import (
+    SendMessageRequest, DrawCardsRequest, DrawCardsResponse,
+    TarotCard, MessageRole, SessionType
+)
 from services.conversation_service import ConversationService
 from services.gemini_service import GeminiService
 from services.astrology_service import AstrologyService
+from services.tarot_service import TarotService
 from services.user_service import UserService
 import json
 
@@ -203,7 +208,9 @@ async def send_message(request: SendMessageRequest):
                         else:
                             # 🎴 通知前端显示抽牌器（保留用户体验）
                             print(f"[Astrology Router] 🎴 通知前端显示抽牌器，参数: {func_args}")
-                            yield f"data: {json.dumps({'draw_cards': func_args})}\n\n"
+                            # 确保 func_args 完全可序列化（转换所有 protobuf 类型）
+                            serializable_args = json.loads(json.dumps(func_args, default=str))
+                            yield f"data: {json.dumps({'draw_cards': serializable_args})}\n\n"
                             
                             # 告诉AI：已通知用户抽牌，等待用户完成
                             # 注意：实际的抽牌和解读会在用户完成抽牌后由前端触发
@@ -240,8 +247,10 @@ async def send_message(request: SendMessageRequest):
                         # 请求用户补充个人信息
                         print(f"[Astrology Router] 📋 请求用户补充信息: {func_args}")
                         
+                        # 确保 func_args 完全可序列化（转换所有 protobuf 类型）
+                        serializable_args = json.loads(json.dumps(func_args, default=str))
                         # 通知前端显示弹窗
-                        yield f"data: {json.dumps({'need_profile': func_args})}\n\n"
+                        yield f"data: {json.dumps({'need_profile': serializable_args})}\n\n"
                         
                         # 构造函数结果（告诉AI已经请求用户填写）
                         function_result = {
@@ -454,5 +463,57 @@ async def get_current_zodiac():
     return {
         "zodiac": zodiac
     }
+
+
+@router.post("/draw", response_model=DrawCardsResponse)
+async def draw_cards(
+    draw_request: DrawCardsRequest,
+    conversation_id: str = Query(...)
+):
+    """抽取塔罗牌（星座AI辅助解读用）"""
+    try:
+        print(f"[Astrology Draw] 收到抽牌请求:")
+        print(f"[Astrology Draw] conversation_id: {conversation_id}")
+        print(f"[Astrology Draw] draw_request: {draw_request}")
+        print(f"[Astrology Draw] draw_request.spread_type: {draw_request.spread_type}")
+        print(f"[Astrology Draw] draw_request.card_count: {draw_request.card_count}")
+        print(f"[Astrology Draw] draw_request.positions: {draw_request.positions}")
+        
+        # 检查对话是否存在
+        conversation = await ConversationService.get_conversation(conversation_id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="对话不存在")
+        
+        # 检查是否已经抽过牌
+        if conversation.has_drawn_cards:
+            raise HTTPException(status_code=400, detail="已经抽过牌，不能再次抽牌")
+        
+        # 抽牌
+        cards = TarotService.draw_cards(draw_request)
+        
+        # 保存抽牌结果
+        await ConversationService.add_message(
+            conversation_id,
+            MessageRole.SYSTEM,
+            "用户已完成抽牌",
+            tarot_cards=cards,
+            draw_request=draw_request
+        )
+        
+        # 标记已抽牌
+        await ConversationService.mark_cards_drawn(conversation_id)
+        
+        return DrawCardsResponse(
+            cards=cards,
+            conversation_id=conversation_id
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[Astrology Draw] ❌ 错误: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 

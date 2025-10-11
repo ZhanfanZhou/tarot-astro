@@ -173,18 +173,39 @@ mark_cards_drawn → get_conversation → set flag → save_conversation
 
 **Function Calling 工具定义：**
 
+**注意：塔罗AI和星座AI都可以使用以下所有工具，实现灵活的跨领域解读**
+
 1. **draw_tarot_cards** - 塔罗抽牌工具
    ```python
    参数:
    - spread_type: 牌阵类型 (single/three_card/celtic_cross/custom)
    - card_count: 抽牌数量 (1-10张)
    - positions: 牌阵位置含义 (可选)
+   
+   适用场景：
+   - 塔罗AI：主要功能，为用户抽牌占卜
+   - 星座AI：辅助功能，可结合星盘分析抽牌，提供综合性指引
    ```
 
 2. **get_astrology_chart** - 获取星盘数据工具
    ```python
    参数:
    - reason: 调用原因说明
+   
+   适用场景：
+   - 星座AI：主要功能，获取本命盘进行深入分析
+   - 塔罗AI：扩展功能，可在塔罗解读中结合用户星盘，提供更个性化的建议
+   ```
+
+3. **request_user_profile** - 请求用户补充个人信息工具
+   ```python
+   参数:
+   - reason: 请求信息的原因说明
+   - required_fields: 需要的字段列表 (birth_date/birth_time/birth_city/nickname/gender)
+   
+   适用场景：
+   - 星座AI：当需要星盘分析但用户资料不完整时调用
+   - 塔罗AI：当需要结合星盘进行深入解读时调用
    ```
 
 **系统提示词（TAROT_SYSTEM_PROMPT）：**
@@ -232,7 +253,10 @@ continue_with_function_result → format messages with function result
 - **Agent Loop架构**：AI可以主动调用工具，工具执行后将结果喂回AI继续处理
 - **Function Calling协议**：使用Gemini标准的Function Calling机制，符合API规范
 - **可扩展性**：工具定义与业务逻辑分离，易于添加新工具
-- **多会话支持**：塔罗和星座会话各自配置不同的工具集
+- **统一工具集**：塔罗和星座AI使用相同的工具集（所有3个工具），实现跨领域解读能力
+  - 塔罗AI可以调用星盘数据，提供更精准的个性化解读
+  - 星座AI可以抽塔罗牌，从另一角度辅助星盘分析
+  - 两个AI都可以请求用户补充资料
 - **流式输出**：支持流式返回文本和函数调用事件
 - **错误处理**：函数执行失败时返回错误信息，AI会据此调整回复
 - 用户资料（昵称、性别、生日）会被添加到系统提示中，用于个性化
@@ -357,6 +381,7 @@ POST /api/conversations
 
 **端点：**
 - `POST /api/astrology/message` - 发送消息并获取AI流式回复（星盘解读，支持Function Calling）
+- `POST /api/astrology/draw?conversation_id={id}` - 抽取塔罗牌（星座AI辅助解读用）
 - `POST /api/astrology/fetch-chart?conversation_id={id}` - 获取用户星盘数据（保留用于手动获取）
 - `GET /api/astrology/check-profile/{user_id}` - 检查用户星盘资料完整性
 - `GET /api/astrology/current-zodiac` - 获取当前时间对应的星座
@@ -386,15 +411,22 @@ POST /api/astrology/message (新架构)
   4. 处理事件流：
      a. {"content": "..."} - 流式输出文本
      b. {"function_call": {...}} - 检测到函数调用
-        → 执行对应的函数（get_astrology_chart）
-        → 检查用户资料完整性
-        → 调用 AstrologyService.fetch_natal_chart
-        → 格式化星盘数据为文字
-        → 保存星盘数据到对话（SYSTEM消息）
+        → 执行对应的函数：
+           - get_astrology_chart: 获取星盘数据
+           - draw_tarot_cards: 抽塔罗牌（辅助解读）
+           - request_user_profile: 请求用户补充资料
         → 调用 GeminiService.continue_with_function_result
         → 流式输出AI的最终解读
      c. {"done": True} - 对话完成
   5. 保存所有AI消息
+
+POST /api/astrology/draw (抽牌接口)
+  1. 验证对话存在性
+  2. 检查是否已抽过牌
+  3. 调用 TarotService.draw_cards 抽牌
+  4. 保存抽牌结果到对话（SYSTEM消息）
+  5. 标记已抽牌状态
+  6. 返回抽牌结果
 ```
 
 **流式响应格式（Server-Sent Events）：**

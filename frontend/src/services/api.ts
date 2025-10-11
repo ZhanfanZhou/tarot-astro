@@ -91,7 +91,9 @@ export const tarotApi = {
     conversationId: string,
     content: string,
     onChunk: (chunk: string) => void,
-    onDrawCards: (instruction: DrawCardsRequest) => void
+    onDrawCards: (instruction: DrawCardsRequest) => void,
+    onNeedProfile?: (instruction: any) => void,
+    onFetchChart?: (instruction: any) => void
   ): Promise<void> => {
     const response = await fetch(`${API_BASE_URL}/api/tarot/message`, {
       method: 'POST',
@@ -136,7 +138,15 @@ export const tarotApi = {
             if (parsed.content) {
               onChunk(parsed.content);
             } else if (parsed.draw_cards) {
+              console.log('[Frontend SSE] 收到抽牌指令:', parsed.draw_cards);
+              console.log('[Frontend SSE] parsed.draw_cards.spread_type:', parsed.draw_cards.spread_type);
+              console.log('[Frontend SSE] parsed.draw_cards.card_count:', parsed.draw_cards.card_count);
+              console.log('[Frontend SSE] parsed.draw_cards.positions:', parsed.draw_cards.positions);
               onDrawCards(parsed.draw_cards);
+            } else if (parsed.need_profile && onNeedProfile) {
+              onNeedProfile(parsed.need_profile);
+            } else if (parsed.fetch_chart && onFetchChart) {
+              onFetchChart(parsed.fetch_chart);
             }
           } catch (e) {
             console.error('解析SSE数据失败:', e);
@@ -150,6 +160,13 @@ export const tarotApi = {
     conversationId: string,
     drawRequest: DrawCardsRequest
   ): Promise<TarotCard[]> => {
+    console.log('[Frontend API] 发送抽牌请求:');
+    console.log('[Frontend API] conversationId:', conversationId);
+    console.log('[Frontend API] drawRequest:', drawRequest);
+    console.log('[Frontend API] drawRequest.spread_type:', drawRequest.spread_type);
+    console.log('[Frontend API] drawRequest.card_count:', drawRequest.card_count);
+    console.log('[Frontend API] drawRequest.positions:', drawRequest.positions);
+    
     const response = await api.post('/api/tarot/draw', drawRequest, {
       params: { conversation_id: conversationId },
     });
@@ -169,7 +186,8 @@ export const astrologyApi = {
     content: string,
     onChunk: (chunk: string) => void,
     onNeedProfile?: (instruction: any) => void,
-    onFetchChart?: (instruction: any) => void
+    onFetchChart?: (instruction: any) => void,
+    onDrawCards?: (instruction: DrawCardsRequest) => void
   ): Promise<void> => {
     const response = await fetch(`${API_BASE_URL}/api/astrology/message`, {
       method: 'POST',
@@ -217,6 +235,8 @@ export const astrologyApi = {
               onNeedProfile(parsed.need_profile);
             } else if (parsed.fetch_chart && onFetchChart) {
               onFetchChart(parsed.fetch_chart);
+            } else if (parsed.draw_cards && onDrawCards) {
+              onDrawCards(parsed.draw_cards);
             }
           } catch (e) {
             console.error('解析SSE数据失败:', e);
@@ -248,6 +268,23 @@ export const astrologyApi = {
   getCurrentZodiac: async (): Promise<{ zodiac: string }> => {
     const response = await api.get('/api/astrology/current-zodiac');
     return response.data;
+  },
+
+  drawCards: async (
+    conversationId: string,
+    drawRequest: DrawCardsRequest
+  ): Promise<TarotCard[]> => {
+    console.log('[Frontend API] 发送星座AI抽牌请求:');
+    console.log('[Frontend API] conversationId:', conversationId);
+    console.log('[Frontend API] drawRequest:', drawRequest);
+    console.log('[Frontend API] drawRequest.spread_type:', drawRequest.spread_type);
+    console.log('[Frontend API] drawRequest.card_count:', drawRequest.card_count);
+    console.log('[Frontend API] drawRequest.positions:', drawRequest.positions);
+    
+    const response = await api.post('/api/astrology/draw', drawRequest, {
+      params: { conversation_id: conversationId },
+    });
+    return response.data.cards;
   },
 };
 

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from typing import List
 from models import (
@@ -110,7 +110,15 @@ async def send_message(request: SendMessageRequest):
                         else:
                             # 🎴 通知前端显示抽牌器（保留用户体验）
                             print(f"[Tarot Router] 🎴 通知前端显示抽牌器，参数: {func_args}")
-                            yield f"data: {json.dumps({'draw_cards': func_args})}\n\n"
+                            print(f"[Tarot Router] func_args 类型: {type(func_args)}")
+                            print(f"[Tarot Router] func_args.spread_type: {func_args.get('spread_type', 'NOT_FOUND')}")
+                            print(f"[Tarot Router] func_args.card_count: {func_args.get('card_count', 'NOT_FOUND')}")
+                            print(f"[Tarot Router] func_args.positions: {func_args.get('positions', 'NOT_FOUND')}")
+                            
+                            # 确保 func_args 完全可序列化（转换所有 protobuf 类型）
+                            serializable_args = json.loads(json.dumps(func_args, default=str))
+                            print(f"[Tarot Router] 序列化后的参数: {serializable_args}")
+                            yield f"data: {json.dumps({'draw_cards': serializable_args})}\n\n"
                             
                             # 告诉AI：已通知用户抽牌，等待用户完成
                             # 注意：实际的抽牌和解读会在用户完成抽牌后由前端触发
@@ -214,13 +222,13 @@ async def send_message(request: SendMessageRequest):
                         
                         # 将函数结果喂回AI，获取最终解读
                         print(f"[Tarot Router] 🔄 将函数结果喂回AI...")
-                        conversation = await ConversationService.get_conversation(request.conversation_id)
+                        updated_conv = await ConversationService.get_conversation(request.conversation_id)
                         
                         final_response = ""
                         async for event2 in gemini_service.continue_with_function_result(
-                            conversation.messages,
+                            updated_conv.messages,
                             user,
-                            session_type=conversation.session_type,
+                            session_type=updated_conv.session_type,
                             function_name=func_name,
                             function_result=function_result
                         ):
@@ -240,8 +248,10 @@ async def send_message(request: SendMessageRequest):
                         # 请求用户补充个人信息
                         print(f"[Tarot Router] 📋 请求用户补充信息: {func_args}")
                         
+                        # 确保 func_args 完全可序列化（转换所有 protobuf 类型）
+                        serializable_args = json.loads(json.dumps(func_args, default=str))
                         # 通知前端显示弹窗
-                        yield f"data: {json.dumps({'need_profile': func_args})}\n\n"
+                        yield f"data: {json.dumps({'need_profile': serializable_args})}\n\n"
                         
                         # 构造函数结果（告诉AI已经请求用户填写）
                         function_result = {
@@ -253,13 +263,13 @@ async def send_message(request: SendMessageRequest):
                         
                         # 将函数结果喂回AI
                         print(f"[Tarot Router] 🔄 将函数结果喂回AI...")
-                        conversation = await ConversationService.get_conversation(request.conversation_id)
+                        updated_conv = await ConversationService.get_conversation(request.conversation_id)
                         
                         final_response = ""
                         async for event2 in gemini_service.continue_with_function_result(
-                            conversation.messages,
+                            updated_conv.messages,
                             user,
-                            session_type=conversation.session_type,
+                            session_type=updated_conv.session_type,
                             function_name=func_name,
                             function_result=function_result
                         ):
@@ -304,11 +314,17 @@ async def send_message(request: SendMessageRequest):
 
 @router.post("/draw", response_model=DrawCardsResponse)
 async def draw_cards(
-    conversation_id: str,
-    draw_request: DrawCardsRequest
+    draw_request: DrawCardsRequest,
+    conversation_id: str = Query(...)
 ):
     """抽取塔罗牌"""
     try:
+        print(f"[Tarot Draw] 收到抽牌请求:")
+        print(f"[Tarot Draw] conversation_id: {conversation_id}")
+        print(f"[Tarot Draw] draw_request: {draw_request}")
+        print(f"[Tarot Draw] draw_request.spread_type: {draw_request.spread_type}")
+        print(f"[Tarot Draw] draw_request.card_count: {draw_request.card_count}")
+        print(f"[Tarot Draw] draw_request.positions: {draw_request.positions}")
         # 检查对话是否存在
         conversation = await ConversationService.get_conversation(conversation_id)
         if not conversation:

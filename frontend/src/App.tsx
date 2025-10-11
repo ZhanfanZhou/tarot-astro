@@ -122,6 +122,24 @@ const App: React.FC = () => {
             (drawRequest) => {
               setPendingDrawRequest(drawRequest);
               setShowCardDrawer(true);
+            },
+            (instruction) => {
+              // 塔罗AI也可以请求用户资料
+              console.log('塔罗AI请求用户资料:', instruction);
+              setPendingAstrologyConversation(newConv.conversation_id);
+              setShowAstrologyProfileModal(true);
+            },
+            async (instruction) => {
+              // 塔罗AI也可以请求获取星盘数据
+              console.log('塔罗AI请求获取星盘:', instruction);
+              if (user) {
+                try {
+                  await astrologyApi.fetchChart(newConv.conversation_id);
+                  setChartJustFetched(true);
+                } catch (error) {
+                  console.error('获取星盘数据失败:', error);
+                }
+              }
             }
           );
 
@@ -152,12 +170,13 @@ const App: React.FC = () => {
             },
             (instruction) => {
               // AI检测到需要资料
-              console.log('AI请求用户资料:', instruction);
+              console.log('星座AI请求用户资料:', instruction);
+              setPendingAstrologyConversation(newConv.conversation_id);
               setShowAstrologyProfileModal(true);
             },
             async (instruction) => {
               // AI请求获取星盘数据
-              console.log('AI请求获取星盘:', instruction);
+              console.log('星座AI请求获取星盘:', instruction);
               if (user) {
                 try {
                   await astrologyApi.fetchChart(newConv.conversation_id);
@@ -167,6 +186,12 @@ const App: React.FC = () => {
                   console.error('获取星盘数据失败:', error);
                 }
               }
+            },
+            (drawRequest) => {
+              // 星座AI也可以抽塔罗牌
+              console.log('星座AI请求抽塔罗牌:', drawRequest);
+              setPendingDrawRequest(drawRequest);
+              setShowCardDrawer(true);
             }
           );
 
@@ -316,12 +341,13 @@ const App: React.FC = () => {
           },
           (instruction) => {
             // AI检测到需要资料
-            console.log('AI请求用户资料:', instruction);
+            console.log('星座AI请求用户资料:', instruction);
+            setPendingAstrologyConversation(currentConversation.conversation_id);
             setShowAstrologyProfileModal(true);
           },
           async (instruction) => {
             // AI请求获取星盘数据
-            console.log('AI请求获取星盘:', instruction);
+            console.log('星座AI请求获取星盘:', instruction);
             if (user) {
               try {
                 await astrologyApi.fetchChart(currentConversation.conversation_id);
@@ -331,6 +357,15 @@ const App: React.FC = () => {
                 console.error('获取星盘数据失败:', error);
               }
             }
+          },
+          (drawRequest) => {
+            // 星座AI也可以抽塔罗牌（用于辅助解读）
+            console.log('星座AI请求抽塔罗牌:', drawRequest);
+            console.log('drawRequest.spread_type:', drawRequest.spread_type);
+            console.log('drawRequest.card_count:', drawRequest.card_count);
+            console.log('drawRequest.positions:', drawRequest.positions);
+            setPendingDrawRequest(drawRequest);
+            setShowCardDrawer(true);
           }
         );
       } else {
@@ -341,8 +376,30 @@ const App: React.FC = () => {
             setStreamingMessage((prev) => prev + chunk);
           },
           (drawRequest) => {
+            console.log('塔罗AI请求抽塔罗牌:', drawRequest);
+            console.log('drawRequest.spread_type:', drawRequest.spread_type);
+            console.log('drawRequest.card_count:', drawRequest.card_count);
+            console.log('drawRequest.positions:', drawRequest.positions);
             setPendingDrawRequest(drawRequest);
             setShowCardDrawer(true);
+          },
+          (instruction) => {
+            // 塔罗AI也可以请求用户资料（用于结合星盘的深入解读）
+            console.log('塔罗AI请求用户资料:', instruction);
+            setPendingAstrologyConversation(currentConversation.conversation_id);
+            setShowAstrologyProfileModal(true);
+          },
+          async (instruction) => {
+            // 塔罗AI也可以请求获取星盘数据
+            console.log('塔罗AI请求获取星盘:', instruction);
+            if (user) {
+              try {
+                await astrologyApi.fetchChart(currentConversation.conversation_id);
+                setChartJustFetched(true);
+              } catch (error) {
+                console.error('获取星盘数据失败:', error);
+              }
+            }
           }
         );
       }
@@ -392,7 +449,12 @@ const App: React.FC = () => {
     if (!currentConversation || !pendingDrawRequest) return;
 
     try {
-      await tarotApi.drawCards(currentConversation.conversation_id, pendingDrawRequest);
+      // 根据会话类型选择正确的API
+      if (currentConversation.session_type === 'astrology') {
+        await astrologyApi.drawCards(currentConversation.conversation_id, pendingDrawRequest);
+      } else {
+        await tarotApi.drawCards(currentConversation.conversation_id, pendingDrawRequest);
+      }
       
       // 刷新对话（包含抽牌结果）
       const updatedConv = await conversationApi.get(currentConversation.conversation_id);
@@ -407,17 +469,51 @@ const App: React.FC = () => {
       
       setTimeout(async () => {
         try {
-          await tarotApi.sendMessage(
-            currentConversation.conversation_id,
-            '请根据抽牌结果进行解读',
-            (chunk) => {
-              setStreamingMessage((prev) => prev + chunk);
-            },
-            (drawRequest) => {
-              // 不应该再次触发抽牌，但保留处理以防万一
-              console.warn('警告：解读时不应该再次触发抽牌');
-            }
-          );
+          // 根据会话类型选择正确的API
+          if (currentConversation.session_type === 'astrology') {
+            await astrologyApi.sendMessage(
+              currentConversation.conversation_id,
+              '请根据抽牌结果进行解读',
+              (chunk) => {
+                setStreamingMessage((prev) => prev + chunk);
+              },
+              (instruction) => {
+                // AI检测到需要资料
+                console.log('星座AI请求用户资料:', instruction);
+                setPendingAstrologyConversation(currentConversation.conversation_id);
+                setShowAstrologyProfileModal(true);
+              },
+              async (instruction) => {
+                // AI请求获取星盘数据
+                console.log('星座AI请求获取星盘:', instruction);
+                if (user) {
+                  try {
+                    await astrologyApi.fetchChart(currentConversation.conversation_id);
+                    // 标记星盘数据已获取，流式完成后自动触发AI继续
+                    setChartJustFetched(true);
+                  } catch (error) {
+                    console.error('获取星盘数据失败:', error);
+                  }
+                }
+              },
+              (drawRequest) => {
+                // 不应该再次触发抽牌，但保留处理以防万一
+                console.warn('警告：解读时不应该再次触发抽牌');
+              }
+            );
+          } else {
+            await tarotApi.sendMessage(
+              currentConversation.conversation_id,
+              '请根据抽牌结果进行解读',
+              (chunk) => {
+                setStreamingMessage((prev) => prev + chunk);
+              },
+              (drawRequest) => {
+                // 不应该再次触发抽牌，但保留处理以防万一
+                console.warn('警告：解读时不应该再次触发抽牌');
+              }
+            );
+          }
 
           // 刷新对话
           const finalConv = await conversationApi.get(currentConversation.conversation_id);

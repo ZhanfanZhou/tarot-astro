@@ -205,8 +205,7 @@ class GeminiService:
         if context_parts:
             return "\n用户资料：\n" + "\n".join(context_parts)
         else:
-            return "\n用户未输入个人信息，你可以在后续有需要时调用：`get_astrology_chart` 工具获取星盘数据"
-        return ""
+            return "\n用户资料：尚未完善（如需星盘分析，请使用 request_user_profile 工具请求用户补充信息）"
     
     def _format_messages_for_gemini(
         self, 
@@ -302,7 +301,12 @@ class GeminiService:
         # 打印调试信息
         print(f"\n[Gemini Agent] 会话类型: {session_type.value}")
         print(f"[Gemini Agent] 消息总数: {len(gemini_messages)}")
-        print(f"[Gemini Agent] 可用工具: {[tool.function_declarations[0].name for tool in tools]}")
+        # 修复：正确显示所有可用工具
+        all_tool_names = []
+        for tool in tools:
+            for func_decl in tool.function_declarations:
+                all_tool_names.append(func_decl.name)
+        print(f"[Gemini Agent] 可用工具: {all_tool_names}")
         
         # 创建聊天会话
         chat = model.start_chat(history=gemini_messages[:-1])

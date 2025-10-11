@@ -57,7 +57,105 @@ During your interaction with the user, if you find anything reusable in this pro
 
 ### 编码类问题记录
 
-#### 1. React 状态异步更新与闭包问题
+#### 1. Python 闭包变量作用域问题
+
+**问题：** 在 Python 闭包中对外部变量赋值，会导致该变量被视为局部变量，从而在赋值前使用时报 `UnboundLocalError`
+
+**错误信息：** `UnboundLocalError: local variable 'conversation' referenced before assignment`
+
+**解决方案：**
+```python
+# 错误写法：在闭包中重新赋值外部变量
+async def generate():
+    # 使用外部变量
+    async for event in service.stream_response(conversation.messages):  # ❌ 报错
+        ...
+        # 后面重新赋值了 conversation
+        conversation = await get_conversation(id)  # ❌ 导致前面报错
+
+# 正确写法：使用不同的变量名
+async def generate():
+    # 使用外部变量
+    async for event in service.stream_response(conversation.messages):  # ✅ 正常
+        ...
+        # 使用不同的变量名
+        updated_conv = await get_conversation(id)  # ✅ 避免冲突
+```
+
+**核心原则：**
+1. Python 在函数定义时扫描代码，看到变量被赋值就认为是局部变量
+2. 即使赋值在后面，前面的引用也会报错
+3. 在闭包中避免对外部变量重新赋值
+4. 需要更新的值使用新变量名（如 `updated_xxx`）
+
+**适用场景：**
+- 异步生成器函数中使用外部变量
+- 任何闭包需要更新外部变量的场景
+- FastAPI 流式响应中的变量管理
+
+#### 2. FastAPI Query 参数声明
+
+**问题：** FastAPI 接口同时接收请求体和查询参数时，需要明确声明参数来源
+
+**错误信息：** 422 Unprocessable Entity
+
+**解决方案：**
+```python
+# 错误写法：FastAPI 不知道 conversation_id 从哪里来
+@router.post("/draw")
+async def draw_cards(
+    conversation_id: str,  # ❌ 可能被误解为请求体
+    draw_request: DrawCardsRequest
+):
+    ...
+
+# 正确写法：明确指定为查询参数
+from fastapi import Query
+
+@router.post("/draw")
+async def draw_cards(
+    draw_request: DrawCardsRequest,  # 从请求体获取
+    conversation_id: str = Query(...)  # ✅ 明确从查询参数获取
+):
+    ...
+```
+
+**核心原则：**
+1. Pydantic 模型参数自动从请求体解析
+2. 简单类型参数需要明确指定来源（Query, Path, Header 等）
+3. 参数顺序：请求体参数在前，其他参数在后（可选但推荐）
+
+**适用场景：**
+- POST/PUT 接口同时需要请求体和查询参数
+- 需要明确参数来源的所有 FastAPI 接口
+
+#### 3. Gemini API Protobuf 类型序列化
+
+**问题：** Gemini API 返回的函数参数包含 protobuf 类型（`RepeatedComposite`），无法直接被 `json.dumps` 序列化
+
+**错误信息：** `TypeError: Object of type RepeatedComposite is not JSON serializable`
+
+**解决方案：**
+```python
+# 错误写法
+yield f"data: {json.dumps({'draw_cards': func_args})}\n\n"
+
+# 正确写法：先转换为可序列化格式
+serializable_args = json.loads(json.dumps(func_args, default=str))
+yield f"data: {json.dumps({'draw_cards': serializable_args})}\n\n"
+```
+
+**核心原则：**
+1. Gemini API 的 `func_call.args` 使用 `dict()` 转换后，嵌套的数组可能仍是 protobuf 类型
+2. 使用 `json.dumps(..., default=str)` 可以处理所有不可序列化的对象
+3. 再用 `json.loads()` 转回来，得到完全可序列化的 Python 原生类型
+
+**适用场景：**
+- 处理 Gemini Function Calling 的参数
+- 任何涉及 protobuf 数据的 JSON 序列化
+- SSE 流式输出中传递复杂对象
+
+#### 4. React 状态异步更新与闭包问题
 
 **问题：** React 状态更新是异步的，闭包会捕获旧的状态值
 
@@ -72,7 +170,7 @@ During your interaction with the user, if you find anything reusable in this pro
 - 状态更新后立即执行依赖该状态的操作
 - 任何涉及异步状态更新的场景
 
-#### 2. 外部API数据请求与格式化的同步性
+#### 5. 外部API数据请求与格式化的同步性
 
 **问题：** 扩展外部API请求参数后，忘记同步更新数据格式化函数，导致新数据无法传递给AI
 
@@ -92,3 +190,25 @@ During your interaction with the user, if you find anything reusable in this pro
 - 扩展星盘API请求的星体、宫位等数据
 - 集成任何外部API时扩展请求参数
 - 多层数据处理流程的修改
+
+#### 6. 多路由功能一致性维护
+
+**问题：** 星座AI和塔罗AI功能不一致，星座AI缺少抽牌接口，导致前端调用失败
+
+**核心原则：**
+1. **功能对等性** - 相同功能在不同路由中应该保持一致
+2. **接口完整性** - 每个路由都应该有完整的功能接口
+3. **前端路由选择** - 根据会话类型动态选择正确的API
+4. **错误处理统一** - 相同功能应该有相同的错误处理机制
+
+**检查清单（多路由功能开发时）：**
+- [ ] 确认所有相关路由都有对应的接口
+- [ ] 前端根据会话类型选择正确的API
+- [ ] 功能实现逻辑保持一致
+- [ ] 错误处理和状态管理统一
+- [ ] 更新架构文档，记录新增功能
+
+**适用场景：**
+- 为多个AI类型添加相同功能（如抽牌、星盘等）
+- 修复功能不一致导致的调用错误
+- 统一多路由的接口设计

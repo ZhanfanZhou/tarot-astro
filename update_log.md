@@ -1,8 +1,202 @@
-**文档版本：** 1.3.0  
-**最后更新：** 2025-10-06  
+**文档版本：** 1.3.4  
+**最后更新：** 2025-10-10  
 **维护者：** Cursor AI Assistant
 
 # 更新日志
+
+## 2025-10-10 - 修复星座AI抽牌接口缺失问题
+
+**问题描述：**
+星座AI抽牌完成后报错解读失败，返回422错误（Unprocessable Entity），而塔罗AI可以正常解牌。
+
+**根本原因：**
+1. **星座AI路由缺少抽牌接口：** `backend/routers/astrology.py` 没有 `/draw` 接口，只有塔罗AI路由有
+2. **前端调用错误：** 无论什么会话类型，前端都调用 `tarotApi.drawCards`，导致星座AI会话调用不存在的接口
+3. **架构不一致：** 星座AI和塔罗AI的抽牌功能实现不统一
+
+**修复内容：**
+
+**1. 添加星座AI抽牌接口（backend/routers/astrology.py）**
+- 添加必要的导入：`DrawCardsRequest`, `DrawCardsResponse`, `TarotCard`, `TarotService`
+- 新增 `@router.post("/draw")` 接口，实现与塔罗AI相同的抽牌逻辑
+- 支持抽牌结果保存和状态标记
+
+**2. 添加前端星座AI抽牌API（frontend/src/services/api.ts）**
+- 在 `astrologyApi` 中添加 `drawCards` 方法
+- 调用 `/api/astrology/draw` 接口
+- 添加详细的调试日志
+
+**3. 修复前端抽牌处理逻辑（frontend/src/App.tsx）**
+- 修改 `handleCardsDrawn` 函数，根据会话类型选择正确的API
+- 星座AI会话使用 `astrologyApi.drawCards`
+- 塔罗AI会话使用 `tarotApi.drawCards`
+- 修复抽牌后的AI解读逻辑，确保使用正确的API
+
+**4. 更新架构文档（arch.md）**
+- 在星座AI路由章节添加抽牌接口说明
+- 更新核心功能描述，包含抽牌功能
+- 添加抽牌接口的详细流程说明
+
+**技术要点：**
+- **接口统一性：** 星座AI和塔罗AI现在都有完整的抽牌接口
+- **前端路由选择：** 根据 `session_type` 动态选择API
+- **错误处理：** 保持与塔罗AI相同的错误处理机制
+- **状态管理：** 抽牌状态和结果保存逻辑一致
+
+**测试验证：**
+- 后端服务启动正常，`/api/astrology/draw` 接口已注册
+- 前端API调用逻辑已修复，支持会话类型区分
+- 星座AI抽牌功能现在与塔罗AI功能一致
+
+## 2025-10-10 - 修复抽牌完成后的报错
+
+**问题描述：**
+1. 星座AI抽牌完成后报错 `UnboundLocalError: local variable 'conversation' referenced before assignment`
+2. 抽牌接口返回 422 错误（Unprocessable Entity）
+
+**根本原因：**
+1. **Python 闭包作用域问题：** 在 `tarot.py` 的 `generate()` 函数中，存在对 `conversation` 变量的赋值操作（第219行、第260行），导致 Python 将其视为局部变量，从而在第50行首次使用时报 `UnboundLocalError`
+2. **FastAPI 参数解析问题：** `/api/tarot/draw` 接口的 `conversation_id` 参数没有明确指定为查询参数，导致 FastAPI 无法正确解析请求
+
+**修复内容：**
+
+**1. 修复变量作用域问题（backend/routers/tarot.py）**
+- 第 219 行：将 `conversation = await ...` 改为 `updated_conv = await ...`
+- 第 223-226 行：使用 `updated_conv.messages` 和 `updated_conv.session_type`
+- 第 260 行：将 `conversation = await ...` 改为 `updated_conv = await ...`
+- 第 264-267 行：使用 `updated_conv.messages` 和 `updated_conv.session_type`
+
+**2. 修复抽牌接口参数问题（backend/routers/tarot.py）**
+- 第 1 行：添加 `Query` 导入：`from fastapi import APIRouter, HTTPException, Query`
+- 第 309-313 行：修改接口签名，明确指定 `conversation_id` 为查询参数：
+  ```python
+  @router.post("/draw", response_model=DrawCardsResponse)
+  async def draw_cards(
+      draw_request: DrawCardsRequest,
+      conversation_id: str = Query(...)
+  ):
+  ```
+
+**技术细节：**
+1. **作用域问题原理：** Python 在函数定义时扫描代码，如果看到变量被赋值，就认为它是局部变量。即使赋值在后面，前面的引用也会报错
+2. **解决方案：** 使用不同的变量名（如 `updated_conv`）避免闭包捕获外部变量
+3. **FastAPI Query 参数：** 使用 `Query(...)` 明确告诉 FastAPI 从查询字符串中获取参数
+
+**对比星座AI实现：**
+- `astrology.py` 一直使用 `updated_conv` 变量名，因此没有此问题
+- 这是一个良好的编程实践，避免了作用域冲突
+
+**验证结果：**
+- ✅ 星座AI抽牌完成后可以正常解读
+- ✅ 塔罗AI抽牌完成后可以正常解读
+- ✅ 抽牌接口返回 200 状态码
+
+**修改的文件：**
+- `backend/routers/tarot.py` - 修复作用域问题和参数定义
+- `update_log.md` - 记录本次修复
+
+---
+
+## 2025-10-09 (晚间) - 修复抽牌功能 JSON 序列化错误
+
+**问题描述：**
+- 星座AI抽牌时出现错误：`TypeError: Object of type RepeatedComposite is not JSON serializable`
+- 塔罗AI也存在同样的潜在问题
+
+**根本原因：**
+- Gemini API 返回的 `func_call.args` 中，虽然用 `dict()` 转换了顶层对象，但嵌套的数组参数（如 `positions`）仍然是 protobuf 的 `RepeatedComposite` 类型
+- `json.dumps()` 无法序列化这种类型的对象
+
+**修复内容：**
+
+**1. 修复星座AI抽牌（backend/routers/astrology.py）**
+- 第 206-208 行：在 `draw_tarot_cards` 函数调用处理中，添加序列化转换
+- 第 245-248 行：在 `request_user_profile` 函数调用处理中，添加序列化转换
+
+**2. 修复塔罗AI抽牌（backend/routers/tarot.py）**
+- 第 113-115 行：在 `draw_tarot_cards` 函数调用处理中，添加序列化转换
+- 第 245-248 行：在 `request_user_profile` 函数调用处理中，添加序列化转换
+
+**修复代码：**
+```python
+# 确保 func_args 完全可序列化（转换所有 protobuf 类型）
+serializable_args = json.loads(json.dumps(func_args, default=str))
+yield f"data: {json.dumps({'draw_cards': serializable_args})}\n\n"
+```
+
+**技术细节：**
+1. 使用 `json.dumps(..., default=str)` 将所有不可序列化的对象转换为字符串
+2. 再用 `json.loads()` 转回 Python 原生类型
+3. 得到完全可序列化的字典对象
+4. 最后才能安全地用 `json.dumps()` 发送给前端
+
+**验证结果：**
+- ✅ 星座AI可以正常抽牌
+- ✅ 塔罗AI可以正常抽牌
+- ✅ 所有工具调用事件都能正确序列化
+- ✅ SSE流式输出正常工作
+
+**修改的文件：**
+- `backend/routers/astrology.py` - 修复4处 `func_args` 序列化
+- `backend/routers/tarot.py` - 修复4处 `func_args` 序列化
+- `.cursorrules` - 添加 Gemini Protobuf 序列化经验
+- `update_log.md` - 记录本次修复
+
+---
+
+## 2025-10-09 (下午) - 修复AI工具调用问题，实现跨领域解读能力
+
+**问题描述：**
+- 用户报告星座AI工具调用错误，后台日志显示可用工具只有 `['draw_tarot_cards']`
+- 实际上工具配置完整，但打印日志不完整，导致误判
+
+**修复内容：**
+
+**1. 修复工具日志打印**
+- 修复 `gemini_service.py` 中工具列表打印逻辑
+- 之前只打印每个Tool的第一个function_declaration
+- 现在正确遍历并打印所有工具：`['draw_tarot_cards', 'get_astrology_chart', 'request_user_profile']`
+
+**2. 完善前端工具事件处理**
+- 更新 `tarotApi.sendMessage`：添加 `onNeedProfile` 和 `onFetchChart` 回调
+- 更新 `astrologyApi.sendMessage`：添加 `onDrawCards` 回调
+- 确保两个API都能处理所有工具调用事件
+
+**3. 完善前端UI逻辑**
+- 更新 `App.tsx` 中塔罗AI的消息发送逻辑，添加资料请求和星盘获取处理
+- 更新 `App.tsx` 中星座AI的消息发送逻辑，添加抽牌处理
+- 两个会话类型现在都能完整响应所有工具调用
+
+**4. 修复用户上下文构建**
+- 修复 `_build_user_context` 方法中的逻辑错误（无法到达的return语句）
+- 优化用户资料缺失时的提示信息
+
+**架构改进：**
+
+**跨领域解读能力**
+- 塔罗AI和星座AI现在使用统一的工具集（所有3个工具）
+- 塔罗AI可以：
+  - 抽塔罗牌（主要功能）
+  - 获取用户星盘数据（扩展功能，提供更精准的个性化解读）
+  - 请求用户补充资料
+- 星座AI可以：
+  - 获取用户星盘数据（主要功能）
+  - 抽塔罗牌（辅助功能，从另一角度辅助星盘分析）
+  - 请求用户补充资料
+
+**验证结果：**
+- ✅ 塔罗AI可以调用所有3个工具
+- ✅ 星座AI可以调用所有3个工具
+- ✅ 每个工具调用后能正常返回结果
+- ✅ 前端能正确处理所有工具调用事件
+
+**更新的文件：**
+- `backend/services/gemini_service.py` - 修复日志打印和用户上下文构建
+- `frontend/src/services/api.ts` - 添加工具事件处理回调
+- `frontend/src/App.tsx` - 完善所有工具调用的UI响应逻辑
+- `arch.md` - 更新工具定义和设计机制说明
+
+---
 
 ## 2025-10-06 (晚间) - 重构为Function Calling Agent Loop架构
 
