@@ -212,3 +212,72 @@ yield f"data: {json.dumps({'draw_cards': serializable_args})}\n\n"
 - 为多个AI类型添加相同功能（如抽牌、星盘等）
 - 修复功能不一致导致的调用错误
 - 统一多路由的接口设计
+
+#### 7. React 异步回调中的状态闭包陷阱
+
+**问题：** 在异步流程中使用 React 状态来追踪操作，导致重复执行
+
+**症状：** 
+- 星座AI获取星盘数据后自动触发AI回复，但这条回复被发送了多次（如3次）
+- 使用 `setChartJustFetched(true)` 在回调中设置状态
+- 在同一函数后面检查 `if (chartJustFetched)` 时使用的是旧的状态值
+
+**错误写法：**
+```typescript
+// ❌ 错误：在回调中设置状态，然后依赖该状态判断
+const [chartJustFetched, setChartJustFetched] = useState(false);
+
+await astrologyApi.sendMessage(
+  conversationId,
+  content,
+  (chunk) => { /* ... */ },
+  async (instruction) => {
+    // 设置状态（异步生效）
+    setChartJustFetched(true);  // ❌ 标记1：这会加入React批处理队列
+  }
+);
+
+// 后面的判断使用旧值
+if (chartJustFetched) {  // ❌ 这里 chartJustFetched 仍然是 false（闭包捕获的旧值）
+  await astrologyApi.sendMessage(...);  // 这导致重复发送
+}
+```
+
+**正确写法：**
+```typescript
+// ✅ 正确：使用本地变量追踪，不依赖React状态
+let chartWasFetched = false;  // 本地变量，同步生效
+
+await astrologyApi.sendMessage(
+  conversationId,
+  content,
+  (chunk) => { /* ... */ },
+  async (instruction) => {
+    // 直接修改本地变量（同步，立即生效）
+    chartWasFetched = true;  // ✅ 立即生效
+  }
+);
+
+// 检查本地变量（获取最新值）
+if (chartWasFetched) {  // ✅ 这里能获取最新值
+  await astrologyApi.sendMessage(...);  // ✅ 只发送一次
+}
+```
+
+**核心原则：**
+1. **异步状态 vs 同步变量**：对于在同一个异步操作周期内需要追踪的状态，使用本地变量而非 React 状态
+2. **闭包陷阱**：回调函数捕获的 React 状态是定义时的值，不会自动更新
+3. **何时使用 React 状态**：跨函数、跨组件需要共享的状态；需要触发重新渲染的状态
+4. **何时使用本地变量**：单个异步操作周期内的临时状态追踪；回调链中的状态同步
+
+**为什么本地变量有效：**
+- 不涉及 React 的异步状态更新机制
+- 回调函数中对本地变量的修改立即在同一作用域可见
+- 在关键决策点能获取最新的值
+- 避免了闭包捕获旧值的问题
+
+**适用场景：**
+- 获取数据后自动触发后续操作（如星盘获取后自动让AI继续解读）
+- 回调链中需要追踪前一个步骤的完成状态
+- 单个用户交互流程中的多步操作协调
+- 不需要跨组件共享的临时状态

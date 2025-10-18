@@ -4,6 +4,76 @@
 
 # 更新日志
 
+## 2025-10-18 - 修复星座AI对话后重复回答bug
+
+**问题描述：**
+用户在星座AI对话中，AI会连续回答3次，且3次回答内容显然是重复的。这是一个严重的交互bug，导致用户体验极差。
+
+**根本原因：**
+在前端 `App.tsx` 的 `handleSendMessage` 和 `handleSelectSession` 函数中，使用 React 状态 `chartJustFetched` 来追踪星盘数据是否被获取。但因为 React 状态更新是异步的，闭包会捕获旧的状态值，导致：
+
+1. **闭包问题**：回调函数（`onFetchChart`）中使用 `setChartJustFetched(true)` 设置状态
+2. **异步陷阱**：但第 414 行的判断 `if (chartJustFetched && ...)` 使用的是旧值（false）
+3. **重复触发**：如果 AI 在一次响应中多次请求星盘数据，`onFetchChart` 回调可能被触发多次，导致：
+   - 第一次回复：初始的 `astrologyApi.sendMessage`
+   - 自动触发回复：第二次调用 "星盘数据已准备好，请继续解读"
+   - 可能还有第三次（由于闭包和状态管理的复杂性）
+
+**修复方案：**
+
+使用本地变量 `chartWasFetched` 替代 React 状态 `chartJustFetched`：
+
+**1. 移除 `chartJustFetched` React 状态**
+- 删除：`const [chartJustFetched, setChartJustFetched] = useState(false);`
+
+**2. 在函数作用域内使用本地变量追踪**
+```typescript
+// handleSendMessage 中
+let chartWasFetched = false; // 本地变量，不依赖 React 状态
+await astrologyApi.sendMessage(...);
+// 在 onFetchChart 回调中设置
+chartWasFetched = true;
+
+// 流式完成后检查本地变量
+if (chartWasFetched && currentConversation.session_type === 'astrology') {
+  // 自动触发AI继续解读
+  await astrologyApi.sendMessage(...);
+}
+```
+
+**3. 应用到两处函数**
+- `handleSendMessage` - 用户发送消息时的流程
+- `handleSelectSession` - 初始化星座AI对话时的流程
+
+**技术细节：**
+
+**为什么这样修复有效：**
+- 本地变量不涉及异步状态更新，立即生效
+- 回调函数中对本地变量的修改在函数内部立即可见
+- 不依赖 React 的状态更新批处理机制
+- 确保 "星盘数据已准备好，请继续解读" 这条触发消息只发送一次
+
+**修改的文件：**
+- `frontend/src/App.tsx`
+  - 移除 `chartJustFetched` 状态
+  - 修改 `handleSendMessage` - 使用本地 `chartWasFetched` 变量
+  - 修改 `handleSelectSession` - 使用本地 `chartWasFetched` 变量
+  - 移除 `handleCardsDrawn` 中的过时 `setChartJustFetched` 调用
+
+**测试验证：**
+- ✅ 星座AI对话后只回答一次
+- ✅ 获取星盘数据后自动触发AI继续解读（仅一次）
+- ✅ 多轮对话正常工作
+- ✅ 没有重复回答问题
+
+**经验总结：**
+这是一个典型的 React 异步状态管理陷阱：
+- 在异步流程中使用状态来追踪状态很容易出现竞态条件
+- 对于同一个异步操作周期内的状态追踪，使用本地变量更可靠
+- 闭包陷阱：回调函数捕获的状态值可能不是最新的
+
+---
+
 ## 2025-10-10 - 修复星座AI抽牌接口缺失问题
 
 **问题描述：**

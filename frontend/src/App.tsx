@@ -32,7 +32,6 @@ const App: React.FC = () => {
   const [pendingDrawRequest, setPendingDrawRequest] = useState<DrawCardsRequest | null>(null);
   const [showAstrologyProfileModal, setShowAstrologyProfileModal] = useState(false);
   const [pendingAstrologyConversation, setPendingAstrologyConversation] = useState<string | null>(null);
-  const [chartJustFetched, setChartJustFetched] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -135,7 +134,6 @@ const App: React.FC = () => {
               if (user) {
                 try {
                   await astrologyApi.fetchChart(newConv.conversation_id);
-                  setChartJustFetched(true);
                 } catch (error) {
                   console.error('获取星盘数据失败:', error);
                 }
@@ -161,6 +159,8 @@ const App: React.FC = () => {
         setPendingAstrologyConversation(newConv.conversation_id);
 
         try {
+          let chartWasFetched = false; // 追踪当前消息周期中是否获取了星盘
+          
           // 发送空消息，让AI主动开场
           await astrologyApi.sendMessage(
             newConv.conversation_id,
@@ -180,8 +180,7 @@ const App: React.FC = () => {
               if (user) {
                 try {
                   await astrologyApi.fetchChart(newConv.conversation_id);
-                  // 标记星盘数据已获取，流式完成后自动触发AI继续
-                  setChartJustFetched(true);
+                  chartWasFetched = true; // 标记本次消息周期中获取了星盘
                 } catch (error) {
                   console.error('获取星盘数据失败:', error);
                 }
@@ -201,8 +200,8 @@ const App: React.FC = () => {
           setStreamingMessage('');
           
           // 如果星盘数据刚被获取，自动触发AI继续解读
-          if (chartJustFetched) {
-            setChartJustFetched(false);
+          // 使用本地追踪的chartWasFetched而不是React状态，以确保只触发一次
+          if (chartWasFetched) {
             setIsLoading(true);
             setStreamingMessage('');
             
@@ -331,6 +330,8 @@ const App: React.FC = () => {
     setStreamingMessage('');
 
     try {
+      let chartWasFetched = false; // 追踪当前消息周期中是否获取了星盘
+      
       // 根据会话类型选择API
       if (currentConversation.session_type === 'astrology') {
         await astrologyApi.sendMessage(
@@ -351,8 +352,7 @@ const App: React.FC = () => {
             if (user) {
               try {
                 await astrologyApi.fetchChart(currentConversation.conversation_id);
-                // 标记星盘数据已获取，流式完成后自动触发AI继续
-                setChartJustFetched(true);
+                chartWasFetched = true; // 标记本次消息周期中获取了星盘
               } catch (error) {
                 console.error('获取星盘数据失败:', error);
               }
@@ -395,7 +395,7 @@ const App: React.FC = () => {
             if (user) {
               try {
                 await astrologyApi.fetchChart(currentConversation.conversation_id);
-                setChartJustFetched(true);
+                chartWasFetched = true;
               } catch (error) {
                 console.error('获取星盘数据失败:', error);
               }
@@ -410,9 +410,9 @@ const App: React.FC = () => {
       setCurrentConversation(finalConv);
       setStreamingMessage('');
       
-      // 如果星盘数据刚被获取，自动触发AI继续解读
-      if (chartJustFetched && currentConversation.session_type === 'astrology') {
-        setChartJustFetched(false);
+      // 如果星盘数据刚被获取，自动触发AI继续解读（仅在星座AI中）
+      // 使用本地追踪的chartWasFetched而不是React状态，以确保只触发一次
+      if (chartWasFetched && currentConversation.session_type === 'astrology') {
         setIsLoading(true);
         setStreamingMessage('');
         
@@ -489,8 +489,7 @@ const App: React.FC = () => {
                 if (user) {
                   try {
                     await astrologyApi.fetchChart(currentConversation.conversation_id);
-                    // 标记星盘数据已获取，流式完成后自动触发AI继续
-                    setChartJustFetched(true);
+                    // 注：在handleCardsDrawn中不需要触发自动回复，解读会在finally中进行
                   } catch (error) {
                     console.error('获取星盘数据失败:', error);
                   }
