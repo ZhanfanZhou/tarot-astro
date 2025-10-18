@@ -115,6 +115,17 @@ async def send_message(request: SendMessageRequest):
                             print(f"[Tarot Router] func_args.card_count: {func_args.get('card_count', 'NOT_FOUND')}")
                             print(f"[Tarot Router] func_args.positions: {func_args.get('positions', 'NOT_FOUND')}")
                             
+                            # 修复：将 RepeatedComposite 类型转换为普通列表
+                            # 因为 json.dumps(..., default=str) 会把它转换成字符串
+                            if 'positions' in func_args:
+                                positions = func_args['positions']
+                                if hasattr(positions, '__iter__') and not isinstance(positions, (str, dict)):
+                                    func_args['positions'] = list(positions)
+                            
+                            # 修复：将 card_count 转换为 int（Gemini 返回的是 float）
+                            if 'card_count' in func_args and isinstance(func_args['card_count'], float):
+                                func_args['card_count'] = int(func_args['card_count'])
+                            
                             # 确保 func_args 完全可序列化（转换所有 protobuf 类型）
                             serializable_args = json.loads(json.dumps(func_args, default=str))
                             print(f"[Tarot Router] 序列化后的参数: {serializable_args}")
