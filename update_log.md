@@ -1,8 +1,49 @@
-**文档版本：** 1.3.4  
-**最后更新：** 2025-10-10  
+**文档版本：** 1.3.5  
+**最后更新：** 2025-10-18  
 **维护者：** Cursor AI Assistant
 
 # 更新日志
+
+## 2025-10-18 - 修复抽牌器422错误（DrawCardsRequest类型不匹配）
+
+**问题描述：**
+星座AI使用抽牌功能时，前端调用 `/api/astrology/draw` 接口报 422 Unprocessable Content 错误，抽牌请求无法被处理。
+
+**根本原因：**
+1. Gemini Function Calling 中，`draw_tarot_cards` 函数定义的 `spread_type` 参数被定义为 `"type": "string"`（无 enum 约束）
+2. Gemini 返回参数时，`spread_type` 是字符串类型（如 `"three_card"`）
+3. 后端 Pydantic 模型 `DrawCardsRequest.spread_type` 期望 `TarotSpread` 枚举类型
+4. 类型不匹配导致 Pydantic 验证失败，返回 422 错误
+
+**修复方案：**
+
+**1. 后端模型更新 (backend/models.py)**
+- 将 `DrawCardsRequest.spread_type` 的类型从 `TarotSpread` 改为 `str`
+- 原因：Gemini 返回的是字符串，Pydantic 应该与实际数据类型匹配
+
+**2. 前端类型定义同步 (frontend/src/types/index.ts)**
+- 将 `DrawCardsRequest.spread_type` 的类型从 `TarotSpread` 改为 `string`
+- 保持前后端类型定义一致性
+
+**3. Gemini 函数定义 (backend/services/gemini_service.py)**
+- 保持 `spread_type` 为 `"type": "string"`，不添加 enum 约束
+- 原因：Gemini AI 可以自由生成字符串值，不受限于预定义的枚举值
+
+**修改的文件：**
+- `backend/models.py` - DrawCardsRequest 模型
+- `frontend/src/types/index.ts` - DrawCardsRequest 接口
+- `backend/services/gemini_service.py` - 工具定义保持不变
+
+**测试验证：**
+- ✅ 所有 spread_type 值（single, three_card, celtic_cross, custom）都能正确被解析
+- ✅ JSON 序列化/反序列化正常工作
+- ✅ Pydantic 验证通过，不再报 422 错误
+- ✅ 前后端数据流转一致
+
+**关键学习（已更新至 .cursorrules Lesson 8）：**
+- Gemini Function Calling 返回的数据类型必须与后端 Pydantic 模型匹配
+- 当 Gemini 函数定义中不使用 enum 约束时，返回值就是字符串，不能用 enum 类型接收
+- 前后端类型定义需要同步，否则容易导致类型不匹配错误
 
 ## 2025-10-18 - 修复用户输入延迟显示bug
 
