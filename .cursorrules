@@ -281,3 +281,12 @@ if (chartWasFetched) {  // ✅ 这里能获取最新值
 - 回调链中需要追踪前一个步骤的完成状态
 - 单个用户交互流程中的多步操作协调
 - 不需要跨组件共享的临时状态
+#### 8. Gemini Function Calling 参数类型和流式响应异常处理`n
+**问题�?*
+1. Gemini Function Calling 返回的参数类型与后端期望类型不匹配导�?422 错误
+2. 流式响应处理中，�?finish_reason=1 时，访问 .text 属性抛�?ValueError
+
+**解决方案�?*
+1. Gemini 函数定义中添�?enum 约束
+2. Pydantic 模型使用 str 类型而非 enum
+3. 流式响应异常处理：try-except 捕获 ValueError
