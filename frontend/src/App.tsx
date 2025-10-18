@@ -604,6 +604,17 @@ const App: React.FC = () => {
                 />
               )}
               
+              {isLoading && !streamingMessage && (
+                <ChatMessage
+                  message={{
+                    role: 'assistant' as MessageRole,
+                    content: '',
+                    timestamp: new Date().toISOString(),
+                  }}
+                  isThinking={true}
+                />
+              )}
+              
               <div ref={messagesEndRef} />
             </div>
 

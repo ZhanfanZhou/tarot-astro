@@ -26,8 +26,8 @@ class GeminiService:
             "properties": {
                 "spread_type": {
                     "type": "string",
-                    "description": "牌阵类型，必须从以下选项中选择：single(单张牌), three_card(三张牌阵), celtic_cross(凯尔特十字), custom(自定义数量)",
-                    "enum": ["single", "three_card", "celtic_cross", "custom"]
+                    "description": "牌阵类型，你需要根据抽牌的目的，准确判断，选择适合的牌阵",
+                    # "enum": ["single", "three_card", "celtic_cross", "custom"]
                 },
                 "card_count": {
                     "type": "integer",
@@ -478,17 +478,11 @@ class GeminiService:
         
         # 流式输出AI的最终响应
         async for chunk in response:
-            try:
-                if hasattr(chunk, 'text') and chunk.text:
-                    yield {"content": chunk.text}
-                elif hasattr(chunk, 'parts'):
-                    for part in chunk.parts:
-                        if hasattr(part, 'text') and part.text:
-                            yield {"content": part.text}
-            except ValueError as e:
-                # 当响应没有有效的 Part 时（如 finish_reason=1），Gemini API 会抛出 ValueError
-                # 这种情况下继续处理而不是中断流
-                print(f"[Gemini Service] 警告：处理响应时出现 ValueError: {str(e)}")
-                continue
+            if hasattr(chunk, 'text') and chunk.text:
+                yield {"content": chunk.text}
+            elif hasattr(chunk, 'parts'):
+                for part in chunk.parts:
+                    if hasattr(part, 'text') and part.text:
+                        yield {"content": part.text}
         
         yield {"done": True}

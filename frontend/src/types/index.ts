@@ -55,7 +55,7 @@ export interface TarotCard {
 }
 
 export interface DrawCardsRequest {
-  spread_type: TarotSpread;
+  spread_type: string;
   card_count: number;
   positions?: string[];
 }
