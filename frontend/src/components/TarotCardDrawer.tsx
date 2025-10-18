@@ -32,6 +32,16 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
       setSelectedIndices([]);
       setConfirmedCards([]);
       setShowConfirm(false);
+      
+      // Debug logging
+      console.log('[TarotCardDrawer] Opened with drawRequest:', drawRequest);
+      console.log('[TarotCardDrawer] positions:', drawRequest.positions);
+      console.log('[TarotCardDrawer] positions type:', typeof drawRequest.positions);
+      console.log('[TarotCardDrawer] positions is array:', Array.isArray(drawRequest.positions));
+      if (drawRequest.positions) {
+        console.log('[TarotCardDrawer] positions length:', drawRequest.positions.length);
+        console.log('[TarotCardDrawer] positions[0]:', drawRequest.positions[0]);
+      }
     }
   }, [isOpen]);
 

@@ -118,6 +118,10 @@ async def send_message(request: SendMessageRequest):
                             # 确保 func_args 完全可序列化（转换所有 protobuf 类型）
                             serializable_args = json.loads(json.dumps(func_args, default=str))
                             print(f"[Tarot Router] 序列化后的参数: {serializable_args}")
+                            print(f"[Tarot Router] positions 类型（序列化前）: {type(func_args.get('positions'))}")
+                            print(f"[Tarot Router] positions 值（序列化前）: {func_args.get('positions')}")
+                            print(f"[Tarot Router] positions 类型（序列化后）: {type(serializable_args.get('positions'))}")
+                            print(f"[Tarot Router] positions 值（序列化后）: {serializable_args.get('positions')}")
                             yield f"data: {json.dumps({'draw_cards': serializable_args})}\n\n"
                             
                             # 告诉AI：已通知用户抽牌，等待用户完成
