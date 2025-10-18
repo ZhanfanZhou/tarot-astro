@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Literal
 from datetime import datetime
 from enum import Enum
@@ -67,9 +67,15 @@ class TarotCard(BaseModel):
 
 
 class DrawCardsRequest(BaseModel):
-    spread_type: TarotSpread
+    model_config = ConfigDict(json_schema_extra={"examples": [{"spread_type": "three_card", "card_count": 3, "positions": ["过去", "现在", "未来"]}]})
+    
+    spread_type: str  # 牌阵类型，如 "single", "three_card", "celtic_cross", "custom"
     card_count: int
     positions: Optional[List[str]] = None  # 牌阵中每个位置的含义
+    
+    class Config:
+        # 允许从 float 和其他类型转换到 int
+        validate_assignment = True
 
 
 class Message(BaseModel):

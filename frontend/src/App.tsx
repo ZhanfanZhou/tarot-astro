@@ -22,6 +22,7 @@ const App: React.FC = () => {
     addConversation,
     updateConversation,
     removeConversation,
+    addMessageToCurrentConversation,
   } = useConversationStore();
 
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -331,6 +332,14 @@ const App: React.FC = () => {
 
     try {
       let chartWasFetched = false; // 追踪当前消息周期中是否获取了星盘
+      
+      // 立即将用户消息添加到对话中（无需等待API响应）
+      const userMessage: Message = {
+        role: 'user' as MessageRole,
+        content,
+        timestamp: new Date().toISOString(),
+      };
+      addMessageToCurrentConversation(userMessage);
       
       // 根据会话类型选择API
       if (currentConversation.session_type === 'astrology') {

@@ -506,6 +506,7 @@ POST /api/tarot/draw
 - 不持久化到 localStorage，每次登录后从服务器加载
 - 添加对话时插入到列表头部（最新的在前面）
 - 更新对话时同时更新列表和当前对话（如果匹配）
+- `addMessageToCurrentConversation` - 将单个消息添加到当前对话（用于立即显示用户输入）
 
 ### 2. API 服务层 (services/api.ts)
 
@@ -845,12 +846,22 @@ choice (选择) → guest (游客)
 
 **handleSendMessage(content):**
 ```
-1. 设置加载状态
-2. 调用 tarotApi.sendMessage
-3. 实时接收文本块 → 更新 streamingMessage
-4. 接收到抽牌指令 → 打开抽牌器
-5. 流式结束 → 刷新对话 → 清空 streamingMessage
+1. 立即将用户消息添加到对话中（用户输入立即显示）
+   - 创建 Message 对象，role='user'
+   - 调用 addMessageToCurrentConversation 将消息加入本地状态
+   - 无需等待 API 响应
+2. 设置加载状态
+3. 调用 tarotApi.sendMessage 或 astrologyApi.sendMessage
+4. 实时接收文本块 → 更新 streamingMessage
+5. 接收到指令（抽牌、获取资料、获取星盘等） → 触发对应处理
+6. 流式结束 → 刷新对话 → 清空 streamingMessage
 ```
+
+**设计机制：**
+- **立即显示原则**：用户的输入在按下发送按钮后立即显示，不阻塞于 AI 响应
+- **本地状态优先**：使用 `addMessageToCurrentConversation` 方法直接修改 Zustand 状态
+- **服务端同步**：后续 `conversationApi.get()` 刷新确保与服务端数据保持一致
+- 提升用户体验：反馈迅速，即使 AI 响应较慢也不会影响消息显示
 
 **handleCardsDrawn(cards):**
 ```

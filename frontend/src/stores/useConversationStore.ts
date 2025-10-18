@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Conversation } from '@/types';
+import type { Conversation, Message } from '@/types';
 
 interface ConversationState {
   conversations: Conversation[];
@@ -9,6 +9,7 @@ interface ConversationState {
   addConversation: (conversation: Conversation) => void;
   updateConversation: (conversation: Conversation) => void;
   removeConversation: (conversationId: string) => void;
+  addMessageToCurrentConversation: (message: Message) => void;
 }
 
 export const useConversationStore = create<ConversationState>((set) => ({
@@ -45,6 +46,25 @@ export const useConversationStore = create<ConversationState>((set) => ({
           ? null
           : state.currentConversation,
     })),
+
+  addMessageToCurrentConversation: (message) =>
+    set((state) => {
+      if (!state.currentConversation) return state;
+      
+      const updatedConversation = {
+        ...state.currentConversation,
+        messages: [...state.currentConversation.messages, message],
+      };
+
+      return {
+        conversations: state.conversations.map((c) =>
+          c.conversation_id === updatedConversation.conversation_id
+            ? updatedConversation
+            : c
+        ),
+        currentConversation: updatedConversation,
+      };
+    }),
 }));
 
 

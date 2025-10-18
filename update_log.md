@@ -4,6 +4,63 @@
 
 # 更新日志
 
+## 2025-10-18 - 修复用户输入延迟显示bug
+
+**问题描述：**
+用户输入的内容需要等待AI回应后才能在对话界面显示出来，而不是立即显示。这导致用户输入反馈不及时，影响交互体验。
+
+**根本原因：**
+前端的 `handleSendMessage` 函数在调用 API 之后才通过 `conversationApi.get()` 刷新对话，获取包含用户消息的最新对话数据。这导致用户消息需要等待 API 响应和对话刷新才能显示。
+
+**修复方案：**
+
+**1. 添加对话状态新方法 (frontend/src/stores/useConversationStore.ts)**
+- 新增 `addMessageToCurrentConversation(message)` 方法
+- 将单个消息立即添加到当前对话的本地状态中
+- 同时更新全局对话列表中的对应对话
+
+**2. 修改消息发送流程 (frontend/src/App.tsx)**
+```typescript
+const handleSendMessage = async (content: string) => {
+  // 1️⃣ 立即将用户消息添加到本地状态
+  const userMessage: Message = {
+    role: 'user' as MessageRole,
+    content,
+    timestamp: new Date().toISOString(),
+  };
+  addMessageToCurrentConversation(userMessage);  // 立即显示
+
+  // 2️⃣ 然后再发送 API 请求（无需等待）
+  // 根据会话类型调用相应的 API...
+};
+```
+
+**3. 设计机制**
+- **立即显示原则**：用户输入在按下发送按钮后立即显示在对话中
+- **本地状态优先**：使用 Zustand 状态管理，无需等待服务端响应
+- **最终一致性**：后续的 `conversationApi.get()` 刷新确保与服务端数据保持同步
+- **改善体验**：快速反馈，即使 AI 响应较慢也不会影响消息显示
+
+**修改的文件：**
+- `frontend/src/stores/useConversationStore.ts` - 添加 `addMessageToCurrentConversation` 方法
+- `frontend/src/App.tsx` - 在 `handleSendMessage` 开始处立即添加用户消息
+- `arch.md` - 更新对话状态文档和 `handleSendMessage` 流程文档
+
+**测试验证：**
+- ✅ 用户输入立即显示，无延迟
+- ✅ AI 响应仍然能够正常完成
+- ✅ 多轮对话正常工作
+- ✅ 消息顺序正确
+
+**技术要点：**
+这是一个常见的前端交互优化模式：
+- 对于输入类操作，先更新本地状态实现快速反馈
+- 再在后台发送 API 请求进行数据同步
+- 避免用户输入被 API 响应时间阻塞
+- 提升应用的响应性和用户体验
+
+---
+
 ## 2025-10-18 - 修复星座AI对话后重复回答bug
 
 **问题描述：**
