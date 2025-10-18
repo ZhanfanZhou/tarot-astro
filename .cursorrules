@@ -324,3 +324,52 @@ if (chartWasFetched) {  // ✅ 这里能获取最新值
 - Gemini Function Calling 中的所有参数
 - 任何 Pydantic 模型直接接收 Gemini 返回数据
 - 跨应用边界的类型交互
+
+#### 9. Gemini Function Calling 中 Protobuf 类型序列化问题
+
+**问题：**
+Gemini API 返回的 Function Calling 参数中，数组类型（如 `positions`）是 `proto.marshal.collections.repeated.RepeatedComposite` 而不是普通 Python list。使用 `json.dumps(..., default=str)` 序列化时，会把整个 `RepeatedComposite` 对象转换成字符串表示，而不是数组！
+
+**具体表现：**
+- 序列化前：`positions = RepeatedComposite(['文本1', '文本2', '文本3'])`  (正确的 protobuf 类型)
+- 序列化后：`positions = "['文本1', '文本2', '文本3']"` ❌ (字符串！)
+- 前端收到：`positions[0]` = `"["` 而不是 `"文本1"`
+- 前端提交：发送字符串 `"['文本1', ...]"` 给后端
+- 结果：422 Unprocessable Content（Pydantic 期望 `List[str]` 但收到 `str`）
+
+**根本原因：**
+`json.dumps(func_args, default=str)` 中的 `default=str` 会对所有不能被 JSON 序列化的对象调用 `str()` 函数，包括 `RepeatedComposite` 对象。而 `str(RepeatedComposite(...))` 返回的是字符串表示形式。
+
+**解决方案：**
+在 JSON 序列化前，先将 `RepeatedComposite` 转换为普通 Python list：
+
+```python
+# 修复：在 json.dumps 前转换 RepeatedComposite 为 list
+if 'positions' in func_args:
+    positions = func_args['positions']
+    if hasattr(positions, '__iter__') and not isinstance(positions, (str, dict)):
+        # 这是 RepeatedComposite 或其他可迭代对象，转换为 list
+        func_args['positions'] = list(positions)
+
+# 然后再进行 JSON 序列化（此时 positions 已经是真正的 list）
+serializable_args = json.loads(json.dumps(func_args, default=str))
+```
+
+**额外发现 - card_count 类型问题：**
+Gemini 返回的 `card_count` 是 `float` (如 `3.0`) 而不是 `int` (3)。虽然 Pydantic 通常会自动转换，但为了保险起见也应该预先转换：
+
+```python
+if 'card_count' in func_args and isinstance(func_args['card_count'], float):
+    func_args['card_count'] = int(func_args['card_count'])
+```
+
+**核心原则：**
+- Gemini API 的 protobuf 类型（`RepeatedComposite`）不能直接被 `json.dumps` 序列化
+- 在序列化前应该将所有 protobuf 类型转换为原生 Python 类型
+- `default=str` 是 fallback 机制，不应该依赖它来处理 protobuf 类型
+- 后端发送给前端的数据必须是标准的 JSON 可序列化类型（list, dict, str, int, float, bool, None）
+
+**适用场景：**
+- 处理 Gemini Function Calling 的任何数组参数
+- 处理任何来自 Gemini API 的 protobuf 数据
+- 需要在后端和前端之间传递复杂数据结构的场景

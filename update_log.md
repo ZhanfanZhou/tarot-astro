@@ -4,6 +4,72 @@
 
 # 更新日志
 
+## 2025-10-18 - 修复抽牌位置文字错乱和422错误（Protobuf序列化）
+
+**问题症状：**
+1. 抽牌器显示的位置文字错乱：显示 `"[" "'" "这"` 而不是实际的位置描述
+2. 用户点击确认抽牌后报错：`422 Unprocessable Content`
+3. 后端日志显示 AI 收到了抽牌结果，但前端却无法正常处理
+
+**根本原因（关键发现！）：**
+Gemini API 返回的 Function Calling 参数中，`positions` 是 `proto.marshal.collections.repeated.RepeatedComposite` 类型（protobuf 类型），而不是普通 Python list。
+
+序列化过程出错：
+```
+json.dumps(func_args, default=str)
+             ↓
+default=str 对不可序列化的对象调用 str()
+             ↓
+str(RepeatedComposite([...])) = "['文本1', '文本2', ...]"  ❌ 转换成字符串了！
+```
+
+结果导致：
+- 前端收到字符串：`"['这个新机会的核心特质', ...]"`
+- 访问 `positions[0]` 得到 `"["`（字符串的第一个字符）
+- 前端提交时发送字符串而非数组，导致 422 错误
+
+**修复方案：**
+
+**1. 后端序列化修复（astrology.py 和 tarot.py）**
+在 JSON 序列化前将 `RepeatedComposite` 转换为普通 Python list：
+```python
+# 修复：将 RepeatedComposite 转换为 list
+if 'positions' in func_args:
+    positions = func_args['positions']
+    if hasattr(positions, '__iter__') and not isinstance(positions, (str, dict)):
+        func_args['positions'] = list(positions)
+
+# 修复：将 card_count 转换为 int（Gemini 返回 3.0 而非 3）
+if 'card_count' in func_args and isinstance(func_args['card_count'], float):
+    func_args['card_count'] = int(func_args['card_count'])
+
+# 然后再序列化（此时数据都是原生 Python 类型）
+serializable_args = json.loads(json.dumps(func_args, default=str))
+```
+
+**2. 前端调试（TarotCardDrawer.tsx）**
+添加了完整的日志便于问题排查：
+- 打印接收到的 `positions` 类型
+- 验证是否为数组
+- 显示第一个元素的值
+
+**修改的文件：**
+- `backend/routers/astrology.py` - 添加 RepeatedComposite 转换逻辑
+- `backend/routers/tarot.py` - 添加 RepeatedComposite 转换逻辑
+- `frontend/src/components/TarotCardDrawer.tsx` - 添加调试日志
+
+**测试验证：**
+- ✅ 前端显示正确的位置文字（中文描述）
+- ✅ 用户点击确认抽牌后正常工作，无 422 错误
+- ✅ 后端数据序列化正确
+- ✅ 前端能正确访问 positions 数组
+
+**关键学习（已更新至 .cursorrules Lesson 9）：**
+- Gemini API 返回的 protobuf 类型（`RepeatedComposite`）不能直接被 `json.dumps` 序列化
+- `default=str` 不能安全处理 protobuf 对象，会转换成字符串表示
+- 必须在序列化前将 protobuf 类型转换为原生 Python 类型
+- 需要处理来自 Gemini 的类型偏差（如 float vs int）
+
 ## 2025-10-18 - 修复抽牌器422错误（DrawCardsRequest类型不匹配）
 
 **问题描述：**
