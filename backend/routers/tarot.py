@@ -77,94 +77,65 @@ async def send_message(request: SendMessageRequest):
                     # 执行函数
                     if func_name == "draw_tarot_cards":
                         # 抽塔罗牌 - 保留原有的用户交互体验（显示抽牌动画窗口）
-                        # 检查是否已经抽过牌
-                        updated_conv = await ConversationService.get_conversation(request.conversation_id)
-                        if updated_conv.has_drawn_cards:
-                            # 已经抽过牌，返回错误
-                            function_result = {
-                                "success": False,
-                                "error": "已经抽过牌，不能再次抽牌"
-                            }
-                            
-                            print(f"[Tarot Router] ⚠️ 已经抽过牌，拒绝请求")
-                            
-                            # 告诉AI结果
-                            final_response = ""
-                            async for event2 in gemini_service.continue_with_function_result(
-                                updated_conv.messages,
-                                user,
-                                session_type=updated_conv.session_type,
-                                function_name=func_name,
-                                function_result=function_result
-                            ):
-                                if "content" in event2:
-                                    final_response += event2["content"]
-                                    yield f"data: {json.dumps({'content': event2['content']})}\n\n"
-                            
-                            if final_response.strip():
-                                await ConversationService.add_message(
-                                    request.conversation_id,
-                                    MessageRole.ASSISTANT,
-                                    final_response
-                                )
-                        else:
-                            # 🎴 通知前端显示抽牌器（保留用户体验）
-                            print(f"[Tarot Router] 🎴 通知前端显示抽牌器，参数: {func_args}")
-                            print(f"[Tarot Router] func_args 类型: {type(func_args)}")
-                            print(f"[Tarot Router] func_args.spread_type: {func_args.get('spread_type', 'NOT_FOUND')}")
-                            print(f"[Tarot Router] func_args.card_count: {func_args.get('card_count', 'NOT_FOUND')}")
-                            print(f"[Tarot Router] func_args.positions: {func_args.get('positions', 'NOT_FOUND')}")
-                            
-                            # 修复：将 RepeatedComposite 类型转换为普通列表
-                            # 因为 json.dumps(..., default=str) 会把它转换成字符串
-                            if 'positions' in func_args:
-                                positions = func_args['positions']
-                                if hasattr(positions, '__iter__') and not isinstance(positions, (str, dict)):
-                                    func_args['positions'] = list(positions)
-                            
-                            # 修复：将 card_count 转换为 int（Gemini 返回的是 float）
-                            if 'card_count' in func_args and isinstance(func_args['card_count'], float):
-                                func_args['card_count'] = int(func_args['card_count'])
-                            
-                            # 确保 func_args 完全可序列化（转换所有 protobuf 类型）
-                            serializable_args = json.loads(json.dumps(func_args, default=str))
-                            print(f"[Tarot Router] 序列化后的参数: {serializable_args}")
-                            print(f"[Tarot Router] positions 类型（序列化前）: {type(func_args.get('positions'))}")
-                            print(f"[Tarot Router] positions 值（序列化前）: {func_args.get('positions')}")
-                            print(f"[Tarot Router] positions 类型（序列化后）: {type(serializable_args.get('positions'))}")
-                            print(f"[Tarot Router] positions 值（序列化后）: {serializable_args.get('positions')}")
-                            yield f"data: {json.dumps({'draw_cards': serializable_args})}\n\n"
-                            
-                            # 告诉AI：已通知用户抽牌，等待用户完成
-                            # 注意：实际的抽牌和解读会在用户完成抽牌后由前端触发
-                            function_result = {
-                                "success": True,
-                                "message": "已通知用户打开抽牌器，用户正在选择塔罗牌。用户完成选牌后，我会立即为您解读。请稍候..."
-                            }
-                            
-                            print(f"[Tarot Router] ✅ 函数执行完成: {func_name}")
-                            print(f"[Tarot Router] 📋 等待用户在抽牌器中完成选牌...")
-                            
-                            # 告诉AI当前状态
-                            final_response = ""
-                            async for event2 in gemini_service.continue_with_function_result(
-                                updated_conv.messages,
-                                user,
-                                session_type=updated_conv.session_type,
-                                function_name=func_name,
-                                function_result=function_result
-                            ):
-                                if "content" in event2:
-                                    final_response += event2["content"]
-                                    yield f"data: {json.dumps({'content': event2['content']})}\n\n"
-                            
-                            # 保存AI的提示消息
-                            if final_response.strip():
-                                await ConversationService.add_message(
-                                    request.conversation_id,
-                                    MessageRole.ASSISTANT,
-                                    final_response
-                                )
+                        # 注意：移除严格的has_drawn_cards检查，允许用户多次抽牌（如追问）
+                        # 系统提示词会引导AI避免不必要的重复抽牌
+                        # 🎴 通知前端显示抽牌器（保留用户体验）
+                        print(f"[Tarot Router] 🎴 通知前端显示抽牌器，参数: {func_args}")
+                        print(f"[Tarot Router] func_args 类型: {type(func_args)}")
+                        print(f"[Tarot Router] func_args.spread_type: {func_args.get('spread_type', 'NOT_FOUND')}")
+                        print(f"[Tarot Router] func_args.card_count: {func_args.get('card_count', 'NOT_FOUND')}")
+                        print(f"[Tarot Router] func_args.positions: {func_args.get('positions', 'NOT_FOUND')}")
+                        
+                        # 修复：将 RepeatedComposite 类型转换为普通列表
+                        # 因为 json.dumps(..., default=str) 会把它转换成字符串
+                        if 'positions' in func_args:
+                            positions = func_args['positions']
+                            if hasattr(positions, '__iter__') and not isinstance(positions, (str, dict)):
+                                func_args['positions'] = list(positions)
+                        
+                        # 修复：将 card_count 转换为 int（Gemini 返回的是 float）
+                        if 'card_count' in func_args and isinstance(func_args['card_count'], float):
+                            func_args['card_count'] = int(func_args['card_count'])
+                        
+                        # 确保 func_args 完全可序列化（转换所有 protobuf 类型）
+                        serializable_args = json.loads(json.dumps(func_args, default=str))
+                        print(f"[Tarot Router] 序列化后的参数: {serializable_args}")
+                        print(f"[Tarot Router] positions 类型（序列化前）: {type(func_args.get('positions'))}")
+                        print(f"[Tarot Router] positions 值（序列化前）: {func_args.get('positions')}")
+                        print(f"[Tarot Router] positions 类型（序列化后）: {type(serializable_args.get('positions'))}")
+                        print(f"[Tarot Router] positions 值（序列化后）: {serializable_args.get('positions')}")
+                        yield f"data: {json.dumps({'draw_cards': serializable_args})}\n\n"
+                        
+                        # 告诉AI：已通知用户抽牌，等待用户完成
+                        # 注意：实际的抽牌和解读会在用户完成抽牌后由前端触发
+                        function_result = {
+                            "success": True,
+                            "message": "已通知用户打开抽牌器，用户正在选择塔罗牌。用户完成选牌后，我会立即为您解读。请稍候..."
+                        }
+                        
+                        print(f"[Tarot Router] ✅ 函数执行完成: {func_name}")
+                        print(f"[Tarot Router] 📋 等待用户在抽牌器中完成选牌...")
+                        
+                        # 告诉AI当前状态
+                        final_response = ""
+                        async for event2 in gemini_service.continue_with_function_result(
+                            updated_conv.messages,
+                            user,
+                            session_type=updated_conv.session_type,
+                            function_name=func_name,
+                            function_result=function_result
+                        ):
+                            if "content" in event2:
+                                final_response += event2["content"]
+                                yield f"data: {json.dumps({'content': event2['content']})}\n\n"
+                        
+                        # 保存AI的提示消息
+                        if final_response.strip():
+                            await ConversationService.add_message(
+                                request.conversation_id,
+                                MessageRole.ASSISTANT,
+                                final_response
+                            )
                     
                     elif func_name == "get_astrology_chart":
                         # 获取星盘数据
@@ -345,10 +316,8 @@ async def draw_cards(
         if not conversation:
             raise HTTPException(status_code=404, detail="对话不存在")
         
-        # 检查是否已经抽过牌
-        if conversation.has_drawn_cards:
-            raise HTTPException(status_code=400, detail="已经抽过牌，不能再次抽牌")
-        
+        # 注意：移除has_drawn_cards的严格检查，允许用户多次抽牌（追问）
+        # 系统提示词会引导AI避免不必要的重复抽牌
         # 抽牌
         cards = TarotService.draw_cards(draw_request)
         
@@ -361,7 +330,7 @@ async def draw_cards(
             draw_request=draw_request
         )
         
-        # 标记已抽牌
+        # 标记已抽牌（但这不会阻止后续抽牌）
         await ConversationService.mark_cards_drawn(conversation_id)
         
         return DrawCardsResponse(

@@ -501,10 +501,8 @@ async def draw_cards(
         if not conversation:
             raise HTTPException(status_code=404, detail="对话不存在")
         
-        # 检查是否已经抽过牌
-        if conversation.has_drawn_cards:
-            raise HTTPException(status_code=400, detail="已经抽过牌，不能再次抽牌")
-        
+        # 注意：移除has_drawn_cards的严格检查，允许用户多次抽牌（追问）
+        # 系统提示词会引导AI避免不必要的重复抽牌
         # 抽牌
         cards = TarotService.draw_cards(draw_request)
         
@@ -517,7 +515,7 @@ async def draw_cards(
             draw_request=draw_request
         )
         
-        # 标记已抽牌
+        # 标记已抽牌（但这不会阻止后续抽牌）
         await ConversationService.mark_cards_drawn(conversation_id)
         
         return DrawCardsResponse(
