@@ -11,10 +11,18 @@ from services.astrology_service import AstrologyService
 from services.tarot_service import TarotService
 from services.user_service import UserService
 import json
+import random
 
 router = APIRouter(prefix="/api/astrology", tags=["astrology"])
 
 gemini_service = GeminiService()
+
+# 预设的开场白模板
+GREETING_TEMPLATES = [
+    "{nickname}！今天有什么想问的？我可以帮你看星座、运势、星盘等任何问题～",
+    "{nickname}，你好呀！✨ 想聊聊你的星座、运势，还是想深入了解你的本命盘？",
+    "嗨，{nickname}！很高兴见到你～ 今天想探索什么呢？星座、塔罗还是星盘分析都可以哦！"
+]
 
 
 @router.post("/message")
@@ -26,6 +34,49 @@ async def send_message(request: SendMessageRequest):
         if not conversation:
             raise HTTPException(status_code=404, detail="对话不存在")
         
+        # 获取用户信息
+        user = None
+        try:
+            user = await UserService.get_user(conversation.user_id)
+        except:
+            pass
+        
+        # 🎯 检测首次对话（空消息）：直接返回预设开场白
+        if not request.content and len(conversation.messages) == 0:
+            print("[Astrology Router] 🌟 首次对话，使用预设开场白")
+            
+            # 获取用户昵称
+            nickname = "朋友"  # 默认称呼
+            if user and user.profile and user.profile.nickname:
+                nickname = user.profile.nickname
+            
+            # 随机选择一个开场白模板
+            greeting_template = random.choice(GREETING_TEMPLATES)
+            greeting_message = greeting_template.format(nickname=nickname)
+            
+            print(f"[Astrology Router] 开场白: {greeting_message}")
+            
+            # 生成流式响应
+            async def generate_greeting():
+                # 模拟流式输出（逐字输出）
+                for char in greeting_message:
+                    yield f"data: {json.dumps({'content': char}, ensure_ascii=False)}\n\n"
+                
+                # 完成标记
+                yield "data: [DONE]\n\n"
+            
+            # 保存开场白到对话
+            await ConversationService.add_message(
+                request.conversation_id,
+                MessageRole.ASSISTANT,
+                greeting_message
+            )
+            
+            return StreamingResponse(
+                generate_greeting(),
+                media_type="text/event-stream"
+            )
+        
         # 只有当用户发送了内容时才添加用户消息
         if request.content:
             conversation = await ConversationService.add_message(
@@ -33,13 +84,6 @@ async def send_message(request: SendMessageRequest):
                 MessageRole.USER,
                 request.content
             )
-        
-        # 获取用户信息
-        user = None
-        try:
-            user = await UserService.get_user(conversation.user_id)
-        except:
-            pass
         
         # 流式生成AI回复（使用Agent Loop）
         async def generate():
