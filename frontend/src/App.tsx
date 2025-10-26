@@ -7,6 +7,7 @@ import SessionButtons from './components/SessionButtons';
 import TarotCardDrawer from './components/TarotCardDrawer';
 import AuthModal from './components/AuthModal';
 import AstrologyProfileModal from './components/AstrologyProfileModal';
+import QuickReplies from './components/QuickReplies';
 import { useAuthStore } from './stores/useAuthStore';
 import { useConversationStore } from './stores/useConversationStore';
 import { userApi, conversationApi, tarotApi, astrologyApi } from './services/api';
@@ -100,22 +101,14 @@ const App: React.FC = () => {
 
       // 处理塔罗占卜
       if (sessionType === 'tarot') {
-        const greetings = [
-          '你好，我想进行一次塔罗占卜',
-          '晚上好，能帮我看看塔罗牌吗？',
-          '我想请教一些问题，可以帮我占卜一下吗？',
-          '最近有些迷茫，希望塔罗牌能给我一些指引',
-          '你好呀，想通过塔罗牌了解一下自己的运势'
-        ];
-        const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
-        
         setIsLoading(true);
         setStreamingMessage('');
 
         try {
+          // 发送空消息，让后端返回预设开场白
           await tarotApi.sendMessage(
             newConv.conversation_id,
-            randomGreeting,
+            '', // 空内容，触发后端返回预设开场白
             (chunk) => {
               setStreamingMessage((prev) => prev + chunk);
             },
@@ -147,8 +140,8 @@ const App: React.FC = () => {
           setCurrentConversation(updatedConv);
           setStreamingMessage('');
         } catch (error) {
-          console.error('发送初始消息失败:', error);
-          alert('发送失败，请重试');
+          console.error('塔罗AI开场失败:', error);
+          alert('初始化失败，请重试');
         } finally {
           setIsLoading(false);
         }
@@ -621,6 +614,12 @@ const App: React.FC = () => {
             {/* Input */}
             <div className="p-6 border-t border-dark-border">
               <div className="max-w-4xl mx-auto">
+                {/* Quick Replies */}
+                <QuickReplies
+                  conversationType={currentConversation.session_type}
+                  onReplyClick={handleSendMessage}
+                />
+                
                 <ChatInput
                   onSend={handleSendMessage}
                   disabled={isLoading}

@@ -10,10 +10,18 @@ from services.gemini_service import GeminiService
 from services.tarot_service import TarotService
 from services.user_service import UserService
 import json
+import random
 
 router = APIRouter(prefix="/api/tarot", tags=["tarot"])
 
 gemini_service = GeminiService()
+
+# 预设的开场白模板
+GREETING_TEMPLATES = [
+    "{nickname}！欢迎来到塔罗的神秘世界～ 今天有什么想问的吗？无论是爱情、事业还是人生困惑，塔罗都会为你指引方向。",
+    "{nickname}，你好呀！✨ 塔罗牌已经准备好了，想探索什么问题呢？感情、工作、还是内心的迷茫？",
+    "嗨，{nickname}！很高兴见到你～ 让塔罗牌为你揭示答案吧！你可以问我关于爱情、事业、决策等任何问题哦！"
+]
 
 
 @router.post("/message")
@@ -25,19 +33,55 @@ async def send_message(request: SendMessageRequest):
         if not conversation:
             raise HTTPException(status_code=404, detail="对话不存在")
         
-        # 添加用户消息
-        conversation = await ConversationService.add_message(
-            request.conversation_id,
-            MessageRole.USER,
-            request.content
-        )
-        
         # 获取用户信息（用于个性化回复）
         user = None
         try:
             user = await UserService.get_user(conversation.user_id)
         except:
             pass
+        
+        # 🎯 检测首次对话（空消息）：直接返回预设开场白
+        if not request.content and len(conversation.messages) == 0:
+            print("[Tarot Router] 🌟 首次对话，使用预设开场白")
+            
+            # 获取用户昵称
+            nickname = "朋友"  # 默认称呼
+            if user and user.profile and user.profile.nickname:
+                nickname = user.profile.nickname
+            
+            # 随机选择一个开场白模板
+            greeting_template = random.choice(GREETING_TEMPLATES)
+            greeting_message = greeting_template.format(nickname=nickname)
+            
+            print(f"[Tarot Router] 开场白: {greeting_message}")
+            
+            # 生成流式响应
+            async def generate_greeting():
+                # 模拟流式输出（逐字输出）
+                for char in greeting_message:
+                    yield f"data: {json.dumps({'content': char}, ensure_ascii=False)}\n\n"
+                
+                # 完成标记
+                yield "data: [DONE]\n\n"
+            
+            # 保存开场白到对话
+            await ConversationService.add_message(
+                request.conversation_id,
+                MessageRole.ASSISTANT,
+                greeting_message
+            )
+            
+            return StreamingResponse(
+                generate_greeting(),
+                media_type="text/event-stream"
+            )
+        
+        # 添加用户消息
+        conversation = await ConversationService.add_message(
+            request.conversation_id,
+            MessageRole.USER,
+            request.content
+        )
         
         # 流式生成AI回复（使用Agent Loop）
         async def generate():
