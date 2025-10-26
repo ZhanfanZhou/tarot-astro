@@ -7,7 +7,6 @@ import SessionButtons from './components/SessionButtons';
 import TarotCardDrawer from './components/TarotCardDrawer';
 import AuthModal from './components/AuthModal';
 import AstrologyProfileModal from './components/AstrologyProfileModal';
-import QuickReplies from './components/QuickReplies';
 import { useAuthStore } from './stores/useAuthStore';
 import { useConversationStore } from './stores/useConversationStore';
 import { userApi, conversationApi, tarotApi, astrologyApi } from './services/api';
@@ -614,12 +613,6 @@ const App: React.FC = () => {
             {/* Input */}
             <div className="p-6 border-t border-dark-border">
               <div className="max-w-4xl mx-auto">
-                {/* Quick Replies */}
-                <QuickReplies
-                  conversationType={currentConversation.session_type}
-                  onReplyClick={handleSendMessage}
-                />
-                
                 <ChatInput
                   onSend={handleSendMessage}
                   disabled={isLoading}
