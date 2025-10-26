@@ -8,7 +8,9 @@ import type {
   DrawCardsRequest,
 } from '@/types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// 默认使用同源路径，开发环境下由 Vite 代理转发到后端，避免跨域与预检请求
+// 如需直连后端，请在 .env 中设置 VITE_API_URL
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -20,7 +22,7 @@ const api = axios.create({
 // 用户相关API
 export const userApi = {
   createGuest: async (profile?: UserProfile): Promise<User> => {
-    const response = await api.post('/api/users/guest', profile);
+    const response = await api.post('/api/users/guest', profile || {});
     return response.data;
   },
 
@@ -28,7 +30,7 @@ export const userApi = {
     const response = await api.post('/api/users/register', {
       username,
       password,
-      profile,
+      ...(profile ? { profile } : {}),  // Only include profile if it's defined
     });
     return response.data;
   },

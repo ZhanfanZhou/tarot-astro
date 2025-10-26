@@ -122,15 +122,59 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, isThinking = false }
           
           {/* 显示抽到的牌 */}
           {message.tarot_cards && message.tarot_cards.length > 0 && (
-            <div className="mt-3 pt-3 border-t border-dark-border">
-              <p className="text-sm font-semibold mb-2">抽到的牌：</p>
-              <div className="space-y-1">
+            <div className="mt-4 pt-4 border-t border-dark-border">
+              <p className="text-sm font-semibold mb-3 text-purple-300">✨ 抽到的牌</p>
+              <div className="flex flex-wrap gap-3">
                 {message.tarot_cards.map((card, idx) => (
-                  <div key={idx} className="text-sm">
-                    <span className="font-medium">
-                      {message.draw_request?.positions?.[idx] || `第${idx + 1}张`}:
-                    </span>{' '}
-                    {card.card_name} {card.reversed ? '（逆位）' : '（正位）'}
+                  <div
+                    key={idx}
+                    className="relative group"
+                    style={{ width: '120px' }}
+                  >
+                    {/* 卡牌容器 */}
+                    <div
+                      className={`
+                        relative w-full aspect-[2/3] rounded-lg overflow-hidden
+                        bg-gradient-to-br shadow-lg
+                        border-2 transition-all duration-300
+                        group-hover:scale-105 group-hover:shadow-xl
+                        ${
+                          card.reversed
+                            ? 'from-indigo-600 to-purple-700 border-purple-400'
+                            : 'from-purple-500 to-pink-600 border-pink-400'
+                        }
+                      `}
+                    >
+                      {/* 逆位标记 */}
+                      {card.reversed && (
+                        <div className="absolute top-1 right-1 bg-purple-900/80 text-white text-xs px-2 py-0.5 rounded">
+                          逆位
+                        </div>
+                      )}
+                      
+                      {/* 卡牌内容 */}
+                      <div className="absolute inset-0 flex flex-col items-center justify-center p-2 text-center">
+                        {/* 装饰性图标 */}
+                        <div className="text-3xl mb-2 opacity-80">
+                          {card.reversed ? '🔮' : '✨'}
+                        </div>
+                        
+                        {/* 卡牌名称 */}
+                        <div className="text-white font-bold text-sm leading-tight break-words">
+                          {card.card_name}
+                        </div>
+                      </div>
+                      
+                      {/* 边框装饰 */}
+                      <div className="absolute inset-0 border-2 border-white/20 rounded-lg pointer-events-none" />
+                    </div>
+                    
+                    {/* 位置标签 */}
+                    {message.draw_request?.positions?.[idx] && (
+                      <div className="mt-1 text-xs text-center text-gray-400 font-medium">
+                        {message.draw_request.positions[idx]}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

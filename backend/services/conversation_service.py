@@ -120,6 +120,19 @@ class ConversationService:
     async def delete_conversation(conversation_id: str):
         """删除对话"""
         await StorageService.delete_conversation(conversation_id)
+    
+    @staticmethod
+    def get_latest_tarot_cards(conversation: Conversation) -> tuple[Optional[List[TarotCard]], Optional[DrawCardsRequest]]:
+        """
+        从对话历史中获取最近的抽牌结果
+        返回: (tarot_cards, draw_request) 元组
+        """
+        # 从后往前遍历消息，找到最近的包含抽牌结果的消息
+        for message in reversed(conversation.messages):
+            if message.tarot_cards and len(message.tarot_cards) > 0:
+                return (message.tarot_cards, message.draw_request)
+        
+        return (None, None)
 
 
 

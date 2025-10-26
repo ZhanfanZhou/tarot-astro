@@ -25,6 +25,23 @@ GREETING_TEMPLATES = [
 ]
 
 
+async def should_attach_tarot_cards(conversation_id: str) -> bool:
+    """
+    检查当前是否应该在AI回复中附加抽牌结果
+    规则：如果用户最后一条消息是"请根据抽牌结果进行解读"，则附加
+    """
+    conversation = await ConversationService.get_conversation(conversation_id)
+    if not conversation or not conversation.messages:
+        return False
+    
+    # 找到最后一条用户消息
+    for message in reversed(conversation.messages):
+        if message.role == MessageRole.USER:
+            return message.content == "请根据抽牌结果进行解读"
+    
+    return False
+
+
 @router.post("/message")
 async def send_message(request: SendMessageRequest):
     """发送消息并获取AI流式回复（星座咨询，支持Function Calling）"""
@@ -114,10 +131,19 @@ async def send_message(request: SendMessageRequest):
                     
                     # 保存AI的文本回复（如果有）
                     if full_text_response.strip():
+                        # 检查是否需要附加抽牌结果
+                        tarot_cards_to_attach = None
+                        draw_request_to_attach = None
+                        if await should_attach_tarot_cards(request.conversation_id):
+                            latest_conv = await ConversationService.get_conversation(request.conversation_id)
+                            tarot_cards_to_attach, draw_request_to_attach = ConversationService.get_latest_tarot_cards(latest_conv)
+                        
                         await ConversationService.add_message(
                             request.conversation_id,
                             MessageRole.ASSISTANT,
-                            full_text_response
+                            full_text_response,
+                            tarot_cards=tarot_cards_to_attach,
+                            draw_request=draw_request_to_attach
                         )
                     
                     # 执行函数：获取星盘数据
@@ -211,10 +237,19 @@ async def send_message(request: SendMessageRequest):
                         
                         # 保存AI的最终解读
                         if final_response.strip():
+                            # 检查是否需要附加抽牌结果
+                            tarot_cards_to_attach = None
+                            draw_request_to_attach = None
+                            if await should_attach_tarot_cards(request.conversation_id):
+                                latest_conv = await ConversationService.get_conversation(request.conversation_id)
+                                tarot_cards_to_attach, draw_request_to_attach = ConversationService.get_latest_tarot_cards(latest_conv)
+                            
                             await ConversationService.add_message(
                                 request.conversation_id,
                                 MessageRole.ASSISTANT,
-                                final_response
+                                final_response,
+                                tarot_cards=tarot_cards_to_attach,
+                                draw_request=draw_request_to_attach
                             )
                     
                     elif func_name == "draw_tarot_cards":
@@ -244,10 +279,19 @@ async def send_message(request: SendMessageRequest):
                                     yield f"data: {json.dumps({'content': event2['content']})}\n\n"
                             
                             if final_response.strip():
+                                # 检查是否需要附加抽牌结果
+                                tarot_cards_to_attach = None
+                                draw_request_to_attach = None
+                                if await should_attach_tarot_cards(request.conversation_id):
+                                    latest_conv = await ConversationService.get_conversation(request.conversation_id)
+                                    tarot_cards_to_attach, draw_request_to_attach = ConversationService.get_latest_tarot_cards(latest_conv)
+                                
                                 await ConversationService.add_message(
                                     request.conversation_id,
                                     MessageRole.ASSISTANT,
-                                    final_response
+                                    final_response,
+                                    tarot_cards=tarot_cards_to_attach,
+                                    draw_request=draw_request_to_attach
                                 )
                         else:
                             # 🎴 通知前端显示抽牌器（保留用户体验）
@@ -283,10 +327,13 @@ async def send_message(request: SendMessageRequest):
                             print(f"[Astrology Router] ✅ 函数执行完成: {func_name}")
                             print(f"[Astrology Router] 📋 等待用户在抽牌器中完成选牌...")
                             
+                            # 获取最新对话状态
+                            current_conv = await ConversationService.get_conversation(request.conversation_id)
+                            
                             # 告诉AI当前状态
                             final_response = ""
                             async for event2 in gemini_service.continue_with_function_result(
-                                updated_conv.messages,
+                                current_conv.messages,
                                 user,
                                 session_type=SessionType.ASTROLOGY,
                                 function_name=func_name,
@@ -298,10 +345,19 @@ async def send_message(request: SendMessageRequest):
                             
                             # 保存AI的提示消息
                             if final_response.strip():
+                                # 检查是否需要附加抽牌结果
+                                tarot_cards_to_attach = None
+                                draw_request_to_attach = None
+                                if await should_attach_tarot_cards(request.conversation_id):
+                                    latest_conv = await ConversationService.get_conversation(request.conversation_id)
+                                    tarot_cards_to_attach, draw_request_to_attach = ConversationService.get_latest_tarot_cards(latest_conv)
+                                
                                 await ConversationService.add_message(
                                     request.conversation_id,
                                     MessageRole.ASSISTANT,
-                                    final_response
+                                    final_response,
+                                    tarot_cards=tarot_cards_to_attach,
+                                    draw_request=draw_request_to_attach
                                 )
                     
                     elif func_name == "request_user_profile":
@@ -339,10 +395,19 @@ async def send_message(request: SendMessageRequest):
                         
                         # 保存AI的最终回复
                         if final_response.strip():
+                            # 检查是否需要附加抽牌结果
+                            tarot_cards_to_attach = None
+                            draw_request_to_attach = None
+                            if await should_attach_tarot_cards(request.conversation_id):
+                                latest_conv = await ConversationService.get_conversation(request.conversation_id)
+                                tarot_cards_to_attach, draw_request_to_attach = ConversationService.get_latest_tarot_cards(latest_conv)
+                            
                             await ConversationService.add_message(
                                 request.conversation_id,
                                 MessageRole.ASSISTANT,
-                                final_response
+                                final_response,
+                                tarot_cards=tarot_cards_to_attach,
+                                draw_request=draw_request_to_attach
                             )
                 
                 elif "done" in event:
@@ -350,10 +415,19 @@ async def send_message(request: SendMessageRequest):
                     if not has_function_call:
                         # 没有函数调用，保存AI回复
                         if full_text_response.strip():
+                            # 检查是否需要附加抽牌结果
+                            tarot_cards_to_attach = None
+                            draw_request_to_attach = None
+                            if await should_attach_tarot_cards(request.conversation_id):
+                                latest_conv = await ConversationService.get_conversation(request.conversation_id)
+                                tarot_cards_to_attach, draw_request_to_attach = ConversationService.get_latest_tarot_cards(latest_conv)
+                            
                             await ConversationService.add_message(
                                 request.conversation_id,
                                 MessageRole.ASSISTANT,
-                                full_text_response
+                                full_text_response,
+                                tarot_cards=tarot_cards_to_attach,
+                                draw_request=draw_request_to_attach
                             )
             
             yield "data: [DONE]\n\n"

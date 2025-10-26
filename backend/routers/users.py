@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Body
 from models import User, UserProfile, UserRegister, UserLogin, UserType
 from services.user_service import UserService
 
@@ -6,7 +6,7 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 
 
 @router.post("/guest", response_model=User)
-async def create_guest(profile: UserProfile = None):
+async def create_guest(profile: UserProfile = Body(default=None)):
     """创建游客用户"""
     try:
         user = await UserService.create_guest_user(profile)

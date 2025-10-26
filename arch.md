@@ -57,7 +57,9 @@
 - `User` - 用户模型（包含 ID、类型、用户名、密码哈希、个人资料）
 - `UserProfile` - 用户资料（昵称、性别、出生日期）
 - `Conversation` - 对话模型（包含消息列表、会话类型、完成状态）
-- `Message` - 消息模型（角色、内容、时间戳、塔罗牌结果）
+- `Message` - 消息模型（角色、内容、时间戳、塔罗牌结果、抽牌请求）
+  - `tarot_cards`: 抽到的牌列表（可选，用于在对话中显示抽牌结果）
+  - `draw_request`: 抽牌请求信息（可选，包含牌阵类型、牌数、位置含义）
 - `TarotCard` - 塔罗牌模型（牌ID、牌名、是否逆位）
 - `DrawCardsRequest` - 抽牌请求（牌阵类型、牌数、位置含义）
 
@@ -65,6 +67,7 @@
 - 使用 Pydantic BaseModel 实现数据验证
 - 使用 Enum 定义枚举类型（UserType, Gender, MessageRole, SessionType, TarotSpread）
 - 使用 Field 添加默认值和验证规则
+- **抽牌结果显示机制**：AI解读消息会附加 `tarot_cards` 和 `draw_request` 字段，前端根据这些字段在对话窗口中渲染美化的卡牌UI
 
 #### 1.2 配置层 (config.py)
 
@@ -140,7 +143,12 @@ update_user_profile → get_user → save_user
 - `create_conversation(user_id, session_type)` - 创建新对话
 - `get_conversation(conversation_id)` - 获取对话
 - `get_user_conversations(user_id)` - 获取用户的所有对话
-- `add_message(conversation_id, role, content, ...)` - 添加消息
+- `add_message(conversation_id, role, content, tarot_cards, draw_request)` - 添加消息
+  - 支持附加 `tarot_cards` 和 `draw_request` 参数
+  - 用于在AI解读消息中包含抽牌结果
+- `get_latest_tarot_cards(conversation)` - 从对话历史中获取最近的抽牌结果
+  - 返回 `(tarot_cards, draw_request)` 元组
+  - 用于在AI回复时附加抽牌数据
 - `update_conversation_title(conversation_id, title)` - 更新标题
 - `mark_cards_drawn(conversation_id)` - 标记已抽牌
 - `mark_completed(conversation_id)` - 标记已完成
@@ -461,8 +469,13 @@ POST /api/tarot/draw
 
 **配置：**
 - CORS 中间件（允许前端跨域请求）
-- 路由注册（users, conversations, tarot）
+- 路由注册（users, conversations, tarot, astrology）
 - 健康检查端点
+
+**开发环境 CORS/代理机制：**
+- 前端通过 Vite 代理将同源 `/api/*` 请求转发到后端 `http://localhost:8000`
+- 前端 `services/api.ts` 默认 `API_BASE_URL = ''`，优先使用同源，避免预检请求 400 问题
+- 如需绕过代理直连后端，可在 `.env` 设置 `VITE_API_URL`，例如 `VITE_API_URL=http://localhost:8000`
 
 **端点：**
 - `GET /` - 根路径，返回API信息
@@ -917,7 +930,18 @@ choice (选择) → guest (游客)
 4. 清空 pendingDrawRequest
 5. 延迟0.5秒后自动发送"请根据抽牌结果进行解读"（USER 消息，界面不显示）
 6. 触发 AI 流式解读
+7. 后端检测到"请根据抽牌结果进行解读"消息，在AI回复时附加 tarot_cards 数据
+8. 前端渲染带有抽牌结果的AI消息，显示美化的卡牌UI
 ```
+
+**抽牌结果显示机制：**
+- 后端在保存AI解读消息时，检测用户最后一条消息是否为"请根据抽牌结果进行解读"
+- 如果是，从对话历史中获取最近的抽牌结果（通过 `get_latest_tarot_cards()`）
+- 将抽牌结果附加到AI消息的 `tarot_cards` 和 `draw_request` 字段
+- 前端 ChatMessage 组件检测到消息包含 `tarot_cards` 字段时，渲染美化的卡牌UI
+- 每张卡片显示：渐变色背景、卡牌名称、正逆位标记、位置标签（如"过去"、"现在"、"未来"）
+- 正位卡片使用紫粉渐变（from-purple-500 to-pink-600），逆位卡片使用靛紫渐变（from-indigo-600 to-purple-700）
+- 鼠标悬停时卡片放大，增强交互体验
 
 **UI 布局：**
 ```

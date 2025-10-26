@@ -1,8 +1,181 @@
-**文档版本：** 1.3.8  
-**最后更新：** 2025-10-21  
-**维护者：** Cursor AI Assistant
+## 2025-10-26 - 修复游客登录和注册失败 400 错误
 
-# 更新日志
+**问题描述：**
+1. 游客登录：`OPTIONS /api/users/guest` 返回 400 Bad Request
+2. 用户注册：`POST /api/users/register` 返回 400 Bad Request
+
+**根本原因：**
+
+**问题1（游客登录）：**
+- 前端调用 `api.post('/api/users/guest', profile)` 时，如果 `profile` 是 `undefined`，axios 序列化为不规范的请求体
+- FastAPI Pydantic 验证失败，CORS 预检也返回 400
+
+**问题2（用户注册）：**
+- bcrypt 与 passlib 版本不兼容
+- passlib 尝试读取 bcrypt 版本时出错（`AttributeError: module 'bcrypt' has no attribute '__about__'`）
+- 导致密码哈希失败，返回误导的错误信息："password cannot be longer than 72 bytes"
+
+**修复方案：**
+
+**1. 前端修复（frontend/src/services/api.ts）**
+- 游客登录：改为 `api.post('/api/users/guest', profile || {})` - 发送空对象而非 undefined
+- 注册：改为 `api.post('/api/users/register', { username, password, ...(profile ? { profile } : {}) })` - 条件性包含 profile
+
+**2. 后端修复（backend/routers/users.py）**
+- 游客登录：改为 `profile: UserProfile = Body(default=None)` - 显式声明可选参数
+- 这样 FastAPI 能正确处理空或 null 的请求体
+
+**3. 依赖修复**
+- 重新安装兼容的版本：
+  ```bash
+  pip uninstall -y bcrypt passlib
+  pip install passlib==1.7.4 bcrypt==4.1.2
+  ```
+
+**测试验证：**
+- ✅ 游客登录成功，返回 200 OK
+- ✅ 用户注册成功，返回 200 OK
+- ✅ 注册用户登录成功，返回 200 OK
+- ✅ CORS 预检请求返回 200 OK
+
+**修改的文件：**
+- `frontend/src/services/api.ts` - 修复 createGuest 和 register 调用
+- `backend/routers/users.py` - 修复 create_guest 参数处理
+
+**编码经验（记录到 .cursorrules）：**
+已添加 Lesson 11 - FastAPI 可选 Pydantic 模型参数处理
+
+---
+
+
+## 2025-10-26 - 修复游客登录预检请求 400（CORS/代理配置）
+
+问题：前端调用 `POST /api/users/guest` 显示预检 `OPTIONS /api/users/guest` 返回 400，导致游客登录失败。
+
+原因：前端默认直连 `http://localhost:8000` 触发跨域预检；后端虽然已开启 CORS，但某些场景下预检仍被上游或非预期中间件拒绝。开发环境下应尽量走同源代理以避免预检。
+
+修复：
+- 前端 `services/api.ts` 将 `API_BASE_URL` 默认改为 `''`，通过 Vite 代理将同源 `/api/*` 请求转发到后端。
+- 保留对 `VITE_API_URL` 的支持，若需直连后端可在 `.env` 设置。
+- 添加 `src/vite-env.d.ts` 引用，修复 TypeScript 对 `import.meta.env` 的类型报错。
+
+文档：
+- 更新 `arch.md` 增加“开发环境 CORS/代理机制”说明。
+
+影响：
+- 开发环境下游客登录与所有 API 调用不再触发跨域预检，避免 400。
+
+改动文件：
+- 修改：`frontend/src/services/api.ts`
+- 新增：`frontend/src/vite-env.d.ts`
+- 更新：`arch.md`
+
+---
+
+## 2025-10-26 - 优化塔罗抽牌后的界面显示
+
+**问题描述：**
+抽完牌后，抽牌结果只在抽牌弹窗中显示图片，对话界面只有文字描述，用户无法在对话历史中看到抽到的牌的视觉展示。
+
+**优化目标：**
+在对话窗口中显示抽到的牌的美化卡牌UI，提升用户体验。
+
+**实现内容：**
+
+**1. 后端实现**
+
+**1.1 修复 bug (backend/routers/tarot.py, astrology.py)**
+- 修复 `updated_conv` 变量未定义就使用的问题（第166行）
+- 在使用前先获取最新对话状态：`current_conv = await ConversationService.get_conversation(request.conversation_id)`
+
+**1.2 新增辅助函数**
+- 添加 `should_attach_tarot_cards(conversation_id)` 函数
+  - 检查用户最后一条消息是否为"请根据抽牌结果进行解读"
+  - 返回布尔值，决定是否在AI回复中附加抽牌结果
+
+**1.3 扩展 ConversationService (backend/services/conversation_service.py)**
+- 新增 `get_latest_tarot_cards(conversation)` 方法
+  - 从对话历史中获取最近的抽牌结果
+  - 返回 `(tarot_cards, draw_request)` 元组
+
+**1.4 修改消息保存逻辑**
+- 在所有保存 ASSISTANT 消息的地方添加检查逻辑：
+  ```python
+  if await should_attach_tarot_cards(request.conversation_id):
+      latest_conv = await ConversationService.get_conversation(request.conversation_id)
+      tarot_cards_to_attach, draw_request_to_attach = ConversationService.get_latest_tarot_cards(latest_conv)
+  
+  await ConversationService.add_message(
+      request.conversation_id,
+      MessageRole.ASSISTANT,
+      response_text,
+      tarot_cards=tarot_cards_to_attach,
+      draw_request=draw_request_to_attach
+  )
+  ```
+- 修改位置：
+  - `backend/routers/tarot.py`：3处（函数调用后的回复、无函数调用的回复）
+  - `backend/routers/astrology.py`：6处（包含获取星盘、抽牌、请求资料等场景）
+
+**2. 前端实现 (frontend/src/components/ChatMessage.tsx)**
+
+**2.1 美化卡牌UI设计**
+- 将文字列表改为视觉化的卡牌展示
+- 每张卡片包含：
+  - 渐变色背景（2:3 宽高比）
+  - 装饰性图标（正位：✨，逆位：🔮）
+  - 卡牌名称（居中显示）
+  - 逆位标记（右上角徽章）
+  - 位置标签（底部，如"过去"、"现在"、"未来"）
+
+**2.2 视觉样式**
+- 正位卡片：紫粉渐变（`from-purple-500 to-pink-600`）+ 粉色边框
+- 逆位卡片：靛紫渐变（`from-indigo-600 to-purple-700`）+ 紫色边框
+- 悬停效果：放大（scale: 1.05）+ 增强阴影
+- 边框装饰：内外双层边框，增加质感
+- 卡片尺寸：120px 宽度，自动计算高度（aspect-[2/3]）
+
+**2.3 布局**
+- 使用 `flex flex-wrap gap-3` 实现响应式网格布局
+- 支持多张牌并排显示，自动换行
+- 标题显示"✨ 抽到的牌"，使用紫色高亮
+
+**技术细节：**
+```typescript
+// 前端检测逻辑
+{message.tarot_cards && message.tarot_cards.length > 0 && (
+  <div className="mt-4 pt-4 border-t border-dark-border">
+    <p className="text-sm font-semibold mb-3 text-purple-300">✨ 抽到的牌</p>
+    <div className="flex flex-wrap gap-3">
+      {message.tarot_cards.map((card, idx) => (
+        // 渲染美化的卡牌UI
+      ))}
+    </div>
+  </div>
+)}
+```
+
+**改动文件清单：**
+- `backend/routers/tarot.py` - 修复bug + 添加抽牌结果附加逻辑
+- `backend/routers/astrology.py` - 同步修复 + 添加抽牌结果附加逻辑
+- `backend/services/conversation_service.py` - 新增 `get_latest_tarot_cards()` 方法
+- `frontend/src/components/ChatMessage.tsx` - 实现美化的卡牌UI
+- `arch.md` - 更新架构文档，记录抽牌结果显示机制
+
+**用户体验提升：**
+- ✅ 抽牌结果在对话历史中可视化展示
+- ✅ 美观的卡牌UI，增强沉浸感
+- ✅ 正逆位一目了然，颜色区分
+- ✅ 位置含义清晰标注
+- ✅ 支持多种牌阵布局
+
+**注意事项：**
+- 抽牌弹窗保持原样，不受影响
+- 只有AI解读消息会显示卡牌UI
+- SYSTEM 消息仍然不显示（保持原设计）
+- 同时支持塔罗AI和星座AI的抽牌功能
+
+---
 
 ## 2025-10-21 - 塔罗AI开场白统一优化
 
