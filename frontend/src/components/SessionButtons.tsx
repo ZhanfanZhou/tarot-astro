@@ -18,7 +18,7 @@ const SessionButtons: React.FC<SessionButtonsProps> = ({
       label: '塔罗占卜',
       description: '探索命运的奥秘',
       gradient: 'from-purple-600 via-pink-500 to-rose-500',
-      glowColor: 'rgba(139, 92, 246, 0.5)',
+      glowColor: 'rgba(139, 0, 0, 0.8)', // 暗红色边缘光晕
     },
     {
       type: 'astrology' as SessionType,
@@ -26,7 +26,7 @@ const SessionButtons: React.FC<SessionButtonsProps> = ({
       label: '占星',
       description: '聆听星辰的指引',
       gradient: 'from-blue-600 via-cyan-500 to-teal-500',
-      glowColor: 'rgba(59, 130, 246, 0.5)',
+      glowColor: 'rgba(218, 165, 32, 0.8)', // 暗金色边缘光晕
       comingSoon: false,
     },
     {
@@ -66,16 +66,6 @@ const SessionButtons: React.FC<SessionButtonsProps> = ({
               }
             `}
           >
-            {/* 背景光效 */}
-            {!button.comingSoon && (
-              <motion.div
-                className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                style={{
-                  background: `radial-gradient(circle at center, ${button.glowColor} 0%, transparent 70%)`,
-                }}
-              />
-            )}
-
             {/* 图标容器 */}
             <motion.div
               className={`
@@ -85,9 +75,9 @@ const SessionButtons: React.FC<SessionButtonsProps> = ({
               animate={{
                 boxShadow: !button.comingSoon
                   ? [
-                      `0 0 20px ${button.glowColor}`,
-                      `0 0 40px ${button.glowColor}`,
-                      `0 0 20px ${button.glowColor}`,
+                      `0 0 0 2px ${button.glowColor}, 0 0 15px 2px ${button.glowColor}`,
+                      `0 0 0 3px ${button.glowColor}, 0 0 25px 4px ${button.glowColor}`,
+                      `0 0 0 2px ${button.glowColor}, 0 0 15px 2px ${button.glowColor}`,
                     ]
                   : undefined,
               }}
@@ -106,10 +96,10 @@ const SessionButtons: React.FC<SessionButtonsProps> = ({
                 <span className="text-5xl relative z-10">{button.icon}</span>
               )}
 
-              {/* 旋转光环 */}
+              {/* 边缘光晕环 */}
               {!button.comingSoon && (
                 <motion.div
-                  className="absolute inset-0 rounded-2xl border-2 border-white/30"
+                  className="absolute inset-0 rounded-2xl"
                   animate={{ rotate: 360 }}
                   transition={{
                     duration: 10,
@@ -117,8 +107,9 @@ const SessionButtons: React.FC<SessionButtonsProps> = ({
                     ease: 'linear',
                   }}
                   style={{
-                    background: `conic-gradient(from 0deg, transparent, ${button.glowColor}, transparent)`,
-                    filter: 'blur(8px)',
+                    background: `conic-gradient(from 0deg, transparent 60%, ${button.glowColor} 80%, transparent 100%)`,
+                    filter: 'blur(6px)',
+                    opacity: 0.6,
                   }}
                 />
               )}

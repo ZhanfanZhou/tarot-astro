@@ -57,7 +57,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           className="flex items-center gap-3 mb-4"
         >
           <motion.div
-            className="w-10 h-10 rounded-xl bg-mystic-gradient flex items-center justify-center"
+            className="w-10 h-10 rounded-xl bg-mystic-gradient flex items-center justify-center overflow-hidden"
             animate={{
               boxShadow: [
                 '0 0 20px rgba(139, 92, 246, 0.3)',
@@ -70,7 +70,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               repeat: Infinity,
             }}
           >
-            <span className="text-2xl">🔮</span>
+            <img src="/assets/icon.png" alt="Logo" className="w-full h-full object-cover" />
           </motion.div>
           <div>
             <h1 className="font-display font-bold text-lg mystic-text">小x的秘密圣殿</h1>
