@@ -1,3 +1,60 @@
+## 2025-10-29 - 更新图标和光晕效果
+
+**功能描述：**
+优化应用中的图标显示，并将光晕特效从整体光晕改为更精致的边缘光晕，提升视觉效果。
+
+**改动内容：**
+
+**1. 更新应用主标题图标 (frontend/src/components/Sidebar.tsx)**
+- ✅ 将"小x的秘密圣殿"主标题旁的 emoji 🔮 替换为图片
+- ✅ 使用 `/assets/icon.png` 作为应用 Logo
+- ✅ 添加 `overflow-hidden` 确保图片完整显示
+
+**2. 更新会话类型图标 (多个文件)**
+- ✅ 塔罗占卜图标：使用 `/assets/avatar_tarot.png`
+  - SessionButtons.tsx（按钮图标）
+  - Sidebar.tsx（会话列表图标）
+  - App.tsx（会话标题栏图标）
+- ✅ 星座图标：使用 `/assets/avatar.png`
+  - SessionButtons.tsx（按钮图标）
+  - Sidebar.tsx（会话列表图标）
+  - App.tsx（会话标题栏图标）
+
+**3. 更新 AI 聊天头像 (frontend/src/components/ChatMessage.tsx)**
+- ✅ 新增 `sessionType` 参数，根据会话类型显示不同头像
+- ✅ 塔罗 AI 头像：`/assets/avatar_tarot.png`
+- ✅ 星座 AI 头像：`/assets/avatar.png`
+- ✅ 在思考状态和正常消息中都正确显示对应头像
+
+**4. 优化光晕特效 (frontend/src/components/SessionButtons.tsx)**
+- ✅ 将整体光晕改为边缘光晕效果
+- ✅ 塔罗占卜光晕颜色：暗红色 `rgba(139, 0, 0, 0.8)`
+- ✅ 星座光晕颜色：暗金色 `rgba(218, 165, 32, 0.8)`
+- ✅ 使用多层 boxShadow 实现边缘光晕：
+  ```tsx
+  boxShadow: [
+    '0 0 0 2px ${glowColor}, 0 0 15px 2px ${glowColor}',
+    '0 0 0 3px ${glowColor}, 0 0 25px 4px ${glowColor}',
+    '0 0 0 2px ${glowColor}, 0 0 15px 2px ${glowColor}',
+  ]
+  ```
+- ✅ 调整旋转光环的 conic-gradient 参数，减少覆盖范围
+- ✅ 移除背景整体光效，保留边缘光晕和旋转光环
+
+**视觉效果：**
+- 🎨 统一的图标风格，使用实际图片替代 emoji
+- ✨ 更精致的边缘光晕效果，突出按钮边缘
+- 🌈 暗红色（塔罗）和暗金色（星座）的主题色光晕
+- 🔄 保留旋转光环效果，增加神秘感
+
+**技术细节：**
+- 图片路径统一使用 `/assets/` 前缀
+- 边缘光晕使用多层 boxShadow 叠加实现
+- 旋转光环调整为 60%-80% 范围的 conic-gradient
+- ChatMessage 组件支持根据会话类型动态切换头像
+
+---
+
 ## 2025-10-28 - 恢复快速回复功能并更新神秘风格
 
 **功能描述：**
