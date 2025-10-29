@@ -2,6 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&display=swap');
+@import './styles/mystic-background.css';
+
 * {
   margin: 0;
   padding: 0;
@@ -14,33 +17,119 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #0F0F0F;
+  /* 移除原有背景，使用自定义背景图组件 */
+  background: #0A0A0F;
   color: #FFFFFF;
+  position: relative;
+  overflow: hidden;
 }
 
 #root {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+  position: relative;
+  /* 移除 z-index，让背景自然显示 */
 }
 
 /* 自定义滚动条 */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: rgba(26, 26, 37, 0.5);
+  border-radius: 5px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #404040;
-  border-radius: 4px;
+  background: linear-gradient(135deg, #6D28D9 0%, #8B5CF6 100%);
+  border-radius: 5px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #525252;
+  background: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
+}
+
+/* 神秘光效 */
+.mystic-glow {
+  position: relative;
+}
+
+.mystic-glow::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  background: linear-gradient(45deg, #8B5CF6, #EC4899, #8B5CF6);
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 0.3s;
+  z-index: -1;
+  filter: blur(10px);
+}
+
+.mystic-glow:hover::after {
+  opacity: 0.7;
+}
+
+/* 卡片悬停效果 */
+.card-hover {
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.card-hover:hover {
+  transform: translateY(-5px) scale(1.02);
+  box-shadow: 0 20px 60px rgba(139, 92, 246, 0.4);
+}
+
+/* 神秘文字效果 */
+.mystic-text {
+  background: linear-gradient(135deg, #FFD700, #FFF4A3, #FFD700);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmerText 3s ease-in-out infinite;
+}
+
+@keyframes shimmerText {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+/* 加载动画 - 神秘符号 */
+.mystic-loader {
+  width: 60px;
+  height: 60px;
+  position: relative;
+}
+
+.mystic-loader::before,
+.mystic-loader::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  border-top-color: #8B5CF6;
+  animation: spin 1.5s linear infinite;
+}
+
+.mystic-loader::after {
+  border-top-color: #EC4899;
+  animation-duration: 2s;
+  animation-direction: reverse;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* 动画 */
@@ -57,11 +146,46 @@ body {
   animation: shimmer 2s infinite;
   background: linear-gradient(
     to right,
-    #171717 0%,
-    #262626 50%,
-    #171717 100%
+    rgba(23, 23, 26, 0.8) 0%,
+    rgba(35, 35, 48, 0.8) 50%,
+    rgba(23, 23, 26, 0.8) 100%
   );
   background-size: 1000px 100%;
+}
+
+/* 玻璃态效果 */
+.glass-morphism {
+  background: rgba(19, 19, 26, 0.6);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+/* 金色边框动画 */
+.gold-border-animate {
+  position: relative;
+  overflow: hidden;
+}
+
+.gold-border-animate::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  padding: 2px;
+  background: linear-gradient(45deg, transparent, #FFD700, transparent);
+  background-size: 200% 200%;
+  -webkit-mask: 
+    linear-gradient(#fff 0 0) content-box, 
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: borderRotate 3s linear infinite;
+}
+
+@keyframes borderRotate {
+  to {
+    background-position: 200% center;
+  }
 }
 
 

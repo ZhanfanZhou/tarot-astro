@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+.test-bg {
+  position: fixed;
+  inset: 0;
+  background-image: url('/assets/bg.png');
+  background-size: cover;
+  background-position: center;
+  z-index: -1;
+}
+.content {
+  position: relative;
+  z-index: 1;
+  color: white;
+  padding: 50px;
+  font-size: 30px;
+  text-shadow: 2px 2px 4px black;
+}
+</style>
+</head>
+<body>
+<div class="test-bg"></div>
+<div class="content">
+  测试背景图 - 如果你能看到红色帷幕背景，说明图片路径是正确的
+</div>
+</body>
+</html>

@@ -1,0 +1,180 @@
+/**
+ * 神秘背景样式
+ * 包含背景图和各种动态效果
+ */
+
+.mystic-background {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+}
+
+/* 静态背景图 */
+.mystic-background__image {
+  position: absolute;
+  inset: 0;
+  background-image: url('/assets/bg.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: brightness(0.85);
+  /* 调试：添加背景色确认元素存在 */
+  background-color: rgba(139, 0, 0, 0.3);
+}
+
+/* 窗帘飘动效果 */
+.mystic-background__curtain {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 30%;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    rgba(139, 0, 0, 0.1) 0%,
+    rgba(139, 0, 0, 0.05) 50%,
+    rgba(139, 0, 0, 0.1) 100%
+  );
+  mix-blend-mode: overlay;
+  transform-origin: top;
+}
+
+.mystic-background__curtain--left {
+  left: 0;
+  background: linear-gradient(
+    to right,
+    rgba(139, 0, 0, 0.15) 0%,
+    rgba(139, 0, 0, 0.05) 50%,
+    transparent 100%
+  );
+}
+
+.mystic-background__curtain--right {
+  right: 0;
+  background: linear-gradient(
+    to left,
+    rgba(139, 0, 0, 0.15) 0%,
+    rgba(139, 0, 0, 0.05) 50%,
+    transparent 100%
+  );
+}
+
+/* 水晶球光芒效果 - 中心位置 */
+.mystic-background__glow {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+.mystic-background__glow--outer {
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(
+    circle,
+    rgba(138, 43, 226, 0.4) 0%,
+    rgba(75, 0, 130, 0.2) 30%,
+    transparent 70%
+  );
+}
+
+.mystic-background__glow--middle {
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(
+    circle,
+    rgba(255, 215, 0, 0.5) 0%,
+    rgba(255, 165, 0, 0.3) 30%,
+    transparent 70%
+  );
+}
+
+/* 水晶球闪烁效果 */
+.mystic-background__sparkle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.8) 0%,
+    rgba(255, 255, 255, 0.4) 20%,
+    rgba(173, 216, 230, 0.2) 40%,
+    transparent 60%
+  );
+  pointer-events: none;
+  mix-blend-mode: screen;
+  filter: blur(10px);
+}
+
+/* 闪烁的星星 */
+.mystic-background__star {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.8),
+              0 0 20px rgba(255, 215, 0, 0.6);
+  pointer-events: none;
+}
+
+/* 径向光效 - 波纹扩散 */
+.mystic-background__radial {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 500px;
+  height: 500px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    transparent 0%,
+    rgba(138, 43, 226, 0.3) 40%,
+    rgba(75, 0, 130, 0.1) 60%,
+    transparent 80%
+  );
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+  .mystic-background__glow--outer {
+    width: 250px;
+    height: 250px;
+  }
+  
+  .mystic-background__glow--middle {
+    width: 180px;
+    height: 180px;
+  }
+  
+  .mystic-background__sparkle {
+    width: 120px;
+    height: 120px;
+  }
+  
+  .mystic-background__radial {
+    width: 300px;
+    height: 300px;
+  }
+}
+
+/* 添加背景暗化遮罩，确保内容可读性 */
+.mystic-background::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+

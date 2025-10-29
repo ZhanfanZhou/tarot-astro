@@ -1,3 +1,288 @@
+## 2025-10-28 - 恢复快速回复功能并更新神秘风格
+
+**功能描述：**
+修复快速回复悬浮窗不显示的问题，并更新其视觉风格以符合神秘主题。
+
+**改动内容：**
+
+**1. 修复 QuickReplies 组件在 App.tsx 中缺失**
+- ✅ 在 `App.tsx` 中导入 `QuickReplies` 组件
+- ✅ 在输入框上方渲染 `QuickReplies` 组件
+- ✅ 传递正确的 `conversationType` 和 `onReplyClick` 参数
+
+**2. 更新 QuickReplies 组件样式 (frontend/src/components/QuickReplies.tsx)**
+- ✅ 引入 `framer-motion` 实现动画效果
+- ✅ 引入 `Sparkles` 图标作为装饰
+- ✅ 添加渐入动画（opacity + y轴位移）
+- ✅ 按钮逐个延迟显示（index * 0.03s）
+- ✅ 玻璃态效果（glass-morphism）
+- ✅ 悬停时光效（mystic-gradient + 阴影）
+- ✅ 悬停时边框变金色（border-mystic-gold/50）
+- ✅ 装饰性闪烁光点
+- ✅ 添加"快速回复"标题和分割线
+
+**视觉效果：**
+- 🎨 深色玻璃态背景，符合整体神秘风格
+- ✨ 悬停时金色边框和光芒效果
+- 🔄 按钮交互动画（缩放、阴影）
+- 📐 圆角设计，与其他组件统一
+
+**技术细节：**
+```tsx
+// 添加动画入场效果
+<motion.div
+  initial={{ opacity: 0, y: -10 }}
+  animate={{ opacity: 1, y: 0 }}
+  transition={{ duration: 0.3 }}
+>
+  {/* 按钮逐个显示 */}
+  <motion.button
+    initial={{ opacity: 0, scale: 0.9 }}
+    animate={{ opacity: 1, scale: 1 }}
+    transition={{ delay: index * 0.03 }}
+    whileHover={{ 
+      scale: 1.05,
+      boxShadow: '0 0 20px rgba(255, 215, 0, 0.3)',
+    }}
+    className="group glass-morphism border-mystic-gold/50 ..."
+  >
+    {/* 悬停光效 */}
+    <div className="bg-mystic-gradient opacity-0 group-hover:opacity-10" />
+    
+    {/* 闪烁光点 */}
+    <motion.div className="bg-mystic-gold" animate={{ scale: [1, 1.5, 1] }} />
+  </motion.button>
+</motion.div>
+```
+
+**修改的文件：**
+- `frontend/src/App.tsx` - 导入并使用 QuickReplies 组件
+- `frontend/src/components/QuickReplies.tsx` - 完全重写样式和动画
+
+---
+
+## 2025-10-28 - 更改AI头像为自定义图片
+
+**功能描述：**
+将AI头像从 Bot 图标改为使用自定义图片 `/assets/avatar.png`。
+
+**改动内容：**
+
+**1. 修改 ChatMessage 组件 (frontend/src/components/ChatMessage.tsx)**
+- ✅ 思考状态头像：从 `<Bot>` 图标改为 `<img src="/assets/avatar.png">`
+- ✅ 正常消息头像：从 `<Bot>` 图标改为 `<img src="/assets/avatar.png">`
+- ✅ 添加 `overflow-hidden` 类确保图片不溢出圆角容器
+- ✅ 保留原有的样式和动画效果
+- ✅ 用户头像保持使用 `<User>` 图标不变
+
+**技术细节：**
+```tsx
+// 之前：使用 Bot 图标
+<div className="...">
+  <Bot size={22} />
+</div>
+
+// 现在：使用图片
+<div className="... overflow-hidden">
+  <img src="/assets/avatar.png" alt="AI Avatar" className="w-full h-full object-cover" />
+</div>
+```
+
+**视觉效果：**
+- 🎨 AI头像现在显示为自定义图片
+- 🔄 保留了原有的悬停和动画效果
+- 📐 图片完美适配圆角容器（12x12，rounded-xl）
+- ✨ 背景保持神秘渐变色（mystic-gradient）
+
+**修改的文件：**
+- `frontend/src/components/ChatMessage.tsx` - 修改两处头像渲染逻辑
+
+---
+
+## 2025-10-28 - 新增神秘背景组件（动态效果）
+
+**功能描述：**
+为主界面添加静态背景图和动态视觉效果，使用红色帷幕和水晶球背景，并实现窗帘飘动、水晶球闪烁、光芒扩散等动画效果。
+
+**改动内容：**
+
+**1. 创建神秘背景组件 (MysticBackground.tsx)**
+- ✅ 引入静态背景图：`/bg.png`（红色帷幕+水晶球）
+- ✅ 窗帘飘动效果：左右两侧帷幕微微飘动（x轴位移 + scaleX变化）
+- ✅ 水晶球光芒：三层光晕效果（外层、中层、内层，不同颜色和尺寸）
+- ✅ 闪烁效果：水晶球中心的白色闪烁光点
+- ✅ 星星点缀：8个随机位置的闪烁星星
+- ✅ 径向光效：从水晶球向外扩散的波纹（scale + opacity动画）
+
+**2. 创建背景样式文件 (mystic-background.css)**
+- ✅ 定义背景容器样式：fixed定位 + z-index控制
+- ✅ 静态背景图样式：cover + center + brightness滤镜
+- ✅ 窗帘效果样式：线性渐变 + overlay混合模式
+- ✅ 光效样式：径向渐变 + screen混合模式 + blur滤镜
+- ✅ 响应式调整：移动端光效尺寸自动缩小
+- ✅ 添加暗化遮罩：确保前景内容可读性
+
+**3. 集成到主应用 (App.tsx)**
+- ✅ 导入并使用 MysticBackground 组件
+- ✅ 调整z-index层级：背景(-1) < 装饰(10) < 内容(20) < 弹窗(50/100)
+- ✅ 移除原有星空背景（body::before），改用自定义背景组件
+
+**4. 更新全局样式 (index.css)**
+- ✅ 引入 mystic-background.css 样式文件
+- ✅ 简化 body 背景为纯色，由背景组件提供视觉效果
+- ✅ 移除原有星空动画（twinkleStars）
+
+**5. 更新架构文档 (arch.md)**
+- ✅ 新增 3.9 神秘背景组件章节
+- ✅ 详细说明视觉效果、动画机制、样式特点、设计机制
+
+**技术亮点：**
+- 🎨 多层光效叠加：使用 mix-blend-mode 实现光效融合
+- ⚡ 流畅动画：Framer Motion + 错开的时长避免视觉疲劳
+- 📱 响应式设计：移动端自动调整光效尺寸
+- 🎯 交互无干扰：所有动效元素设置 pointer-events: none
+
+**视觉效果：**
+- 🕯️ 窗帘微微飘动：营造神秘氛围
+- 💎 水晶球光芒：多层次光晕效果
+- ✨ 闪烁星星：点缀背景空间
+- 🌊 径向波纹：能量扩散效果
+
+---
+
+## 2025-10-27 - 前端UI全面重新设计
+
+**功能描述：**
+完成前端界面的全面重新设计，从简单功能性界面升级为沉浸式神秘学体验，大幅提升视觉效果和用户体验。
+
+**设计理念：**
+- 🌌 神秘学美学：星空背景 + 动态星星效果
+- 🎨 统一配色：紫色系（神秘）+ 金色（神圣）+ 深蓝（宇宙）
+- ✨ 流畅动画：过渡、悬停、加载等丰富动画效果
+- 🔮 主题元素：星星、月亮、塔罗牌等装饰符号
+- 💫 玻璃态效果：毛玻璃背景 + 半透明卡片
+
+**核心改动：**
+
+**1. 全局样式与主题系统**
+- ✅ 扩展Tailwind配置：新增神秘主题颜色、动画、阴影系统
+- ✅ 新增全局CSS效果：星空背景、玻璃态、神秘光效、渐变文字等
+- ✅ 引入Google字体Cinzel：优雅的衬线字体用于标题
+- ✅ 优化滚动条样式：渐变紫色滚动条
+
+**2. 塔罗牌系统**
+- ✅ 创建完整配置文件（78张牌）：中英文名称、图片路径、牌组分类
+- ✅ 建立图片文件夹结构：major/wands/cups/swords/pentacles
+- ✅ 创建SVG占位图：美观的渐变卡背和占位符
+- ✅ 支持真实图片加载：图片加载失败自动降级到占位符
+
+**3. 神秘装饰组件库**
+- ✅ MysticSymbol：旋转的神秘符号
+- ✅ StarDecoration：闪烁星星效果
+- ✅ MoonPhase：月相动画
+- ✅ TarotCardBorder：塔罗牌四角装饰框
+- ✅ MysticAura：神秘光环效果
+- ✅ ParticleEffect：粒子浮动效果
+- ✅ MysticDivider：装饰性分割线
+
+**4. 主界面重设计 (App.tsx)**
+- ✅ 欢迎页面：
+  - 大标题"神秘占卜殿堂" + 金色渐变闪烁文字
+  - 旋转的神秘符号装饰
+  - 中心脉冲光效
+  - 浮动的背景符号动画
+- ✅ 对话界面：
+  - 新增玻璃态顶部标题栏
+  - 显示会话类型图标（塔罗🔮 / 星座✨）
+  - 优化消息区域布局
+  - 玻璃态输入框背景
+
+**5. 侧边栏重设计 (Sidebar.tsx)**
+- ✅ Logo区：脉冲发光的Logo图标 + "神秘殿堂"标题
+- ✅ 对话列表：
+  - 玻璃态背景 + 类型图标标识
+  - 选中状态光效动画
+  - 悬停放大效果
+  - 流畅的进入动画
+- ✅ 底部装饰：旋转星星分割线 + Slogan
+
+**6. 聊天消息重设计 (ChatMessage.tsx)**
+- ✅ 头像优化：渐变背景 + 阴影 + 悬停旋转 + Bot摇摆动画
+- ✅ 消息气泡：用户蓝色渐变 / AI玻璃态紫色边框
+- ✅ 塔罗牌显示：
+  - 3D翻转进场动画
+  - 真实图片 + 精美占位符
+  - 逆位旋转显示
+  - 悬停放大效果
+  - 位置标签（金色圆角）
+  - 装饰性边框和光效
+- ✅ 思考状态：脉冲圆点动画 + 随机文案
+
+**7. 会话选择重设计 (SessionButtons.tsx)**
+- ✅ 大型卡片（264px宽）+ 玻璃态背景
+- ✅ 渐变图标容器 + 旋转光环效果
+- ✅ Emoji图标（🔮✨💬）
+- ✅ 悬停上浮动画 + 装饰性闪烁星星
+- ✅ 向下箭头提示
+
+**8. 输入框重设计 (ChatInput.tsx)**
+- ✅ 玻璃态背景 + 金色聚焦边框
+- ✅ 渐变外发光效果
+- ✅ 左侧装饰图标（旋转星星）
+- ✅ 右侧渐变发送按钮
+- ✅ 字符计数显示 + 聚焦提示文字
+
+**9. 塔罗牌抽取器重设计 (TarotCardDrawer.tsx)**
+- ✅ 全屏玻璃态模态框 + 金色边框
+- ✅ 背景漂浮星星效果（30个动态星星）
+- ✅ 顶部卡槽：虚线边框 + 选中光效动画
+- ✅ 洗牌动画：15张卡片旋转飞舞（圆形轨迹）
+- ✅ 展开牌阵：78张牌扇形排列 + Spring动画进场
+- ✅ 悬停放大1.3倍 + 金色渐变按钮
+- ✅ 完成提示：全屏遮罩 + 大型星星旋转动画
+
+**技术特点：**
+- 🚀 性能优化：lazy loading、图片降级、CSS动画优先
+- 📱 响应式设计：Flexbox布局、自适应间距
+- 🎯 用户体验：所有交互都有反馈、加载状态明确
+- 🧩 代码组织：组件化开发、配置与逻辑分离、TypeScript类型安全
+
+**配色方案：**
+```css
+--primary: #8B5CF6        /* 紫色 */
+--secondary: #EC4899       /* 粉色 */
+--mystic-gold: #FFD700     /* 金色 */
+--dark-bg: #0A0A0F         /* 深黑 */
+--cosmic-purple: #4C1D95   /* 深紫 */
+```
+
+**新增文件：**
+- `frontend/src/config/tarotCards.ts` - 78张塔罗牌配置
+- `frontend/src/components/MysticDecorations.tsx` - 装饰组件库
+- `frontend/public/tarot-images/` - 图片文件夹结构
+- `frontend/public/tarot-images/README.md` - 图片使用说明
+- `frontend/public/tarot-images/placeholder.svg` - 占位图
+- `frontend/public/tarot-images/card-back.svg` - 卡背图
+- `frontend/UI_REDESIGN_SUMMARY.md` - 详细设计文档
+
+**修改文件：**
+- `frontend/tailwind.config.js` - 扩展主题配置
+- `frontend/src/index.css` - 新增全局样式
+- `frontend/src/App.tsx` - 主界面重设计
+- `frontend/src/components/Sidebar.tsx` - 侧边栏美化
+- `frontend/src/components/ChatMessage.tsx` - 消息组件优化
+- `frontend/src/components/SessionButtons.tsx` - 会话按钮重设计
+- `frontend/src/components/ChatInput.tsx` - 输入框增强
+- `frontend/src/components/TarotCardDrawer.tsx` - 抽牌器重设计
+
+**用户体验提升：**
+- ✅ 视觉效果从简单升级为沉浸式神秘学体验
+- ✅ 动画流畅自然，细节丰富
+- ✅ 保持所有原有交互逻辑不变
+- ✅ 完全符合塔罗占卜和星座咨询的主题定位
+
+---
+
 ## 2025-10-26 - 修复游客登录和注册失败 400 错误
 
 **问题描述：**

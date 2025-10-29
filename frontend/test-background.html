@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>背景测试</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        .bg-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: -1;
+            background-image: url('/assets/bg.png');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+        }
+        
+        .content {
+            position: relative;
+            z-index: 1;
+            color: white;
+            padding: 50px;
+            font-size: 30px;
+            text-shadow: 2px 2px 8px black;
+            font-family: sans-serif;
+        }
+        
+        .test-info {
+            background: rgba(0, 0, 0, 0.7);
+            padding: 20px;
+            border-radius: 10px;
+            max-width: 600px;
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-container"></div>
+    <div class="content">
+        <div class="test-info">
+            <h1>🔮 背景图测试</h1>
+            <p style="margin-top: 20px;">
+                如果你能看到红色帷幕和水晶球背景，说明路径是正确的！
+            </p>
+            <p style="margin-top: 10px;">
+                图片路径: <code style="color: #ffdd00">/assets/bg.png</code>
+            </p>
+            <p style="margin-top: 10px;">
+                如果看不到背景，请打开浏览器开发者工具（F12），查看 Console 和 Network 标签页的错误信息。
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+

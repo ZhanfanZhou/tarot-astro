@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Shuffle } from 'lucide-react';
+import { X, Shuffle, Sparkles } from 'lucide-react';
 import type { DrawCardsRequest, TarotCard } from '@/types';
+import { getCardInfo, CARD_BACK_IMAGE } from '@/config/tarotCards';
 
 interface TarotCardDrawerProps {
   isOpen: boolean;
@@ -32,16 +33,6 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
       setSelectedIndices([]);
       setConfirmedCards([]);
       setShowConfirm(false);
-      
-      // Debug logging
-      console.log('[TarotCardDrawer] Opened with drawRequest:', drawRequest);
-      console.log('[TarotCardDrawer] positions:', drawRequest.positions);
-      console.log('[TarotCardDrawer] positions type:', typeof drawRequest.positions);
-      console.log('[TarotCardDrawer] positions is array:', Array.isArray(drawRequest.positions));
-      if (drawRequest.positions) {
-        console.log('[TarotCardDrawer] positions length:', drawRequest.positions.length);
-        console.log('[TarotCardDrawer] positions[0]:', drawRequest.positions[0]);
-      }
     }
   }, [isOpen]);
 
@@ -50,7 +41,7 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
     setTimeout(() => {
       setIsShuffling(false);
       setIsSpread(true);
-    }, 2000);
+    }, 2500);
   };
 
   const handleCardClick = (index: number) => {
@@ -58,21 +49,26 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
 
     if (selectedIndices.includes(index)) {
       setSelectedIndices(selectedIndices.filter((i) => i !== index));
+      setShowConfirm(false);
     } else if (selectedIndices.length < drawRequest.card_count) {
-      setSelectedIndices([...selectedIndices, index]);
-      if (selectedIndices.length + 1 === drawRequest.card_count) {
+      const newSelected = [...selectedIndices, index];
+      setSelectedIndices(newSelected);
+      if (newSelected.length === drawRequest.card_count) {
         setShowConfirm(true);
       }
     }
   };
 
   const handleConfirm = () => {
-    // 模拟抽牌结果（实际应该调用API）
-    const drawnCards: TarotCard[] = selectedIndices.map((idx) => ({
-      card_id: idx,
-      card_name: `塔罗牌 ${idx}`,
-      reversed: Math.random() < 0.3,
-    }));
+    // 模拟抽牌结果
+    const drawnCards: TarotCard[] = selectedIndices.map((idx) => {
+      const cardInfo = getCardInfo(idx);
+      return {
+        card_id: idx,
+        card_name: cardInfo?.name_zh || `塔罗牌 ${idx}`,
+        reversed: Math.random() < 0.3,
+      };
+    });
 
     setConfirmedCards(drawnCards);
     
@@ -80,7 +76,7 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
     setTimeout(() => {
       onCardsDrawn(drawnCards);
       onClose();
-    }, 1500);
+    }, 2000);
   };
 
   return (
@@ -90,64 +86,138 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md"
           onClick={(e) => {
             if (e.target === e.currentTarget && !isShuffling) {
               onClose();
             }
           }}
         >
+          {/* 背景装饰 - 漂浮的星星 */}
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            {Array.from({ length: 30 }).map((_, i) => (
+              <motion.div
+                key={i}
+                className="absolute w-1 h-1 bg-mystic-gold rounded-full"
+                style={{
+                  left: `${Math.random() * 100}%`,
+                  top: `${Math.random() * 100}%`,
+                }}
+                animate={{
+                  opacity: [0, 1, 0],
+                  scale: [0, 1.5, 0],
+                }}
+                transition={{
+                  duration: 2 + Math.random() * 2,
+                  repeat: Infinity,
+                  delay: Math.random() * 2,
+                }}
+              />
+            ))}
+          </div>
+
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.9, opacity: 0 }}
-            className="relative w-full max-w-6xl h-[80vh] bg-dark-surface rounded-2xl shadow-2xl overflow-hidden"
+            className="relative w-full max-w-7xl h-[85vh] glass-morphism rounded-3xl shadow-2xl overflow-hidden border border-mystic-gold/30"
           >
             {/* Header */}
-            <div className="absolute top-0 left-0 right-0 z-10 p-6 bg-gradient-to-b from-dark-bg to-transparent">
+            <div className="absolute top-0 left-0 right-0 z-20 p-6 bg-gradient-to-b from-dark-bg/90 to-transparent backdrop-blur-sm">
               <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-2xl font-bold">抽取塔罗牌</h2>
-                  <p className="text-gray-400 mt-1">
-                    {isSpread
-                      ? `请选择 ${drawRequest.card_count} 张牌 (已选${selectedIndices.length}张)`
-                      : '点击洗牌开始'}
-                  </p>
+                <div className="flex items-center gap-4">
+                  <motion.div
+                    className="w-12 h-12 rounded-xl bg-mystic-gradient flex items-center justify-center shadow-mystic"
+                    animate={{
+                      boxShadow: [
+                        '0 0 20px rgba(139, 92, 246, 0.5)',
+                        '0 0 40px rgba(236, 72, 153, 0.8)',
+                        '0 0 20px rgba(139, 92, 246, 0.5)',
+                      ],
+                    }}
+                    transition={{
+                      duration: 2,
+                      repeat: Infinity,
+                    }}
+                  >
+                    <Sparkles size={24} className="text-white" />
+                  </motion.div>
+                  <div>
+                    <h2 className="text-2xl font-display font-bold text-white">
+                      抽取塔罗牌
+                    </h2>
+                    <p className="text-gray-400 font-display mt-1">
+                      {isSpread
+                        ? `请选择 ${drawRequest.card_count} 张牌 (已选${selectedIndices.length}/${drawRequest.card_count})`
+                        : '静心凝神，准备开启命运之门'}
+                    </p>
+                  </div>
                 </div>
-                <button
+                <motion.button
                   onClick={onClose}
                   disabled={isShuffling}
-                  className="p-2 hover:bg-dark-hover rounded-lg transition-colors disabled:opacity-50"
+                  whileHover={{ scale: 1.1, rotate: 90 }}
+                  whileTap={{ scale: 0.9 }}
+                  className="p-3 hover:bg-dark-elevated rounded-xl transition-colors disabled:opacity-50"
                 >
                   <X size={24} />
-                </button>
+                </motion.button>
               </div>
             </div>
 
-            {/* Card Slots (顶部) */}
+            {/* Card Slots (顶部显示位置) */}
             {isSpread && (
               <div className="absolute top-24 left-0 right-0 z-10 px-6">
-                <div className="flex gap-4 justify-center">
+                <div className="flex gap-4 justify-center flex-wrap">
                   {Array.from({ length: drawRequest.card_count }).map((_, idx) => (
                     <motion.div
                       key={idx}
-                      initial={{ opacity: 0, y: -20 }}
-                      animate={{ opacity: 1, y: 0 }}
+                      initial={{ opacity: 0, y: -30, scale: 0.8 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
                       transition={{ delay: idx * 0.1 }}
-                      className="w-24 h-36 border-2 border-dashed border-primary/50 rounded-lg flex items-center justify-center bg-dark-bg/50"
+                      className="relative w-28 h-40 rounded-xl border-2 border-dashed border-mystic-gold/40 flex flex-col items-center justify-center bg-dark-bg/50 backdrop-blur-sm overflow-hidden"
                     >
+                      {/* 背景光效 */}
+                      {selectedIndices[idx] !== undefined && (
+                        <motion.div
+                          className="absolute inset-0 bg-mystic-gradient opacity-20"
+                          animate={{
+                            opacity: [0.1, 0.3, 0.1],
+                          }}
+                          transition={{
+                            duration: 2,
+                            repeat: Infinity,
+                          }}
+                        />
+                      )}
+
                       {confirmedCards[idx] ? (
-                        <div className="text-center p-2">
-                          <div className="text-4xl mb-2">🎴</div>
-                          <div className="text-xs">
+                        <motion.div
+                          initial={{ scale: 0, rotateY: 180 }}
+                          animate={{ scale: 1, rotateY: 0 }}
+                          className="relative text-center"
+                        >
+                          <div className="text-5xl mb-2">
+                            {confirmedCards[idx].reversed ? '🔮' : '✨'}
+                          </div>
+                          <div className="text-xs text-white font-display font-medium">
                             {confirmedCards[idx].reversed ? '逆位' : '正位'}
                           </div>
-                        </div>
+                        </motion.div>
                       ) : selectedIndices[idx] !== undefined ? (
-                        <div className="text-2xl">✨</div>
+                        <motion.div
+                          initial={{ scale: 0 }}
+                          animate={{ scale: 1 }}
+                          className="text-3xl"
+                        >
+                          ✨
+                        </motion.div>
                       ) : (
-                        <div className="text-sm text-gray-500">
-                          {drawRequest.positions?.[idx] || `位置${idx + 1}`}
+                        <div className="text-center">
+                          <div className="text-sm text-gray-500 font-display font-medium mb-1">
+                            {drawRequest.positions?.[idx] || `位置${idx + 1}`}
+                          </div>
+                          <div className="w-8 h-8 mx-auto border border-mystic-gold/30 rounded-lg" />
                         </div>
                       )}
                     </motion.div>
@@ -157,70 +227,113 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
             )}
 
             {/* Cards Display */}
-            <div className="h-full flex items-center justify-center p-6 pt-48">
+            <div className="h-full flex items-center justify-center p-6 pt-52">
+              {/* 洗牌按钮 */}
               {!isSpread && !isShuffling && (
-                <motion.button
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={handleShuffle}
-                  className="px-8 py-4 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl text-xl font-bold flex items-center gap-3 shadow-lg"
+                <motion.div
+                  initial={{ scale: 0, rotate: -180 }}
+                  animate={{ scale: 1, rotate: 0 }}
+                  transition={{ type: 'spring', stiffness: 100 }}
+                  className="text-center"
                 >
-                  <Shuffle size={24} />
-                  开始洗牌
-                </motion.button>
-              )}
-
-              {isShuffling && (
-                <div className="relative w-32 h-48">
-                  {cards.slice(0, 10).map((_, idx) => (
+                  <motion.button
+                    onClick={handleShuffle}
+                    whileHover={{ scale: 1.05, y: -5 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="px-10 py-5 bg-mystic-gradient rounded-2xl text-xl font-display font-bold flex items-center gap-4 shadow-2xl shadow-mystic relative overflow-hidden group"
+                  >
+                    {/* 按钮光效 */}
                     <motion.div
-                      key={idx}
-                      className="absolute inset-0 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl shadow-xl"
+                      className="absolute inset-0 bg-white/20"
                       animate={{
-                        rotate: [0, 360],
-                        scale: [1, 1.1, 1],
-                        x: Math.sin(idx) * 50,
-                        y: Math.cos(idx) * 50,
+                        x: ['-100%', '200%'],
                       }}
                       transition={{
                         duration: 2,
-                        repeat: 0,
-                        delay: idx * 0.05,
+                        repeat: Infinity,
+                        repeatDelay: 1,
                       }}
-                    >
-                      <div className="w-full h-full flex items-center justify-center text-4xl">
+                    />
+                    <Shuffle size={28} />
+                    <span className="relative z-10">开始洗牌</span>
+                  </motion.button>
+                  
+                  <motion.p
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.5 }}
+                    className="mt-6 text-gray-400 font-display"
+                  >
+                    🌟 深呼吸，让心灵与牌阵共鸣
+                  </motion.p>
+                </motion.div>
+              )}
+
+              {/* 洗牌动画 */}
+              {isShuffling && (
+                <div className="relative w-40 h-56">
+                  {cards.slice(0, 15).map((_, idx) => {
+                    const angle = (idx / 15) * 360;
+                    const radius = 80;
+                    return (
+                      <motion.div
+                        key={idx}
+                        className="absolute inset-0 bg-mystic-gradient rounded-2xl shadow-2xl flex items-center justify-center text-4xl"
+                        animate={{
+                          rotate: [0, 360, 720],
+                          x: [
+                            0,
+                            Math.cos((angle * Math.PI) / 180) * radius,
+                            0,
+                          ],
+                          y: [
+                            0,
+                            Math.sin((angle * Math.PI) / 180) * radius,
+                            0,
+                          ],
+                          scale: [1, 1.2, 1],
+                        }}
+                        transition={{
+                          duration: 2.5,
+                          delay: idx * 0.05,
+                          ease: 'easeInOut',
+                        }}
+                      >
                         🎴
-                      </div>
-                    </motion.div>
-                  ))}
+                      </motion.div>
+                    );
+                  })}
                 </div>
               )}
 
+              {/* 展开的牌阵 */}
               {isSpread && (
-                <div className="w-full max-w-5xl">
-                  <div className="relative h-64">
+                <div className="w-full max-w-6xl">
+                  <div className="relative h-72">
                     {cards.map((cardId, idx) => {
                       const totalCards = cards.length;
                       const angle = (idx / totalCards) * 180 - 90;
-                      const radius = 400;
+                      const radius = 450;
                       const x = Math.cos((angle * Math.PI) / 180) * radius;
                       const y = Math.sin((angle * Math.PI) / 180) * radius * 0.6;
                       const isSelected = selectedIndices.includes(idx);
+                      const cardInfo = getCardInfo(cardId);
 
                       return (
                         <motion.div
                           key={cardId}
-                          initial={{ x: 0, y: 0, rotate: 0 }}
+                          initial={{ x: 0, y: 0, rotate: 0, opacity: 0 }}
                           animate={{
                             x,
                             y,
                             rotate: angle + 90,
+                            opacity: 1,
                           }}
                           transition={{
-                            duration: 1,
-                            delay: idx * 0.01,
+                            duration: 1.2,
+                            delay: idx * 0.008,
+                            type: 'spring',
+                            stiffness: 80,
                           }}
                           className="absolute left-1/2 top-1/2 cursor-pointer"
                           style={{
@@ -229,16 +342,26 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
                           onClick={() => handleCardClick(idx)}
                         >
                           <motion.div
-                            whileHover={{ scale: 1.2, z: 10 }}
+                            whileHover={{ scale: 1.3, z: 20 }}
                             animate={{
-                              scale: isSelected ? 1.3 : 1,
-                              y: isSelected ? -20 : 0,
+                              scale: isSelected ? 1.4 : 1,
+                              y: isSelected ? -25 : 0,
                             }}
-                            className={`w-16 h-24 bg-gradient-to-br rounded-lg shadow-lg flex items-center justify-center text-2xl ${
-                              isSelected
-                                ? 'from-yellow-500 to-orange-500 ring-4 ring-yellow-400'
-                                : 'from-purple-600 to-pink-600'
-                            }`}
+                            transition={{ type: 'spring', stiffness: 300 }}
+                            className={`
+                              w-20 h-28 rounded-lg shadow-2xl overflow-hidden
+                              flex items-center justify-center text-3xl
+                              ${
+                                isSelected
+                                  ? 'ring-4 ring-mystic-gold shadow-mystic-gold'
+                                  : 'ring-1 ring-white/20'
+                              }
+                            `}
+                            style={{
+                              background: isSelected
+                                ? 'linear-gradient(135deg, #FFD700, #FFF4A3)'
+                                : 'linear-gradient(135deg, #6D28D9, #8B5CF6, #EC4899)',
+                            }}
                           >
                             {isSelected ? '✨' : '🎴'}
                           </motion.div>
@@ -253,16 +376,65 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
             {/* Confirm Button */}
             {showConfirm && confirmedCards.length === 0 && (
               <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="absolute bottom-6 left-0 right-0 flex justify-center"
+                initial={{ opacity: 0, y: 30, scale: 0.9 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                className="absolute bottom-8 left-0 right-0 flex justify-center z-20"
               >
-                <button
+                <motion.button
                   onClick={handleConfirm}
-                  className="px-8 py-4 bg-gradient-to-r from-green-500 to-teal-500 rounded-xl text-xl font-bold shadow-lg hover:scale-105 transition-transform"
+                  whileHover={{ scale: 1.05, y: -3 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="px-10 py-4 bg-gold-gradient rounded-2xl text-xl font-display font-bold shadow-2xl shadow-gold text-dark-bg relative overflow-hidden group"
                 >
-                  确认抽牌
-                </button>
+                  {/* 按钮光效 */}
+                  <motion.div
+                    className="absolute inset-0 bg-white/30"
+                    animate={{
+                      x: ['-100%', '200%'],
+                    }}
+                    transition={{
+                      duration: 1.5,
+                      repeat: Infinity,
+                      repeatDelay: 0.5,
+                    }}
+                  />
+                  <span className="relative z-10 flex items-center gap-3">
+                    <Sparkles size={24} />
+                    确认抽牌
+                    <Sparkles size={24} />
+                  </span>
+                </motion.button>
+              </motion.div>
+            )}
+
+            {/* 抽牌完成提示 */}
+            {confirmedCards.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-md z-30"
+              >
+                <div className="text-center">
+                  <motion.div
+                    animate={{
+                      rotate: 360,
+                      scale: [1, 1.2, 1],
+                    }}
+                    transition={{
+                      duration: 2,
+                      repeat: Infinity,
+                    }}
+                    className="text-8xl mb-6"
+                  >
+                    ✨
+                  </motion.div>
+                  <h3 className="text-3xl font-display font-bold text-mystic-gold mb-4">
+                    命运之牌已就位
+                  </h3>
+                  <p className="text-gray-400 font-display">
+                    正在为您解读...
+                  </p>
+                </div>
               </motion.div>
             )}
           </motion.div>
@@ -273,7 +445,3 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
 };
 
 export default TarotCardDrawer;
-
-
-
-

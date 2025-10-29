@@ -3,10 +3,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Sidebar from './components/Sidebar';
 import ChatMessage from './components/ChatMessage';
 import ChatInput from './components/ChatInput';
+import QuickReplies from './components/QuickReplies';
 import SessionButtons from './components/SessionButtons';
 import TarotCardDrawer from './components/TarotCardDrawer';
 import AuthModal from './components/AuthModal';
 import AstrologyProfileModal from './components/AstrologyProfileModal';
+import MysticBackground from './components/MysticBackground';
 import { useAuthStore } from './stores/useAuthStore';
 import { useConversationStore } from './stores/useConversationStore';
 import { userApi, conversationApi, tarotApi, astrologyApi } from './services/api';
@@ -446,7 +448,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleCardsDrawn = async (cards: any) => {
+  const handleCardsDrawn = async () => {
     if (!currentConversation || !pendingDrawRequest) return;
 
     try {
@@ -496,7 +498,7 @@ const App: React.FC = () => {
                   }
                 }
               },
-              (drawRequest) => {
+              () => {
                 // 不应该再次触发抽牌，但保留处理以防万一
                 console.warn('警告：解读时不应该再次触发抽牌');
               }
@@ -508,7 +510,7 @@ const App: React.FC = () => {
               (chunk) => {
                 setStreamingMessage((prev) => prev + chunk);
               },
-              (drawRequest) => {
+              () => {
                 // 不应该再次触发抽牌，但保留处理以防万一
                 console.warn('警告：解读时不应该再次触发抽牌');
               }
@@ -543,32 +545,140 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="w-full h-full flex">
+    <div className="w-full h-full flex relative">
+      {/* 神秘背景（包含静态图和动态效果） */}
+      <MysticBackground />
+      
+      {/* 背景装饰层 */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden z-10">
+        {/* 浮动的神秘符号 */}
+        <motion.div
+          className="absolute top-20 left-10 w-20 h-20 opacity-10"
+          animate={{
+            y: [0, -20, 0],
+            rotate: [0, 180, 360],
+          }}
+          transition={{
+            duration: 20,
+            repeat: Infinity,
+            ease: 'easeInOut',
+          }}
+        >
+          <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="50" cy="50" r="40" stroke="currentColor" strokeWidth="2" className="text-mystic-gold" />
+            <path d="M50 10 L50 90 M10 50 L90 50" stroke="currentColor" strokeWidth="1" className="text-mystic-gold" />
+          </svg>
+        </motion.div>
+        
+        <motion.div
+          className="absolute bottom-40 right-20 w-16 h-16 opacity-10"
+          animate={{
+            y: [0, 20, 0],
+            scale: [1, 1.2, 1],
+          }}
+          transition={{
+            duration: 15,
+            repeat: Infinity,
+            ease: 'easeInOut',
+          }}
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" className="text-secondary">
+            <path d="M12 2l2.09 6.26L20 10l-5.91 1.74L12 18l-2.09-6.26L4 10l5.91-1.74z" />
+          </svg>
+        </motion.div>
+      </div>
+
       {/* Sidebar */}
-      <Sidebar
-        conversations={conversations}
-        currentConversationId={currentConversation?.conversation_id}
-        onNewConversation={handleNewConversation}
-        onSelectConversation={handleSelectConversation}
-        onDeleteConversation={handleDeleteConversation}
-        onOpenSettings={() => setShowSettings(true)}
-      />
+      <div className="relative z-20">
+        <Sidebar
+          conversations={conversations}
+          currentConversationId={currentConversation?.conversation_id}
+          onNewConversation={handleNewConversation}
+          onSelectConversation={handleSelectConversation}
+          onDeleteConversation={handleDeleteConversation}
+          onOpenSettings={() => setShowSettings(true)}
+        />
+      </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col relative z-20">
         {!currentConversation ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8">
+          <div className="flex-1 flex flex-col items-center justify-center p-8 relative">
+            {/* 中心光效 */}
+            <motion.div
+              className="absolute inset-0 flex items-center justify-center pointer-events-none"
+              animate={{
+                scale: [1, 1.1, 1],
+                opacity: [0.1, 0.2, 0.1],
+              }}
+              transition={{
+                duration: 4,
+                repeat: Infinity,
+                ease: 'easeInOut',
+              }}
+            >
+              <div className="w-96 h-96 rounded-full bg-gradient-to-r from-primary/30 to-secondary/30 blur-3xl" />
+            </motion.div>
+
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="text-center mb-12"
+              transition={{ duration: 0.8 }}
+              className="text-center mb-12 relative z-10"
             >
-              <h1 className="text-5xl font-bold mb-4 bg-gradient-to-r from-purple-500 to-pink-500 bg-clip-text text-transparent">
-                欢迎来到塔罗占卜
-              </h1>
-              <p className="text-gray-400 text-lg">
-                选择一种方式，开始你的心灵之旅
+              {/* 神秘符号装饰 */}
+              <motion.div
+                className="absolute -top-10 left-1/2 -translate-x-1/2 w-20 h-20 opacity-30"
+                animate={{ rotate: 360 }}
+                transition={{ duration: 30, repeat: Infinity, ease: 'linear' }}
+              >
+                <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="50" cy="50" r="45" stroke="url(#headerGrad)" strokeWidth="2" />
+                  <path d="M50 5 L50 95 M5 50 L95 50" stroke="url(#headerGrad)" strokeWidth="1" />
+                  <defs>
+                    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#FFD700" />
+                      <stop offset="100%" stopColor="#FFF4A3" />
+                    </linearGradient>
+                  </defs>
+                </svg>
+              </motion.div>
+
+              <motion.h1
+                className="text-6xl font-display font-bold mb-6 mystic-text"
+                animate={{
+                  textShadow: [
+                    '0 0 20px rgba(255, 215, 0, 0.5)',
+                    '0 0 40px rgba(255, 215, 0, 0.8)',
+                    '0 0 20px rgba(255, 215, 0, 0.5)',
+                  ],
+                }}
+                transition={{
+                  duration: 3,
+                  repeat: Infinity,
+                  ease: 'easeInOut',
+                }}
+              >
+                ✨ 小x的秘密圣殿 ✨
+              </motion.h1>
+              
+              <p className="text-gray-300 text-xl font-display tracking-wide">
+              anyway the wind blows
               </p>
+              
+              {/* 装饰性分割线 */}
+              <motion.div
+                className="flex items-center justify-center gap-4 mt-8"
+                initial={{ opacity: 0, scaleX: 0 }}
+                animate={{ opacity: 1, scaleX: 1 }}
+                transition={{ delay: 0.5, duration: 0.8 }}
+              >
+                <div className="h-px w-20 bg-gradient-to-r from-transparent via-mystic-gold to-transparent" />
+                <svg className="w-4 h-4 text-mystic-gold" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2l2.09 6.26L20 10l-5.91 1.74L12 18l-2.09-6.26L4 10l5.91-1.74z" />
+                </svg>
+                <div className="h-px w-20 bg-gradient-to-r from-transparent via-mystic-gold to-transparent" />
+              </motion.div>
             </motion.div>
 
             <SessionButtons
@@ -578,48 +688,84 @@ const App: React.FC = () => {
           </div>
         ) : (
           <>
+            {/* 会话标题栏 */}
+            <div className="glass-morphism px-6 py-4 border-b border-dark-border">
+              <div className="max-w-4xl mx-auto flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {currentConversation.session_type === 'tarot' ? (
+                    <div className="w-10 h-10 rounded-xl bg-mystic-gradient flex items-center justify-center overflow-hidden">
+                      <img src="/assets/avatar_tarot.png" alt="tarot" className="w-full h-full object-cover" />
+                    </div>
+                  ) : (
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center overflow-hidden">
+                      <img src="/assets/avatar.png" alt="astrology" className="w-full h-full object-cover" />
+                    </div>
+                  )}
+                  <div>
+                    <h2 className="font-display font-semibold text-lg">
+                      {currentConversation.title}
+                    </h2>
+                    <p className="text-xs text-gray-400">
+                      {currentConversation.session_type === 'tarot' ? '塔罗占卜' : '占星'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
-              {currentConversation.messages.map((message, idx) => (
-                message.role !== 'system' && (
-                  <ChatMessage key={idx} message={message} />
-                )
-              ))}
-              
-              {streamingMessage && (
-                <ChatMessage
-                  message={{
-                    role: 'assistant' as MessageRole,
-                    content: streamingMessage,
-                    timestamp: new Date().toISOString(),
-                  }}
-                />
-              )}
-              
-              {isLoading && !streamingMessage && (
-                <ChatMessage
-                  message={{
-                    role: 'assistant' as MessageRole,
-                    content: '',
-                    timestamp: new Date().toISOString(),
-                  }}
-                  isThinking={true}
-                />
-              )}
-              
-              <div ref={messagesEndRef} />
+              <div className="max-w-4xl mx-auto space-y-6">
+                {currentConversation.messages.map((message, idx) => (
+                  message.role !== 'system' && (
+                    <ChatMessage key={idx} message={message} sessionType={currentConversation.session_type} />
+                  )
+                ))}
+                
+                {streamingMessage && (
+                  <ChatMessage
+                    message={{
+                      role: 'assistant' as MessageRole,
+                      content: streamingMessage,
+                      timestamp: new Date().toISOString(),
+                    }}
+                    sessionType={currentConversation.session_type}
+                  />
+                )}
+                
+                {isLoading && !streamingMessage && (
+                  <ChatMessage
+                    message={{
+                      role: 'assistant' as MessageRole,
+                      content: '',
+                      timestamp: new Date().toISOString(),
+                    }}
+                    isThinking={true}
+                    sessionType={currentConversation.session_type}
+                  />
+                )}
+                
+                <div ref={messagesEndRef} />
+              </div>
             </div>
 
             {/* Input */}
-            <div className="p-6 border-t border-dark-border">
-              <div className="max-w-4xl mx-auto">
+            <div className="glass-morphism p-6 border-t border-dark-border/50">
+              <div className="max-w-4xl mx-auto space-y-4">
+                {/* Quick Replies */}
+                <QuickReplies
+                  conversationType={currentConversation.session_type}
+                  onReplyClick={handleSendMessage}
+                />
+                
+                {/* Chat Input */}
                 <ChatInput
                   onSend={handleSendMessage}
                   disabled={isLoading}
                   placeholder={
                     currentConversation.has_drawn_cards
-                      ? '继续深入探讨，或提出新的疑问...'
-                      : '输入你的问题...'
+                      ? '✨ 继续深入探讨，或提出新的疑问...'
+                      : '🌙 输入你的问题，开启心灵对话...'
                   }
                 />
               </div>
@@ -629,43 +775,44 @@ const App: React.FC = () => {
       </div>
 
       {/* Modals */}
-      <AuthModal
-        isOpen={showAuthModal}
-        onClose={() => setShowAuthModal(false)}
-        onGuestLogin={handleGuestLogin}
-        onRegister={handleRegister}
-        onLogin={handleLogin}
-      />
+      <div className="relative z-50">
+        <AuthModal
+          isOpen={showAuthModal}
+          onClose={() => setShowAuthModal(false)}
+          onGuestLogin={handleGuestLogin}
+          onRegister={handleRegister}
+          onLogin={handleLogin}
+        />
 
-      <TarotCardDrawer
-        isOpen={showCardDrawer}
-        drawRequest={pendingDrawRequest!}
-        onClose={() => {
-          setShowCardDrawer(false);
-          setPendingDrawRequest(null);
-        }}
-        onCardsDrawn={handleCardsDrawn}
-      />
+        <TarotCardDrawer
+          isOpen={showCardDrawer}
+          drawRequest={pendingDrawRequest!}
+          onClose={() => {
+            setShowCardDrawer(false);
+            setPendingDrawRequest(null);
+          }}
+          onCardsDrawn={handleCardsDrawn}
+        />
 
-      <AstrologyProfileModal
-        isOpen={showAstrologyProfileModal}
-        currentProfile={user?.profile}
-        onClose={() => {
-          setShowAstrologyProfileModal(false);
-          setPendingAstrologyConversation(null);
-        }}
-        onSubmit={handleAstrologyProfileSubmit}
-        onSkip={handleAstrologyProfileSkip}
-      />
+        <AstrologyProfileModal
+          isOpen={showAstrologyProfileModal}
+          currentProfile={user?.profile}
+          onClose={() => {
+            setShowAstrologyProfileModal(false);
+            setPendingAstrologyConversation(null);
+          }}
+          onSubmit={handleAstrologyProfileSubmit}
+          onSkip={handleAstrologyProfileSkip}
+        />
 
-      {/* Settings Modal */}
-      <AnimatePresence>
-        {showSettings && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+        {/* Settings Modal */}
+        <AnimatePresence>
+          {showSettings && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm"
             onClick={() => setShowSettings(false)}
           >
             <motion.div
@@ -699,6 +846,7 @@ const App: React.FC = () => {
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
     </div>
   );
 };
