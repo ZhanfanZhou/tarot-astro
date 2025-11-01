@@ -58,8 +58,12 @@ async def send_message(request: SendMessageRequest):
             pass
         
         # 🎯 检测首次对话（空消息）：直接返回预设开场白
-        if not request.content and len(conversation.messages) == 0:
+        # 改进的判断逻辑：检查是否已经有 assistant 消息
+        has_assistant_message = any(msg.role == MessageRole.ASSISTANT for msg in conversation.messages)
+        
+        if not request.content and not has_assistant_message:
             print("[Tarot Router] 🌟 首次对话，使用预设开场白")
+            print(f"[Tarot Router] 当前消息数: {len(conversation.messages)}")
             
             # 获取用户昵称
             nickname = "朋友"  # 默认称呼
@@ -167,39 +171,19 @@ async def send_message(request: SendMessageRequest):
                         print(f"[Tarot Router] positions 值（序列化后）: {serializable_args.get('positions')}")
                         yield f"data: {json.dumps({'draw_cards': serializable_args})}\n\n"
                         
-                        # 告诉AI：已通知用户抽牌，等待用户完成
-                        # 注意：实际的抽牌和解读会在用户完成抽牌后由前端触发
-                        function_result = {
-                            "success": True,
-                            "message": "已通知用户打开抽牌器，用户正在选择塔罗牌。用户完成选牌后，我会立即为您解读。请稍候..."
-                        }
-                        
                         print(f"[Tarot Router] ✅ 函数执行完成: {func_name}")
-                        print(f"[Tarot Router] 📋 等待用户在抽牌器中完成选牌...")
+                        print(f"[Tarot Router] 📋 等待用户点击'我准备好了'按钮...")
                         
-                        # 获取最新对话状态
-                        current_conv = await ConversationService.get_conversation(request.conversation_id)
-                        
-                        # 告诉AI当前状态
-                        final_response = ""
-                        async for event2 in gemini_service.continue_with_function_result(
-                            current_conv.messages,
-                            user,
-                            session_type=current_conv.session_type,
-                            function_name=func_name,
-                            function_result=function_result
-                        ):
-                            if "content" in event2:
-                                final_response += event2["content"]
-                                yield f"data: {json.dumps({'content': event2['content']})}\n\n"
-                        
-                        # 保存AI的提示消息
-                        if final_response.strip():
-                            await ConversationService.add_message(
-                                request.conversation_id,
-                                MessageRole.ASSISTANT,
-                                final_response
-                            )
+                        # ⚠️ 重要修复：不要将函数结果喂回AI！
+                        # 原因：AI会认为抽牌已完成，立即开始解读，但用户还没有真正抽牌
+                        # 正确流程：
+                        # 1. 前端显示"我准备好了"按钮
+                        # 2. 用户点击按钮后弹出抽牌器
+                        # 3. 用户完成抽牌后调用 /draw 接口
+                        # 4. 前端发送"请根据抽牌结果进行解读"消息
+                        # 5. AI才开始解读抽牌结果
+                        # 
+                        # 因此这里不需要继续Agent Loop，直接结束即可
                     
                     elif func_name == "get_astrology_chart":
                         # 获取星盘数据

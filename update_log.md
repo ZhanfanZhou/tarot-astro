@@ -1,3 +1,33 @@
+## 2025-11-01 - 修复开场白并发问题
+
+**问题描述：**
+有时候开场白也会出现"我准备好了"抽牌按钮。开场白应该是预设文案，不经过AI模型处理，不应该有抽牌按钮。
+
+**问题根源：**
+1. **后端判断逻辑不够严格**：原先使用 len(conversation.messages) == 0 判断是否首次对话
+   - 在并发请求或快速重复调用时，第一次请求保存了开场白消息后，第二次请求时 messages 已不为空
+   - 导致第二次请求走 AI 调用逻辑，AI 可能返回类似开场白的回复 + 抽牌指令
+2. **前端缺少防抖保护**：React StrictMode 在开发环境下可能导致组件渲染两次
+
+**解决方案：**
+
+**1. 后端：改进开场白判断逻辑**
+- 将判断条件从 len(conversation.messages) == 0 改为检查是否存在 assistant 消息
+- 新实现：has_assistant_message = any(msg.role == MessageRole.ASSISTANT for msg in conversation.messages)
+- 逻辑：只要对话中没有 assistant 消息，就返回预设开场白
+- 修改文件：backend/routers/tarot.py 和 backend/routers/astrology.py
+
+**2. 前端：添加防抖保护**
+- 在 App.tsx 中添加 isCreatingSessionRef useRef 标志
+- 在 handleSelectSession 函数开头检查标志，如果会话正在创建中则忽略重复请求
+
+**技术细节：**
+- 使用 any() 函数检查是否存在 assistant 消息，比遍历更高效
+- 使用 useRef 而非 useState，因为不需要触发重新渲染
+- 在 finally 块中重置标志，确保异常时也能正确重置
+
+---
+
 ## 2025-10-29 - 更新图标和光晕效果
 
 **功能描述：**
@@ -1877,30 +1907,6 @@ await tarotApi.sendMessage(
 
 ---
 
-## 2025-10-03 - macOS 启动修复
-
-**问题：** 在 macOS 上启动后端时出现模块导入错误
-```
-ModuleNotFoundError: No module named 'backend'
-```
-
-**解决方案：** 修复所有 Python 模块的导入路径
-- 将 `from backend.xxx import xxx` 改为 `from xxx import xxx`
-- 影响文件：`main.py`, `services/*.py`, `routers/*.py`
-- 原因：在 macOS 上运行 Python 时，当前工作目录是项目根目录，不需要 `backend.` 前缀
-
-**测试结果：**
-- ✅ 后端成功启动在 http://localhost:8000
-- ✅ 前端成功启动在 http://localhost:5173  
-- ✅ API 健康检查通过
-- ✅ 用户创建 API 测试通过
-
-**技术细节：**
-- 使用 `source venv/bin/activate` 激活虚拟环境
-- 使用 `python backend/main.py` 启动后端
-- 使用 `npm run dev` 启动前端
-- 端口占用问题通过 `lsof -ti:8000 | xargs kill -9` 解决
- ---
 
 ## 2025-10-03 - 抽牌流程优化
 
@@ -1932,3 +1938,50 @@ ModuleNotFoundError: No module named 'backend'
 后端 API 层：has_drawn_cards 标记阻止重复 API 调用
 AI 提示层：系统提示词和抽牌结果标记引导 AI 行为
 前端逻辑层：console.warn 检测异常情况
+
+---
+
+## 2025-10-31 - 塔罗牌抽牌器UI优化：滑动窗口进度指示器
+
+**问题：** 进度指示器在扇形牌组上方，被牌遮挡看不清
+
+**解决方案：**
+1. **调整扇形牌组布局**
+   - 将扇形 Y 轴压缩系数从 0.75 调整为 0.62，让扇形更扁平
+   - 将基准下移偏移从 0 增加到 48px，扇形整体下移并贴近底部
+   - 将扇形容器高度从 300px 压缩为 280px
+   - 将卡片序号圆点从直径 9px 缩小到 8px，顶部偏移从 -10px 调整为 -8px
+
+2. **重新设计进度指示器**
+   - 移除顶部的简单进度条指示器
+   - 在扇形牌组上方（top: 230px）创建滑动窗口指示器，使用 z-50 确保显示在最上层
+   - 指示器包含三个部分：
+     * 顶部文字：显示"可见窗口：22 张"和"当前居中：第 X 张"
+     * 中间轨道：半透明深色背景条（带模糊效果），宽度代表 78 张牌
+     * 高亮窗口：渐变色区域（60% 透明度），宽度代表 22 张可见牌，左右有金色边框
+     * 中心指示点：金色圆点（增强阴影），标记当前居中的卡牌位置
+     * 底部刻度：显示 "1 · · · 78 张塔罗牌 · · · 78"
+
+3. **滑动窗口动画**
+   - 高亮窗口随拖动平滑移动，计算公式：`left = (centerIndex - halfVisible) / TOTAL_CARDS * 100%`
+   - 窗口宽度：`width = VISIBLE_CARDS / TOTAL_CARDS * 100%` (约 28.2%)
+   - 中心指示点独立跟随，计算公式：`left = (centerIndex + 1) / TOTAL_CARDS * 100%`
+   - 使用 spring 动画：窗口使用 stiffness: 120, damping: 18；指示点使用 stiffness: 200, damping: 24
+
+**技术细节：**
+- 扇形半径保持 450px 不变
+- 扇形角度范围保持 110° 不变
+- 卡片尺寸保持 96×144px (w-24 h-36) 不变
+- 进度指示器使用 `pointer-events-none` 避免干扰拖动
+- 进度指示器使用 `z-50` 确保显示在扇形牌组（z-index: 0-50）之上
+- 轨道使用 `bg-dark-elevated/80 backdrop-blur-sm` 增强可见性
+- 整体布局从上到下：顶部卡槽 → 进度指示器 (top: 230px, z-50) → 扇形牌组 (贴底) → 确认按钮 (bottom-8)
+
+**视觉效果：**
+- ✅ 扇形牌组整体下移并贴近底部，位置不变
+- ✅ 进度指示器显示在扇形牌组上方中间位置，使用高 z-index 确保可见
+- ✅ 进度指示器在中间，不会遮挡两侧的补牌特效
+- ✅ 滑动窗口形象显示当前 22 张可见牌的位置
+- ✅ 拖动时窗口和指示点平滑跟随，视觉反馈直观
+- ✅ 半透明背景和模糊效果确保指示器在任何背景下都清晰可见
+- chore: soften tarot shuffle glow, randomize paths each run, and apply `/assets/table.png` background for shuffle/spread stages

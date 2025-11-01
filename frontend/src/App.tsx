@@ -33,8 +33,10 @@ const App: React.FC = () => {
   const [streamingMessage, setStreamingMessage] = useState('');
   const [showCardDrawer, setShowCardDrawer] = useState(false);
   const [pendingDrawRequest, setPendingDrawRequest] = useState<DrawCardsRequest | null>(null);
+  const [showDrawButton, setShowDrawButton] = useState(false); // 是否显示抽牌按钮
   const [showAstrologyProfileModal, setShowAstrologyProfileModal] = useState(false);
   const [pendingAstrologyConversation, setPendingAstrologyConversation] = useState<string | null>(null);
+  const isCreatingSessionRef = useRef(false); // 防止重复创建会话
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -95,6 +97,13 @@ const App: React.FC = () => {
   const handleSelectSession = async (sessionType: SessionType) => {
     if (!user) return;
 
+    // 防抖：防止重复创建会话
+    if (isCreatingSessionRef.current) {
+      console.log('[App] 会话正在创建中，忽略重复请求');
+      return;
+    }
+    isCreatingSessionRef.current = true;
+
     try {
       const newConv = await conversationApi.create(user.user_id, sessionType);
       addConversation(newConv);
@@ -115,7 +124,7 @@ const App: React.FC = () => {
             },
             (drawRequest) => {
               setPendingDrawRequest(drawRequest);
-              setShowCardDrawer(true);
+              setShowDrawButton(true); // 显示抽牌按钮而非立即弹出抽牌器
             },
             (instruction) => {
               // 塔罗AI也可以请求用户资料
@@ -185,7 +194,7 @@ const App: React.FC = () => {
               // 星座AI也可以抽塔罗牌
               console.log('星座AI请求抽塔罗牌:', drawRequest);
               setPendingDrawRequest(drawRequest);
-              setShowCardDrawer(true);
+              setShowDrawButton(true); // 显示抽牌按钮而非立即弹出抽牌器
             }
           );
 
@@ -231,6 +240,8 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('创建对话失败:', error);
       alert('创建对话失败，请重试');
+    } finally {
+      isCreatingSessionRef.current = false;
     }
   };
 
@@ -368,7 +379,7 @@ const App: React.FC = () => {
             console.log('drawRequest.card_count:', drawRequest.card_count);
             console.log('drawRequest.positions:', drawRequest.positions);
             setPendingDrawRequest(drawRequest);
-            setShowCardDrawer(true);
+            setShowDrawButton(true); // 显示抽牌按钮而非立即弹出抽牌器
           }
         );
       } else {
@@ -384,7 +395,7 @@ const App: React.FC = () => {
             console.log('drawRequest.card_count:', drawRequest.card_count);
             console.log('drawRequest.positions:', drawRequest.positions);
             setPendingDrawRequest(drawRequest);
-            setShowCardDrawer(true);
+            setShowDrawButton(true); // 显示抽牌按钮而非立即弹出抽牌器
           },
           (instruction) => {
             // 塔罗AI也可以请求用户资料（用于结合星盘的深入解读）
@@ -446,6 +457,12 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // 用户点击"我准备好了"按钮，打开抽牌器
+  const handleReadyToDraw = () => {
+    setShowDrawButton(false); // 隐藏按钮
+    setShowCardDrawer(true); // 显示抽牌器
   };
 
   const handleCardsDrawn = async () => {
@@ -716,11 +733,26 @@ const App: React.FC = () => {
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
               <div className="max-w-4xl mx-auto space-y-6">
-                {currentConversation.messages.map((message, idx) => (
-                  message.role !== 'system' && (
-                    <ChatMessage key={idx} message={message} sessionType={currentConversation.session_type} />
-                  )
-                ))}
+                {currentConversation.messages.map((message, idx) => {
+                  // 检查是否是最后一条 AI 消息且有待处理的抽牌请求
+                  const isLastAssistantMessage = 
+                    message.role === 'assistant' && 
+                    idx === currentConversation.messages.length - 1;
+                  const shouldShowDrawButton = 
+                    isLastAssistantMessage && 
+                    showDrawButton && 
+                    pendingDrawRequest !== null;
+                  
+                  return message.role !== 'system' && (
+                    <ChatMessage 
+                      key={idx} 
+                      message={message} 
+                      sessionType={currentConversation.session_type}
+                      showDrawButton={shouldShowDrawButton}
+                      onReadyToDraw={handleReadyToDraw}
+                    />
+                  );
+                })}
                 
                 {streamingMessage && (
                   <ChatMessage
@@ -730,6 +762,8 @@ const App: React.FC = () => {
                       timestamp: new Date().toISOString(),
                     }}
                     sessionType={currentConversation.session_type}
+                    showDrawButton={showDrawButton}
+                    onReadyToDraw={handleReadyToDraw}
                   />
                 )}
                 
