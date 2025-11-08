@@ -8,6 +8,8 @@ interface ChatMessageProps {
   message: Message;
   isThinking?: boolean;
   sessionType?: SessionType;
+  showDrawButton?: boolean; // 是否显示抽牌按钮
+  onReadyToDraw?: () => void; // 点击抽牌按钮的回调
 }
 
 const THINKING_MESSAGES = [
@@ -21,9 +23,16 @@ const THINKING_MESSAGES = [
   '智慧连接中...',
 ];
 
-const ChatMessage: React.FC<ChatMessageProps> = ({ message, isThinking = false, sessionType }) => {
+const ChatMessage: React.FC<ChatMessageProps> = ({ 
+  message, 
+  isThinking = false, 
+  sessionType, 
+  showDrawButton = false,
+  onReadyToDraw 
+}) => {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
+  const trimmedContent = message.content?.trim() ?? '';
 
   // 获取 AI 头像路径
   const getAIAvatarPath = () => {
@@ -134,9 +143,27 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, isThinking = false, 
               : 'glass-morphism border border-primary/20 shadow-cosmic'
           }`}
         >
-          <p className="whitespace-pre-wrap break-words leading-relaxed">
-            {message.content}
-          </p>
+          {trimmedContent && (
+            <p className="whitespace-pre-wrap break-words leading-relaxed">
+              {message.content}
+            </p>
+          )}
+          
+          {/* 抽牌按钮 */}
+          {!isUser && showDrawButton && onReadyToDraw && (
+            <motion.button
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={onReadyToDraw}
+              className={`${trimmedContent ? 'mt-4' : ''} px-6 py-3 bg-mystic-gradient text-white font-display font-semibold rounded-xl shadow-mystic hover:shadow-mystic-lg transition-all duration-300 flex items-center gap-2 mx-auto`}
+            >
+              <Sparkles size={18} className="animate-pulse" />
+              {trimmedContent ? '我准备好了' : '点我抽牌'}
+              <Sparkles size={18} className="animate-pulse" />
+            </motion.button>
+          )}
           
           {/* 显示抽到的牌 */}
           {message.tarot_cards && message.tarot_cards.length > 0 && (

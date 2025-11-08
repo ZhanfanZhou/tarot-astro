@@ -2,6 +2,7 @@ import uuid
 from passlib.context import CryptContext
 from models import User, UserType, UserProfile, UserRegister
 from services.storage_service import StorageService
+from services.notebook_service import notebook_service
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -78,6 +79,47 @@ class UserService:
         if not user:
             raise ValueError("用户不存在")
         return user
+    
+    @staticmethod
+    async def convert_guest_to_registered(user_id: str, username: str, password: str) -> User:
+        """将游客转换为注册用户"""
+        # 获取游客用户
+        user = await StorageService.get_user(user_id)
+        if not user:
+            raise ValueError("用户不存在")
+        
+        if user.user_type != UserType.GUEST:
+            raise ValueError("只有游客用户可以转换为注册用户")
+        
+        # 检查用户名是否已存在
+        existing_user = await StorageService.get_user_by_username(username)
+        if existing_user:
+            raise ValueError("用户名已存在")
+        
+        # 更新用户信息
+        user.user_type = UserType.REGISTERED
+        user.username = username
+        user.password_hash = UserService.hash_password(password)
+        
+        await StorageService.save_user(user)
+        return user
+    
+    @staticmethod
+    async def delete_user_and_conversations(user_id: str):
+        """删除用户及其所有对话"""
+        # 获取用户信息
+        user = await StorageService.get_user(user_id)
+        
+        # 删除用户的所有对话
+        await StorageService.delete_user_conversations(user_id)
+        
+        # 如果是游客用户，删除其笔记本
+        if user and user.user_type == UserType.GUEST:
+            notebook_service.delete_notebook(user_id)
+            print(f"[UserService] 已删除游客 {user_id} 的笔记本")
+        
+        # 删除用户
+        await StorageService.delete_user(user_id)
 
 
 

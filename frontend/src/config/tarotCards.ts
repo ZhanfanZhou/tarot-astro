@@ -123,7 +123,10 @@ export const getCardInfo = (cardId: number): TarotCardInfo | undefined => {
 };
 
 // 卡背图片
-export const CARD_BACK_IMAGE = '/tarot-images/card-back.jpg';
+export const CARD_BACK_IMAGE = '/tarot-images/card-back.png';
+
+// 抽牌台面背景
+export const TABLE_BACKGROUND_IMAGE = '/assets/table.png';
 
 // 默认占位图片（当真实图片不存在时使用）
 export const CARD_PLACEHOLDER_IMAGE = '/tarot-images/placeholder.jpg';

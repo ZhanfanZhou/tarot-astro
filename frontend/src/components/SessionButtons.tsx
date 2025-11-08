@@ -16,26 +16,26 @@ const SessionButtons: React.FC<SessionButtonsProps> = ({
       type: 'tarot' as SessionType,
       icon: '/assets/avatar_tarot.png',
       label: '塔罗占卜',
-      description: '探索命运的奥秘',
+      // description: '探索命运的奥秘',
       gradient: 'from-purple-600 via-pink-500 to-rose-500',
-      glowColor: 'rgba(139, 0, 0, 0.8)', // 暗红色边缘光晕
+      glowColor: 'rgba(139, 92, 246, 0.15)', // 柔和的紫色光晕
     },
     {
       type: 'astrology' as SessionType,
       icon: '/assets/avatar.png',
       label: '占星',
-      description: '聆听星辰的指引',
+      // description: '聆听星辰的指引',
       gradient: 'from-blue-600 via-cyan-500 to-teal-500',
-      glowColor: 'rgba(218, 165, 32, 0.8)', // 暗金色边缘光晕
+      glowColor: 'rgba(59, 130, 246, 0.15)', // 柔和的蓝色光晕
       comingSoon: false,
     },
     {
       type: 'chat' as SessionType,
-      icon: '💬',
-      label: '心灵聊愈',
-      description: '倾诉心声的港湾',
-      gradient: 'from-green-600 via-emerald-500 to-teal-500',
-      glowColor: 'rgba(34, 197, 94, 0.5)',
+      icon: '/assets/avatar3.png',
+      label: '聊愈',
+      // description: '倾诉心声的港湾',
+      // gradient: 'from-green-600 via-emerald-500 to-teal-500',
+      glowColor: 'rgba(142, 41, 15, 0.15)',
       comingSoon: true,
     },
   ];
@@ -75,9 +75,9 @@ const SessionButtons: React.FC<SessionButtonsProps> = ({
               animate={{
                 boxShadow: !button.comingSoon
                   ? [
-                      `0 0 0 2px ${button.glowColor}, 0 0 15px 2px ${button.glowColor}`,
-                      `0 0 0 3px ${button.glowColor}, 0 0 25px 4px ${button.glowColor}`,
-                      `0 0 0 2px ${button.glowColor}, 0 0 15px 2px ${button.glowColor}`,
+                      `0 0 30px 8px ${button.glowColor}`,
+                      `0 0 50px 15px ${button.glowColor}`,
+                      `0 0 30px 8px ${button.glowColor}`,
                     ]
                   : undefined,
               }}
@@ -107,9 +107,9 @@ const SessionButtons: React.FC<SessionButtonsProps> = ({
                     ease: 'linear',
                   }}
                   style={{
-                    background: `conic-gradient(from 0deg, transparent 60%, ${button.glowColor} 80%, transparent 100%)`,
-                    filter: 'blur(6px)',
-                    opacity: 0.6,
+                    background: `conic-gradient(from 0deg, transparent 70%, ${button.glowColor} 85%, transparent 100%)`,
+                    filter: 'blur(12px)',
+                    opacity: 0.8,
                   }}
                 />
               )}

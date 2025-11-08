@@ -8,11 +8,13 @@ import SessionButtons from './components/SessionButtons';
 import TarotCardDrawer from './components/TarotCardDrawer';
 import AuthModal from './components/AuthModal';
 import AstrologyProfileModal from './components/AstrologyProfileModal';
+import ConvertToRegisteredModal from './components/ConvertToRegisteredModal';
 import MysticBackground from './components/MysticBackground';
 import { useAuthStore } from './stores/useAuthStore';
 import { useConversationStore } from './stores/useConversationStore';
 import { userApi, conversationApi, tarotApi, astrologyApi } from './services/api';
-import type { SessionType, DrawCardsRequest, Message, MessageRole, UserProfile } from './types';
+import { MessageRole } from './types';
+import type { SessionType, DrawCardsRequest, Message, UserProfile } from './types';
 
 const App: React.FC = () => {
   const { user, setUser, logout } = useAuthStore();
@@ -29,6 +31,7 @@ const App: React.FC = () => {
 
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showConvertModal, setShowConvertModal] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState('');
   const [showCardDrawer, setShowCardDrawer] = useState(false);
@@ -37,6 +40,7 @@ const App: React.FC = () => {
   const [showAstrologyProfileModal, setShowAstrologyProfileModal] = useState(false);
   const [pendingAstrologyConversation, setPendingAstrologyConversation] = useState<string | null>(null);
   const isCreatingSessionRef = useRef(false); // 防止重复创建会话
+  const previousConversationIdRef = useRef<string | null>(null); // 追踪上一次的对话ID，用于退出时保存笔记
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -53,6 +57,33 @@ const App: React.FC = () => {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentConversation?.messages, streamingMessage]);
+
+  // 页面卸载时保存笔记
+  useEffect(() => {
+    const handleBeforeUnload = async () => {
+      if (currentConversation) {
+        // 使用 sendBeacon 确保在页面卸载前发送请求
+        const apiUrl = import.meta.env.VITE_API_URL || '';
+        const url = `${apiUrl}/api/conversations/${currentConversation.conversation_id}/exit`;
+        
+        // 使用 fetch with keepalive 而不是 sendBeacon，因为我们需要 POST JSON
+        try {
+          await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            keepalive: true,
+          });
+        } catch (error) {
+          console.error('[ConversationExit] 页面卸载时保存笔记失败:', error);
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [currentConversation]);
 
   const loadUserConversations = async () => {
     if (!user) return;
@@ -245,14 +276,38 @@ const App: React.FC = () => {
     }
   };
 
-  const handleNewConversation = () => {
+  // 处理对话退出（保存笔记）
+  const handleExitConversation = async (conversationId: string) => {
+    try {
+      console.log('[ConversationExit] 对话退出，尝试保存笔记:', conversationId);
+      const result = await conversationApi.exit(conversationId);
+      if (result.notebook_updated) {
+        console.log('[ConversationExit] 笔记已保存');
+      }
+    } catch (error) {
+      console.error('[ConversationExit] 保存笔记失败:', error);
+    }
+  };
+
+  const handleNewConversation = async () => {
+    // 如果有当前对话，先保存笔记
+    if (currentConversation) {
+      await handleExitConversation(currentConversation.conversation_id);
+    }
     setCurrentConversation(null);
+    previousConversationIdRef.current = null;
   };
 
   const handleSelectConversation = async (conversation: any) => {
     try {
+      // 如果有当前对话且不是同一个对话，先保存笔记
+      if (currentConversation && currentConversation.conversation_id !== conversation.conversation_id) {
+        await handleExitConversation(currentConversation.conversation_id);
+      }
+      
       const fullConv = await conversationApi.get(conversation.conversation_id);
       setCurrentConversation(fullConv);
+      previousConversationIdRef.current = fullConv.conversation_id;
     } catch (error) {
       console.error('加载对话失败:', error);
     }
@@ -552,14 +607,83 @@ const App: React.FC = () => {
     }
   };
 
-  const handleLogout = () => {
-    if (confirm('确定要退出登录吗？')) {
-      logout();
-      setConversations([]);
-      setCurrentConversation(null);
-      setShowSettings(false);
+  const handleLogout = async () => {
+    if (!user) return;
+
+    // 退出前保存当前对话的笔记
+    if (currentConversation) {
+      await handleExitConversation(currentConversation.conversation_id);
+    }
+
+    // 游客用户特殊处理
+    if (user.user_type === 'guest') {
+      const choice = window.confirm(
+        '您是游客用户，退出后将无法找回对话历史！\n\n' +
+        '点击"确定"删除所有数据并退出\n' +
+        '点击"取消"返回（您也可以选择转换为注册用户保留数据）'
+      );
+
+      if (!choice) return;
+
+      // 用户选择删除数据
+      const confirmDelete = window.confirm(
+        '是否要删除所有对话记录和个人信息？\n\n' +
+        '点击"确定"将永久删除数据\n' +
+        '点击"取消"可以转换为注册用户保留数据'
+      );
+
+      if (confirmDelete) {
+        // 删除用户及其对话
+        try {
+          await userApi.deleteUser(user.user_id);
+          alert('数据已删除');
+        } catch (error) {
+          console.error('删除数据失败:', error);
+        }
+      } else {
+        // 引导转换为注册用户
+        setShowSettings(false);
+        setShowConvertModal(true);
+        return;
+      }
+    } else {
+      // 注册用户正常退出
+      if (!confirm('确定要退出登录吗？')) {
+        return;
+      }
+    }
+
+    // 清空前端状态
+    logout();
+    setConversations([]);
+    setCurrentConversation(null);
+    setShowSettings(false);
+  };
+
+  const handleConvertToRegistered = async (username: string, password: string) => {
+    if (!user) return;
+
+    try {
+      const updatedUser = await userApi.convertGuestToRegistered(user.user_id, username, password);
+      setUser(updatedUser);
+      setShowConvertModal(false);
+      alert('转换成功！现在您可以随时登录查看历史记录了');
+    } catch (error: any) {
+      console.error('转换失败:', error);
+      alert(error.response?.data?.detail || '转换失败，请重试');
     }
   };
+
+  const nonSystemMessages = currentConversation?.messages.filter((msg) => msg.role !== MessageRole.SYSTEM) ?? [];
+  const lastNonSystemMessage = nonSystemMessages[nonSystemMessages.length - 1];
+  const hasAssistantMessageAtEnd = lastNonSystemMessage?.role === MessageRole.ASSISTANT;
+  const shouldRenderStandaloneDrawPrompt = Boolean(
+    currentConversation &&
+    showDrawButton &&
+    pendingDrawRequest &&
+    !hasAssistantMessageAtEnd &&
+    streamingMessage.trim().length === 0
+  );
 
   return (
     <div className="w-full h-full flex relative">
@@ -767,6 +891,20 @@ const App: React.FC = () => {
                   />
                 )}
                 
+                {shouldRenderStandaloneDrawPrompt && (
+                  <ChatMessage
+                    key="draw-button-placeholder"
+                    message={{
+                      role: MessageRole.ASSISTANT,
+                      content: '',
+                      timestamp: new Date().toISOString(),
+                    }}
+                    sessionType={currentConversation.session_type}
+                    showDrawButton={true}
+                    onReadyToDraw={handleReadyToDraw}
+                  />
+                )}
+
                 {isLoading && !streamingMessage && (
                   <ChatMessage
                     message={{
@@ -869,6 +1007,19 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
+                {/* 游客用户显示转换按钮 */}
+                {user?.user_type === 'guest' && (
+                  <button
+                    onClick={() => {
+                      setShowSettings(false);
+                      setShowConvertModal(true);
+                    }}
+                    className="w-full px-6 py-3 bg-primary/20 text-primary hover:bg-primary/30 rounded-xl transition-colors"
+                  >
+                    转为注册用户
+                  </button>
+                )}
+
                 <button
                   onClick={handleLogout}
                   className="w-full px-6 py-3 bg-red-500/20 text-red-500 hover:bg-red-500/30 rounded-xl transition-colors"
@@ -880,6 +1031,14 @@ const App: React.FC = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+        {/* Convert to Registered Modal */}
+        <ConvertToRegisteredModal
+          isOpen={showConvertModal}
+          onClose={() => setShowConvertModal(false)}
+          onConvert={handleConvertToRegistered}
+          currentProfile={user?.profile}
+        />
       </div>
     </div>
   );

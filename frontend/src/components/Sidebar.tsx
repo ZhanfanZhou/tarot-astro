@@ -74,7 +74,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           </motion.div>
           <div>
             <h1 className="font-display font-bold text-lg mystic-text">小x的秘密圣殿</h1>
-            <p className="text-xs text-gray-400">Mystic Oracle</p>
+            {/* <p className="text-xs text-gray-400">Mystic Oracle</p> */}
           </div>
         </motion.div>
 
@@ -82,10 +82,13 @@ const Sidebar: React.FC<SidebarProps> = ({
           onClick={onNewConversation}
           whileHover={{ scale: 1.02, y: -2 }}
           whileTap={{ scale: 0.98 }}
-          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-mystic-gradient hover:opacity-90 rounded-xl transition-all shadow-mystic font-medium"
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-dark-elevated hover:bg-dark-hover border border-primary/30 rounded-xl transition-all font-medium relative overflow-hidden group"
         >
-          <Plus size={20} />
-          <span>开启新占卜</span>
+          {/* 柔和的渐变背景 */}
+          <div className="absolute inset-0 bg-gradient-to-r from-purple-500/10 via-pink-500/10 to-purple-500/10 opacity-50 group-hover:opacity-100 transition-opacity" />
+          
+          <Plus size={20} className="relative z-10" />
+          <span className="relative z-10">开启新占卜</span>
         </motion.button>
       </div>
 
@@ -171,13 +174,13 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                       {/* 删除按钮 */}
                       <motion.button
-                        initial={{ opacity: 0 }}
                         whileHover={{ scale: 1.1 }}
                         onClick={(e) => {
                           e.stopPropagation();
                           onDeleteConversation(conv.conversation_id);
                         }}
-                        className="opacity-0 group-hover:opacity-100 flex-shrink-0 p-1.5 hover:bg-red-500/20 rounded-lg transition-all"
+                        className="relative z-10 opacity-0 group-hover:opacity-80 group-focus-within:opacity-80 focus-visible:opacity-100 flex-shrink-0 p-1.5 hover:bg-red-500/20 rounded-lg transition-all"
+                        aria-label="删除对话"
                       >
                         <Trash2 size={14} className="text-red-400" />
                       </motion.button>
@@ -217,7 +220,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         </div>
         
         <p className="text-xs text-center text-gray-600 font-display">
-          探索命运的奥秘
+        anyway the wind blows
         </p>
       </div>
     </div>

@@ -1,3 +1,273 @@
+## 2025-11-08 - 实现占卜笔记本功能
+
+**功能描述：**
+为每个用户（注册用户/游客）创建独立的占卜笔记本，使用 AI 自动记录每次对话的摘要，包括问题、抽到的牌、用户经历和反馈。
+
+**核心功能：**
+
+**1. 笔记本服务（NotebookService）**
+- ✅ 新增 `services/notebook_service.py` 笔记本管理服务
+  - 每个用户独立的笔记本文件：`backend/data/notebooks/note_{user_id}.log`
+  - JSON 格式存储，支持多条记录
+  - 自动去重：同一对话多次退出只更新同一条记录
+- ✅ AI 自动生成摘要
+  - 使用独立的 Gemini-2.5-flash 模型（与占卜模型分离）
+  - 专用提示词：以用户第一人称视角书写
+  - 限制在 300 字以内
+  - 记录内容：对话时间、讨论问题、抽到的牌、用户经历和反馈
+- ✅ 笔记本生命周期管理
+  - `update_entry()` - 更新或创建笔记条目
+  - `delete_notebook()` - 删除笔记本（游客登出时）
+  - `get_notebook()` - 读取笔记本（调试用）
+
+**2. 对话退出检测**
+- ✅ 新增 `POST /api/conversations/{id}/exit` 端点
+  - 检查触发条件：消息数 > 1 且抽过塔罗牌
+  - 满足条件时自动生成并保存笔记
+  - 返回笔记更新状态
+- ✅ 多场景退出检测（前端）
+  - 用户切换对话时（`handleSelectConversation`）
+  - 用户新建对话时（`handleNewConversation`）
+  - 用户登出时（`handleLogout`）
+  - 页面关闭/刷新时（`beforeunload` 事件）
+- ✅ 页面卸载处理
+  - 使用 `fetch` with `keepalive: true` 确保请求发送
+  - 异步处理，不阻塞页面关闭
+
+**3. 用户转换和删除时的笔记本处理**
+- ✅ 游客转注册用户
+  - user_id 保持不变，笔记本自动保留
+  - 无需额外迁移逻辑
+- ✅ 游客登出时删除笔记本
+  - 在 `delete_user_and_conversations()` 中添加笔记本删除
+  - 确保游客数据完全清理
+- ✅ 注册用户登出
+  - 保留笔记本，仅清空前端状态
+
+**4. 前端集成**
+- ✅ 新增 `conversationApi.exit()` API 方法
+- ✅ 追踪上一次对话ID（`previousConversationIdRef`）
+- ✅ 自动调用 exit API，无需用户手动操作
+- ✅ 错误容忍处理，不影响用户体验
+
+**技术实现：**
+
+**后端架构：**
+```python
+# 笔记本服务
+NotebookService:
+  - NOTEBOOK_MODEL = "gemini-2.5-flash"
+  - NOTEBOOK_PROMPT = 第一人称视角的笔记提示词
+  
+  generate_summary(conversation, user):
+    1. 提取问题（第一条用户消息）
+    2. 提取抽到的牌（所有 tarot_cards）
+    3. 构建对话内容（用户和助手消息）
+    4. 调用 Gemini 生成摘要
+    5. 返回摘要文本
+  
+  update_entry(user_id, conversation, user):
+    1. 加载现有笔记本
+    2. 查找是否有该对话的记录
+    3. 生成新摘要
+    4. 更新或创建条目
+    5. 保存笔记本
+
+# 对话退出端点
+POST /api/conversations/{id}/exit:
+  1. 获取对话信息
+  2. 检查条件：has_content && has_drawn_cards
+  3. 满足条件 → NotebookService.update_entry()
+  4. 返回 { notebook_updated: true/false }
+```
+
+**前端架构：**
+```typescript
+// 对话退出处理
+handleExitConversation(conversationId):
+  - 调用 conversationApi.exit(conversationId)
+  - 记录日志
+  - 错误容忍
+
+// 对话切换
+handleSelectConversation(conversation):
+  1. 如果有当前对话 → handleExitConversation()
+  2. 加载新对话
+  3. 更新 previousConversationIdRef
+
+// 页面卸载
+useEffect(() => {
+  window.addEventListener('beforeunload', () => {
+    fetch(exit_url, { keepalive: true })
+  })
+})
+```
+
+**数据结构：**
+```json
+// note_{user_id}.log
+[
+  {
+    "conversation_id": "conv_xxx",
+    "start_time": "2025-11-08T10:00:00",
+    "question": "最近工作上的问题...",
+    "cards_drawn": ["权杖三（正位）", "圣杯二（逆位）"],
+    "summary": "我在2025年11月8日进行了占卜。我想了解最近工作上的问题...",
+    "user_feedback": ""
+  }
+]
+```
+
+**设计机制：**
+- **独立模型**：笔记生成使用独立的 Gemini-2.5-flash，避免与占卜模型混淆
+- **第一人称视角**：提示词强调以"我"的视角书写，增强个人化
+- **条件过滤**：只记录有意义的对话（有内容且抽过牌），避免空记录
+- **自动触发**：前端监听所有退出场景，完全自动化
+- **异步生成**：不阻塞用户操作
+- **容错处理**：生成失败使用默认摘要
+- **不对外展示**：仅用于内部记录，不在UI中展示
+
+**文件改动：**
+- 新增：`backend/services/notebook_service.py`
+- 修改：`backend/routers/conversations.py` - 添加 exit 端点
+- 修改：`backend/services/user_service.py` - 添加笔记本删除逻辑
+- 修改：`frontend/src/services/api.ts` - 添加 exit API
+- 修改：`frontend/src/App.tsx` - 添加退出检测和处理
+- 更新：`arch.md` - 添加笔记本服务章节和流程说明
+
+---
+
+## 2025-11-03 - 添加游客转注册用户功能和退出保护
+
+**功能描述：**
+实现游客转注册用户功能，并为游客退出时增加数据保护提示，避免用户丢失对话历史。
+
+**核心功能：**
+
+**1. 游客转注册用户（保留历史）**
+- ✅ 后端新增 `POST /api/users/convert-guest` 接口
+  - 验证用户类型（必须是游客）
+  - 验证用户名唯一性
+  - 保留原 user_id 和所有对话历史
+  - 只更新 user_type、username 和 password_hash
+- ✅ 前端新增转换模态框组件 `ConvertToRegisteredModal.tsx`
+  - 用户名自动预填为昵称
+  - 密码强度验证（至少6位）
+  - 显示将被保留的个人信息
+  - 实时表单验证
+- ✅ 设置面板新增"转为注册用户"按钮
+  - 仅对游客用户显示
+  - 点击后打开转换模态框
+
+**2. 游客退出保护机制**
+- ✅ 两次确认机制
+  - 第一次确认："退出后将无法找回对话历史"
+  - 第二次确认："是否删除所有数据"
+- ✅ 三种退出选择
+  - 点击"确定"→ 删除所有数据并退出
+  - 点击"取消"→ 引导转换为注册用户
+  - 直接关闭 → 不退出
+- ✅ 级联删除机制
+  - 新增 `DELETE /api/users/{user_id}` 接口
+  - 删除用户时自动删除其所有对话
+  - 后端级联删除，保证数据清理完整
+
+**3. 数据存储扩展**
+- ✅ 新增 `delete_user_conversations(user_id)` 方法
+  - 批量删除用户的所有对话
+  - 使用字典推导式过滤，高效且安全
+- ✅ 新增 `ConvertGuestToRegisteredRequest` 数据模型
+  - user_id、username、password 三个字段
+
+**技术实现：**
+
+**后端架构：**
+```python
+# 转换流程
+convert_guest_to_registered():
+  1. 检查用户类型（必须是游客）
+  2. 检查用户名唯一性
+  3. 更新用户信息（保留 user_id）
+  4. 返回更新后的用户对象
+
+# 删除流程
+delete_user_and_conversations():
+  1. 调用 delete_user_conversations() 删除所有对话
+  2. 调用 delete_user() 删除用户
+```
+
+**前端交互：**
+```typescript
+// 转换逻辑
+handleConvertToRegistered():
+  1. 调用 API 转换用户
+  2. 更新 Zustand 状态
+  3. 无需重新登录
+  4. 提示转换成功
+
+// 退出逻辑
+handleLogout():
+  1. 判断用户类型
+  2. 游客：显示保护提示 + 三种选择
+  3. 注册用户：正常退出确认
+  4. 清空前端状态
+```
+
+**设计机制：**
+
+**1. 保留历史机制**
+- 转换时保留原 user_id
+- 所有对话通过 user_id 关联
+- 转换后对话自动继承
+
+**2. 无缝切换**
+- 转换后直接更新 Zustand 状态
+- 不需要重新登录
+- 用户体验流畅
+
+**3. 数据保护**
+- 游客退出时两次确认
+- 引导转换而非直接删除
+- 减少用户误操作
+
+**修改的文件：**
+
+**后端：**
+- `backend/models.py` - 新增 `ConvertGuestToRegisteredRequest` 模型
+- `backend/services/user_service.py` - 新增转换和删除方法
+- `backend/services/storage_service.py` - 新增 `delete_user_conversations` 方法
+- `backend/routers/users.py` - 新增两个接口
+
+**前端：**
+- `frontend/src/components/ConvertToRegisteredModal.tsx` - 新增转换模态框
+- `frontend/src/services/api.ts` - 新增API调用方法
+- `frontend/src/App.tsx` - 集成转换功能和改进退出逻辑
+
+**文档：**
+- `arch.md` - 更新架构设计文档
+  - 数据模型层新增模型
+  - 存储服务层新增方法
+  - 用户服务层新增方法
+  - 用户路由层新增接口
+  - 主应用新增状态和方法
+  - 新增转换为注册用户弹窗组件说明
+
+**用户体验提升：**
+- ✅ 游客可以随时转为注册用户，保留所有历史
+- ✅ 退出时有明确的数据保护提示
+- ✅ 避免用户因误操作丢失对话历史
+- ✅ 转换流程简单，自动预填信息
+- ✅ 个人信息完整保留，用户无需重新填写
+
+**测试场景：**
+1. ✅ 游客填写个人信息 → 设置中转换为注册用户 → 检查信息保留
+2. ✅ 游客创建多个对话 → 转换为注册用户 → 检查对话保留
+3. ✅ 游客退出 → 选择删除 → 检查数据清理
+4. ✅ 游客退出 → 选择取消 → 引导转换 → 检查流程
+5. ✅ 注册用户正常退出 → 检查体验一致
+
+---
+
 ## 2025-11-01 - 修复开场白并发问题
 
 **问题描述：**
@@ -1985,3 +2255,5 @@ AI 提示层：系统提示词和抽牌结果标记引导 AI 行为
 - ✅ 拖动时窗口和指示点平滑跟随，视觉反馈直观
 - ✅ 半透明背景和模糊效果确保指示器在任何背景下都清晰可见
 - chore: soften tarot shuffle glow, randomize paths each run, and apply `/assets/table.png` background for shuffle/spread stages
+- fix: render a standalone assistant bubble with the draw button when Gemini 2.5 Pro only returns `draw_tarot_cards`, switching the label to “点我抽牌” when no text is provided and hiding empty paragraphs in `ChatMessage`
+- ui: raise the conversation delete button above overlays, ensure hover opacity applies, and ease its reveal in `Sidebar`

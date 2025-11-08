@@ -91,6 +91,18 @@ class StorageService:
         if conversation_id in conversations:
             del conversations[conversation_id]
             await StorageService._write_json(CONVERSATIONS_FILE, conversations)
+    
+    @staticmethod
+    async def delete_user_conversations(user_id: str):
+        """删除用户的所有对话"""
+        conversations = await StorageService._read_json(CONVERSATIONS_FILE)
+        # 过滤掉该用户的所有对话
+        filtered_conversations = {
+            conv_id: conv_data
+            for conv_id, conv_data in conversations.items()
+            if conv_data.get('user_id') != user_id
+        }
+        await StorageService._write_json(CONVERSATIONS_FILE, filtered_conversations)
 
 
 

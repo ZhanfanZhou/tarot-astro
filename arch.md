@@ -56,6 +56,8 @@
 **核心模型：**
 - `User` - 用户模型（包含 ID、类型、用户名、密码哈希、个人资料）
 - `UserProfile` - 用户资料（昵称、性别、出生日期）
+- `UserRegister` - 用户注册请求（用户名、密码、个人资料）
+- `ConvertGuestToRegisteredRequest` - 游客转注册用户请求（用户ID、用户名、密码）
 - `Conversation` - 对话模型（包含消息列表、会话类型、完成状态）
 - `Message` - 消息模型（角色、内容、时间戳、塔罗牌结果、抽牌请求）
   - `tarot_cards`: 抽到的牌列表（可选，用于在对话中显示抽牌结果）
@@ -101,12 +103,14 @@
 - `get_user_conversations(user_id)` - 获取用户的所有对话
 - `save_conversation(conversation)` - 保存对话
 - `delete_conversation(conversation_id)` - 删除对话
+- `delete_user_conversations(user_id)` - 删除用户的所有对话
 
 **设计机制：**
 - 使用 aiofiles 实现异步文件操作，提高性能
 - 所有方法都是异步的（async/await）
 - 使用 JSON 格式存储，易于调试和迁移
 - 内部使用字典作为索引，提高查询效率
+- 批量删除操作使用字典推导式过滤，高效且安全
 
 #### 1.4 用户服务层 (services/user_service.py)
 
@@ -120,6 +124,8 @@
 - `authenticate_user(username, password)` - 用户认证
 - `update_user_profile(user_id, profile)` - 更新用户资料
 - `get_user(user_id)` - 获取用户信息
+- `convert_guest_to_registered(user_id, username, password)` - 将游客转换为注册用户
+- `delete_user_and_conversations(user_id)` - 删除用户及其所有对话
 
 **调用关系：**
 ```
@@ -127,6 +133,8 @@ create_guest_user → generate UUID → save_user (StorageService)
 create_registered_user → check username → hash_password → save_user
 authenticate_user → get_user_by_username → verify_password
 update_user_profile → get_user → save_user
+convert_guest_to_registered → get_user → check username → hash_password → save_user
+delete_user_and_conversations → delete_user_conversations (StorageService) → delete_user (StorageService)
 ```
 
 **设计机制：**
@@ -134,6 +142,8 @@ update_user_profile → get_user → save_user
 - 注册用户 ID 使用 `user_` 前缀 + 12位随机字符
 - 使用 bcrypt 算法加密密码，保证安全性
 - 注册时检查用户名唯一性
+- **游客转换机制**：保留原 user_id 和所有对话记录，只修改 user_type、username 和 password_hash
+- **数据清理机制**：删除用户时级联删除其所有对话，防止数据残留
 
 #### 1.5 对话服务层 (services/conversation_service.py)
 
@@ -330,6 +340,53 @@ continue_with_function_result → format messages with function result
 - 逆位概率设置为 30%，符合塔罗占卜惯例
 - 抽牌结果包含牌 ID、牌名、逆位状态
 
+#### 1.9 占卜笔记本服务层 (services/notebook_service.py)
+
+**功能：** 为每个用户管理独立的占卜笔记本，自动记录占卜历史
+
+**核心方法：**
+- `generate_summary(conversation, user)` - 使用 AI 生成对话摘要
+- `update_entry(user_id, conversation, user)` - 更新或创建笔记本条目
+- `delete_notebook(user_id)` - 删除用户笔记本
+- `migrate_notebook(old_user_id, new_user_id)` - 迁移笔记本（已废弃，因为游客转注册时 user_id 保持不变）
+- `get_notebook(user_id)` - 获取用户笔记本
+
+**数据结构：**
+```python
+NotebookEntry:
+  - conversation_id: 对话ID
+  - start_time: 对话开始时间
+  - question: 讨论的问题
+  - cards_drawn: 抽到的牌列表
+  - summary: AI生成的摘要（以用户第一人称视角）
+  - user_feedback: 用户反馈
+```
+
+**存储机制：**
+- 每个用户独立的笔记本文件：`backend/data/notebooks/note_{user_id}.log`
+- 使用 JSON 格式存储
+- 游客和注册用户都有独立笔记本
+- 游客转注册时，笔记本自动保留（因为 user_id 不变）
+- 游客登出时，笔记本自动删除
+
+**AI 摘要生成：**
+- 使用独立的 Gemini-2.5-flash 模型（与占卜模型分离）
+- 独立的提示词系统，专注于笔记记录而非占卜
+- 以用户第一人称视角书写
+- 限制在 300 字以内
+- 记录问题、抽到的牌、用户经历和反馈
+
+**触发条件：**
+- 对话退出时（切换对话、新建对话、页面关闭、登出）
+- 且对话内容有新增（消息数 > 1）
+- 且对话中抽过塔罗牌
+
+**设计机制：**
+- 使用异步 AI 生成，避免阻塞
+- 自动去重：同一对话多次退出只更新同一条记录
+- 不对外展示，仅用于内部记录
+- 错误容忍：生成失败时使用简单默认摘要
+
 ### 2. API 路由层
 
 #### 2.1 用户路由 (routers/users.py)
@@ -340,6 +397,8 @@ continue_with_function_result → format messages with function result
 - `POST /api/users/login` - 用户登录
 - `GET /api/users/{user_id}` - 获取用户信息
 - `PUT /api/users/{user_id}/profile` - 更新用户资料
+- `POST /api/users/convert-guest` - 将游客转换为注册用户
+- `DELETE /api/users/{user_id}` - 删除用户及其所有对话
 
 **调用流程：**
 ```
@@ -348,6 +407,19 @@ POST /api/users/register
   → UserService.hash_password
   → StorageService.save_user
   → 返回 User（不包含密码哈希）
+
+POST /api/users/convert-guest
+  → UserService.convert_guest_to_registered
+  → 验证用户类型和用户名唯一性
+  → 更新用户信息（保留原 user_id）
+  → 返回 User（不包含密码哈希）
+
+DELETE /api/users/{user_id}
+  → UserService.delete_user_and_conversations
+  → StorageService.delete_user_conversations
+  → 如果是游客：NotebookService.delete_notebook
+  → StorageService.delete_user
+  → 返回成功消息
 ```
 
 **设计机制：**
@@ -355,6 +427,8 @@ POST /api/users/register
 - 使用 HTTPException 统一错误处理
 - 登录失败返回 401 状态码
 - 用户不存在返回 404 状态码
+- **游客转换机制**：只允许游客用户转换，转换后保留所有对话历史和笔记本（user_id 不变）
+- **数据清理机制**：删除用户时自动级联删除所有对话；游客登出时额外删除笔记本
 
 #### 2.2 对话路由 (routers/conversations.py)
 
@@ -364,6 +438,7 @@ POST /api/users/register
 - `GET /api/conversations/user/{user_id}` - 获取用户的所有对话
 - `PUT /api/conversations/title` - 更新对话标题
 - `DELETE /api/conversations/{conversation_id}` - 删除对话
+- `POST /api/conversations/{conversation_id}/exit` - 对话退出（保存笔记）
 
 **调用流程：**
 ```
@@ -371,12 +446,23 @@ POST /api/conversations
   → ConversationService.create_conversation
   → StorageService.save_conversation
   → 返回 Conversation
+
+POST /api/conversations/{conversation_id}/exit
+  → 获取对话信息
+  → 检查是否满足生成笔记的条件
+    - 条件1: 消息数 > 1
+    - 条件2: 抽过塔罗牌
+  → 如果满足条件：
+    → NotebookService.update_entry
+    → 生成 AI 摘要并保存
+  → 返回是否更新笔记的状态
 ```
 
 **设计机制：**
 - 创建对话时通过 query 参数传递 user_id
 - 获取用户对话时按 updated_at 倒序排序
 - 删除对话返回成功消息
+- **笔记保存机制**：对话退出时自动检查条件并生成笔记，避免空对话产生记录
 
 #### 2.3 塔罗路由 (routers/tarot.py)
 
@@ -859,7 +945,58 @@ choice (选择) → guest (游客)
 - 使用图标增强输入框视觉效果
 - 表单提交后自动关闭弹窗
 
-#### 3.9 神秘背景组件 (MysticBackground.tsx)
+#### 3.9 转换为注册用户弹窗组件 (ConvertToRegisteredModal.tsx)
+
+**功能：** 将游客用户转换为注册用户
+
+**Props：**
+- `isOpen` - 是否打开
+- `onClose` - 关闭回调
+- `onConvert(username, password)` - 转换回调
+- `currentProfile` - 当前用户资料（用于预填充）
+
+**UI 结构：**
+```
+转为注册用户
+转换后可以保存您的所有对话历史
+
+用户名 *
+[👤] [输入框 - 自动填充昵称]
+
+密码 *
+[🔒] [输入框 - 至少6位]
+
+确认密码 *
+[🔒] [输入框 - 再次输入]
+
+[提示信息] 您的个人信息将会保留：
+• 昵称: xxx
+• 出生日期: xxx
+• 出生地: xxx
+
+[取消]  [转换为注册用户]
+```
+
+**功能特性：**
+1. **自动预填充**：
+   - 用户名自动填充为昵称（如果有）
+   - 显示将被保留的个人信息
+2. **表单验证**：
+   - 用户名必填
+   - 密码至少6位
+   - 两次密码必须一致
+3. **错误提示**：
+   - 实时显示验证错误
+   - API 错误友好提示
+
+**设计机制：**
+- 使用 `useEffect` 自动预填用户名
+- 实时表单验证，在提交前阻止无效输入
+- 显示用户已填写的个人信息，增加用户信心
+- 转换成功后更新 Zustand 状态，无需重新登录
+- 使用 z-index: 110 确保在设置弹窗之上
+
+#### 3.10 神秘背景组件 (MysticBackground.tsx)
 
 **功能：** 应用全局背景，包含静态背景图和动态视觉效果
 
@@ -898,6 +1035,7 @@ choice (选择) → guest (游客)
 **状态：**
 - `showAuthModal` - 是否显示认证弹窗
 - `showSettings` - 是否显示设置
+- `showConvertModal` - 是否显示转换为注册用户弹窗
 - `isLoading` - 是否加载中
 - `streamingMessage` - 流式输出的消息
 - `showCardDrawer` - 是否显示抽牌器
@@ -957,6 +1095,7 @@ choice (选择) → guest (游客)
 - **本地状态优先**：使用 `addMessageToCurrentConversation` 方法直接修改 Zustand 状态
 - **服务端同步**：后续 `conversationApi.get()` 刷新确保与服务端数据保持一致
 - 提升用户体验：反馈迅速，即使 AI 响应较慢也不会影响消息显示
+- **抽牌按钮占位机制**：当 Gemini 只返回 `draw_tarot_cards` 函数调用而没有文本块时，`showDrawButton + pendingDrawRequest` 触发一个纯按钮的助手气泡，按钮文案改为“点我抽牌”，确保用户仍能看到交互入口；若 AI 同时返回文本，则按钮附着在最后一条助手消息上并显示“我准备好了”。
 
 **handleCardsDrawn(cards):**
 ```
@@ -978,6 +1117,43 @@ choice (选择) → guest (游客)
 - 每张卡片显示：渐变色背景、卡牌名称、正逆位标记、位置标签（如"过去"、"现在"、"未来"）
 - 正位卡片使用紫粉渐变（from-purple-500 to-pink-600），逆位卡片使用靛紫渐变（from-indigo-600 to-purple-700）
 - 鼠标悬停时卡片放大，增强交互体验
+
+**handleLogout():**
+```
+1. 检查用户类型
+2. 如果是游客用户：
+   a. 弹出第一次确认："退出后将无法找回对话历史"
+   b. 用户点击确定 → 弹出第二次确认："是否删除所有数据"
+   c. 用户选择确定 → 调用 deleteUser API 删除数据
+   d. 用户选择取消 → 引导转换为注册用户（打开转换弹窗）
+3. 如果是注册用户：
+   a. 正常退出确认
+4. 清空前端状态（logout、清空对话列表）
+```
+
+**设计机制：**
+- **游客特殊处理**：两次确认机制，防止误操作
+- **数据清理选项**：游客可选择删除或保留数据
+- **引导转换**：在第二次确认时引导游客转换为注册用户
+- **级联删除**：删除用户时后端自动删除所有对话
+
+**handleConvertToRegistered(username, password):**
+```
+1. 调用 userApi.convertGuestToRegistered(user_id, username, password)
+2. 后端验证：
+   a. 检查用户类型（必须是游客）
+   b. 检查用户名唯一性
+   c. 更新用户信息（保留原 user_id 和对话）
+3. 更新前端状态：setUser(updatedUser)
+4. 关闭转换弹窗
+5. 提示转换成功
+```
+
+**设计机制：**
+- **保留历史**：转换时保留 user_id，所有对话历史自动继承
+- **无缝切换**：转换后直接更新 Zustand 状态，无需重新登录
+- **自动预填**：用昵称预填用户名，减少输入
+- **表单验证**：前端实时验证，后端二次验证
 
 **UI 布局：**
 ```
@@ -1274,6 +1450,95 @@ choice (选择) → guest (游客)
    显示正逆位标识
    延迟1.5秒后关闭
 ```
+
+### 6. 对话退出与笔记保存流程
+
+**触发场景：**
+- 用户切换到其他对话
+- 用户新建对话
+- 用户登出
+- 用户关闭/刷新页面
+
+**流程：**
+```
+前端                         后端                      笔记本服务
+ │                            │                           │
+ ├─ 检测到对话切换/退出       │                           │
+ │  (handleSelectConversation │                           │
+ │   handleNewConversation    │                           │
+ │   handleLogout             │                           │
+ │   beforeunload)            │                           │
+ │                            │                           │
+ ├─ 调用 exit API ────────────►│                           │
+ │  POST /api/conversations/  │                           │
+ │       {id}/exit            │                           │
+ │                            │                           │
+ │                            ├─ 获取对话信息             │
+ │                            │                           │
+ │                            ├─ 检查触发条件：           │
+ │                            │  - 消息数 > 1？           │
+ │                            │  - 抽过塔罗牌？           │
+ │                            │                           │
+ │                            ├─ 满足条件 ────────────────►│
+ │                            │                           │
+ │                            │                           ├─ 加载现有笔记
+ │                            │                           │
+ │                            │                           ├─ 生成 AI 摘要
+ │                            │                           │  (Gemini-2.5-flash)
+ │                            │                           │  - 提取问题
+ │                            │                           │  - 提取抽到的牌
+ │                            │                           │  - 构建对话内容
+ │                            │                           │  - 生成第一人称摘要
+ │                            │                           │
+ │                            │                           ├─ 更新/创建条目
+ │                            │                           │
+ │                            │                           ├─ 保存到文件
+ │                            │                           │  note_{user_id}.log
+ │                            │                           │
+ │                            │ ◄─────────────────────────┤
+ │                            │                           │
+ │ ◄──────────────────────────┤                           │
+ │  { notebook_updated: true }│                           │
+ │                            │                           │
+```
+
+**游客登出特殊处理：**
+```
+前端                         后端                      笔记本服务
+ │                            │                           │
+ ├─ 游客登出                  │                           │
+ │                            │                           │
+ ├─ 1. 先调用 exit API        │                           │
+ │    保存当前对话笔记 ────────►│ ──────────────────────────►│
+ │                            │                           │
+ ├─ 2. 调用 delete user ──────►│                           │
+ │    DELETE /api/users/{id}  │                           │
+ │                            │                           │
+ │                            ├─ 检查用户类型             │
+ │                            │  是游客？                 │
+ │                            │                           │
+ │                            ├─ 删除所有对话             │
+ │                            │                           │
+ │                            ├─ 删除笔记本 ──────────────►│
+ │                            │                           │
+ │                            │                           ├─ 删除文件
+ │                            │                           │  note_{user_id}.log
+ │                            │                           │
+ │                            ├─ 删除用户                 │
+ │                            │                           │
+ │ ◄──────────────────────────┤                           │
+ │  成功                      │                           │
+ │                            │                           │
+```
+
+**设计机制：**
+- **自动触发**：前端监听所有对话退出场景，无需用户手动操作
+- **条件检查**：后端过滤无效对话（空对话、未抽牌对话），避免无意义记录
+- **异步生成**：AI 摘要生成不阻塞用户操作
+- **去重机制**：同一对话多次退出只更新同一条记录
+- **容错处理**：生成失败使用默认摘要，不影响用户体验
+- **页面卸载**：使用 fetch with keepalive 确保在页面关闭前发送请求
+- **游客保护**：游客登出时先保存笔记，再删除所有数据
 
 ---
 

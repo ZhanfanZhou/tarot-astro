@@ -52,6 +52,19 @@ export const userApi = {
     const response = await api.put(`/api/users/${userId}/profile`, profile);
     return response.data;
   },
+
+  convertGuestToRegistered: async (userId: string, username: string, password: string): Promise<User> => {
+    const response = await api.post('/api/users/convert-guest', {
+      user_id: userId,
+      username,
+      password,
+    });
+    return response.data;
+  },
+
+  deleteUser: async (userId: string): Promise<void> => {
+    await api.delete(`/api/users/${userId}`);
+  },
 };
 
 // 对话相关API
@@ -84,6 +97,11 @@ export const conversationApi = {
 
   delete: async (conversationId: string): Promise<void> => {
     await api.delete(`/api/conversations/${conversationId}`);
+  },
+
+  exit: async (conversationId: string): Promise<{ notebook_updated: boolean }> => {
+    const response = await api.post(`/api/conversations/${conversationId}/exit`);
+    return response.data;
   },
 };
 

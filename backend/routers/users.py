@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Body
-from models import User, UserProfile, UserRegister, UserLogin, UserType
+from models import User, UserProfile, UserRegister, UserLogin, UserType, ConvertGuestToRegisteredRequest
 from services.user_service import UserService
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -70,6 +70,34 @@ async def update_profile(user_id: str, profile: UserProfile):
         return user
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/convert-guest", response_model=User)
+async def convert_guest_to_registered(request: ConvertGuestToRegisteredRequest):
+    """将游客转换为注册用户"""
+    try:
+        user = await UserService.convert_guest_to_registered(
+            request.user_id,
+            request.username,
+            request.password
+        )
+        # 不返回密码哈希
+        user.password_hash = None
+        return user
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{user_id}")
+async def delete_user(user_id: str):
+    """删除用户及其所有对话"""
+    try:
+        await UserService.delete_user_and_conversations(user_id)
+        return {"message": "用户及其对话已删除"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

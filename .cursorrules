@@ -12,7 +12,7 @@ During your interaction with the user, if you find anything reusable in this pro
 
 # Tools & Resources
 
-`arch.md`是程序架构设计说明文档，需要根据编码任务的完成情况，及时更新。每次编码修改前，如有必要，找到要修改的模块对应的章节参考，避免引入新的bug！！！NOTE: arch.md内容很多，你只关注需要修改模块，不要修改不属于你负责的模块！！！
+`arch.md`是程序架构设计说明文档，你必须判断，如果用户问题是设计架构改动/复杂改动的问题，则需要更新。编码修改前，如有必要，找到要修改的模块对应的章节参考，避免引入新的bug！！！NOTE: arch.md内容很多，你只关注需要修改模块，不要修改不属于你负责的模块！！！
 `Lessons` section in the `.cursorrules` 是编码经验总结，需要根据编码任务的完成情况，精炼地总结关键点。
 `update_log.md`是更新日志，你每次完成编码任务后的总结同步输入到这个文件中，该文件只写改动点，不记录经验，经验总结都写在`.cursorrules`中。
 
@@ -456,17 +456,6 @@ ValueError: password cannot be longer than 72 bytes
 ```bash
 pip uninstall -y bcrypt passlib
 pip install passlib==1.7.4 bcrypt==4.1.2
-```
-
-**检验方式：**
-```python
-from passlib.context import CryptContext
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-try:
-    result = pwd_context.hash("test")
-    print("✅ Bcrypt working correctly")
-except Exception as e:
-    print(f"❌ Bcrypt error: {e}")
 ```
 
 **适用场景：**

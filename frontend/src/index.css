@@ -48,6 +48,16 @@ body {
   border-radius: 5px;
 }
 
+/* 隐藏滚动条但保持滚动功能 */
+.hide-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari and Opera */
+}
+
 ::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
 }

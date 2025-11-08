@@ -117,4 +117,10 @@ class UpdateConversationTitleRequest(BaseModel):
     title: str
 
 
+class ConvertGuestToRegisteredRequest(BaseModel):
+    user_id: str
+    username: str
+    password: str
+
+
 
