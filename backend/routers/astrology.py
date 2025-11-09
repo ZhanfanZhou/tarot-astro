@@ -10,6 +10,7 @@ from services.gemini_service import GeminiService
 from services.astrology_service import AstrologyService
 from services.tarot_service import TarotService
 from services.user_service import UserService
+from services.notebook_service import notebook_service
 import json
 import random
 
@@ -351,6 +352,83 @@ async def send_message(request: SendMessageRequest):
                         }
                         
                         print(f"[Astrology Router] ✅ 函数执行完成: {func_name}")
+                        
+                        # 将函数结果喂回AI
+                        print(f"[Astrology Router] 🔄 将函数结果喂回AI...")
+                        updated_conv = await ConversationService.get_conversation(request.conversation_id)
+                        
+                        final_response = ""
+                        async for event2 in gemini_service.continue_with_function_result(
+                            updated_conv.messages,
+                            user,
+                            session_type=SessionType.ASTROLOGY,
+                            function_name=func_name,
+                            function_result=function_result
+                        ):
+                            if "content" in event2:
+                                final_response += event2["content"]
+                                yield f"data: {json.dumps({'content': event2['content']})}\n\n"
+                        
+                        # 保存AI的最终回复
+                        if final_response.strip():
+                            # 检查是否需要附加抽牌结果
+                            tarot_cards_to_attach = None
+                            draw_request_to_attach = None
+                            if await should_attach_tarot_cards(request.conversation_id):
+                                latest_conv = await ConversationService.get_conversation(request.conversation_id)
+                                tarot_cards_to_attach, draw_request_to_attach = ConversationService.get_latest_tarot_cards(latest_conv)
+                            
+                            await ConversationService.add_message(
+                                request.conversation_id,
+                                MessageRole.ASSISTANT,
+                                final_response,
+                                tarot_cards=tarot_cards_to_attach,
+                                draw_request=draw_request_to_attach
+                            )
+                    
+                    elif func_name == "read_divination_notebook":
+                        # 读取占卜笔记本
+                        print(f"[Astrology Router] 📖 读取占卜笔记本: {func_args}")
+                        
+                        # 获取用户的笔记本
+                        notebook_entries = notebook_service.get_notebook(conversation.user_id)
+                        
+                        if not notebook_entries or len(notebook_entries) == 0:
+                            # 笔记本为空
+                            function_result = {
+                                "success": True,
+                                "notebook_count": 0,
+                                "message": "笔记本中暂时还没有记录。当你完成占卜并退出对话后，系统会自动生成占卜记录保存在笔记本中。"
+                            }
+                        else:
+                            # 格式化笔记本内容
+                            notebook_text = f"用户的占卜笔记本（共 {len(notebook_entries)} 条记录）：\n\n"
+                            for i, entry in enumerate(notebook_entries, 1):
+                                from datetime import datetime
+                                try:
+                                    start_time = datetime.fromisoformat(entry['start_time']).strftime("%Y年%m月%d日")
+                                except:
+                                    start_time = entry.get('start_time', '未知时间')
+                                
+                                cards_str = "、".join(entry.get('cards_drawn', [])) if entry.get('cards_drawn') else "无"
+                                
+                                notebook_text += f"【记录 {i}】\n"
+                                notebook_text += f"时间：{start_time}\n"
+                                notebook_text += f"问题：{entry.get('question', '无')}\n"
+                                notebook_text += f"抽到的牌：{cards_str}\n"
+                                notebook_text += f"记录：{entry.get('summary', '无')}\n"
+                                if entry.get('user_feedback'):
+                                    notebook_text += f"用户反馈：{entry.get('user_feedback')}\n"
+                                notebook_text += "\n"
+                            
+                            function_result = {
+                                "success": True,
+                                "notebook_count": len(notebook_entries),
+                                "notebook_content": notebook_text
+                            }
+                        
+                        print(f"[Astrology Router] ✅ 函数执行完成: {func_name}")
+                        print(f"[Astrology Router] 笔记本记录数: {function_result.get('notebook_count', 0)}")
                         
                         # 将函数结果喂回AI
                         print(f"[Astrology Router] 🔄 将函数结果喂回AI...")

@@ -97,6 +97,28 @@ class GeminiService:
         }
     )
     
+    # 定义工具：读取占卜笔记本
+    TOOL_READ_NOTEBOOK = FunctionDeclaration(
+        name="read_divination_notebook",
+        description=(
+        "读取用户的占卜笔记本，获取用户之前的占卜记录。"
+        "当用户想要回顾之前的占卜、查看历史记录、或者想了解过去的占卜内容时调用此工具。"
+        "你也可以主动使用此工具，在解读时结合用户的历史占卜记录，提供更有连续性和深度的解读。"
+        "笔记本中记录了用户之前的问题、抽到的牌、以及AI生成的占卜摘要。"
+        "通过回顾历史记录，你可以发现用户关注的主题、重复出现的模式、以及问题的演变。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "读取笔记本的原因，说明为什么需要查看历史记录"
+                }
+            },
+            "required": ["reason"]
+        }
+    )
+    
     TAROT_SYSTEM_PROMPT = """你是一位以塔罗为主、占星为辅的职业占卜师。你阅人无数，见过感情里的拉扯、家庭里的控制、职场里的权力游戏，也见过那些表面要答案、其实想要被看见的灵魂。你不怕说真话，你的风格是直指核心、点破遮羞布的毒舌温柔：刀子下得准，但目的是让TA醒，不是让TA痛。你清楚很多人来占卜，不是缺知识，是被情绪、恐惧、童年印记和关系的拉扯卡住了，所以你说话要像一个见多识广的老占卜者：一眼看穿，一语道破，然后教他怎么走出来。
 
 1）身份与使命
@@ -290,7 +312,8 @@ class GeminiService:
         all_tools = [
             self.TOOL_DRAW_TAROT_CARDS,
             self.TOOL_GET_ASTROLOGY_CHART,
-            self.TOOL_REQUEST_USER_PROFILE
+            self.TOOL_REQUEST_USER_PROFILE,
+            self.TOOL_READ_NOTEBOOK
         ]
         self.tarot_tools = [Tool(function_declarations=all_tools)]
         self.astrology_tools = [Tool(function_declarations=all_tools)]

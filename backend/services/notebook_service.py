@@ -25,7 +25,8 @@ class NotebookEntry:
         question: str,
         cards_drawn: List[str],
         summary: str,
-        user_feedback: str = ""
+        user_feedback: str = "",
+        end_time: str = ""  # 对话结束时间（updated_at）
     ):
         self.conversation_id = conversation_id
         self.start_time = start_time
@@ -33,6 +34,7 @@ class NotebookEntry:
         self.cards_drawn = cards_drawn
         self.summary = summary
         self.user_feedback = user_feedback
+        self.end_time = end_time
     
     def to_dict(self) -> Dict:
         return {
@@ -41,7 +43,8 @@ class NotebookEntry:
             "question": self.question,
             "cards_drawn": self.cards_drawn,
             "summary": self.summary,
-            "user_feedback": self.user_feedback
+            "user_feedback": self.user_feedback,
+            "end_time": self.end_time
         }
     
     @classmethod
@@ -52,7 +55,8 @@ class NotebookEntry:
             question=data.get("question", ""),
             cards_drawn=data.get("cards_drawn", []),
             summary=data.get("summary", ""),
-            user_feedback=data.get("user_feedback", "")
+            user_feedback=data.get("user_feedback", ""),
+            end_time=data.get("end_time", "")  # 兼容旧数据
         )
 
 
@@ -168,6 +172,7 @@ class NotebookService:
                 conversation_content.append(f"占卜师：{msg.content}")
         
         conversation_str = "\n".join(conversation_content[:20])  # 只取前20条消息
+        print(f"[Notebook] 对话内容: {conversation_str}")
         
         # 格式化时间
         start_time = datetime.fromisoformat(conversation.created_at).strftime("%Y年%m月%d日")
@@ -203,7 +208,7 @@ class NotebookService:
         user_id: str,
         conversation: Conversation,
         user: Optional[User] = None
-    ):
+    ) -> Dict[str, any]:
         """
         更新或创建笔记本条目
         
@@ -211,16 +216,51 @@ class NotebookService:
             user_id: 用户ID
             conversation: 对话对象
             user: 用户对象（可选）
+            
+        Returns:
+            包含生成状态的字典
         """
+        from datetime import datetime, timedelta
+        
         # 加载现有笔记本
         entries = self._load_notebook(user_id)
         
         # 查找是否已有该对话的记录
         existing_entry = None
+        existing_entry_idx = None
         for i, entry in enumerate(entries):
             if entry.conversation_id == conversation.conversation_id:
-                existing_entry = i
+                existing_entry = entry
+                existing_entry_idx = i
                 break
+        
+        # 条件1: 检查对话是否有变化
+        conversation_changed = True
+        if existing_entry and existing_entry.end_time:
+            conversation_changed = existing_entry.end_time != conversation.updated_at
+        
+        # 条件2: 检查是否距离对话结束超过12小时
+        time_elapsed = False
+        try:
+            conversation_end_time = datetime.fromisoformat(conversation.updated_at)
+            current_time = datetime.utcnow()
+            time_diff = current_time - conversation_end_time
+            time_elapsed = time_diff > timedelta(hours=12)
+        except Exception as e:
+            print(f"[Notebook] 时间解析失败: {e}")
+            time_elapsed = False
+        
+        # 返回检查结果
+        check_result = {
+            "conversation_changed": conversation_changed,
+            "time_elapsed": time_elapsed,
+            "should_generate": conversation_changed and time_elapsed,
+            "existing_entry": existing_entry is not None
+        }
+        
+        # 如果不满足条件，直接返回
+        if not check_result["should_generate"]:
+            return check_result
         
         # 生成摘要
         summary = await self.generate_summary(conversation, user)
@@ -247,12 +287,13 @@ class NotebookService:
             question=question,
             cards_drawn=cards,
             summary=summary,
-            user_feedback=""
+            user_feedback="",
+            end_time=conversation.updated_at  # 保存对话结束时间
         )
         
         # 更新或添加条目
-        if existing_entry is not None:
-            entries[existing_entry] = new_entry
+        if existing_entry_idx is not None:
+            entries[existing_entry_idx] = new_entry
             print(f"[Notebook] 更新条目: {conversation.conversation_id}")
         else:
             entries.append(new_entry)
@@ -260,6 +301,9 @@ class NotebookService:
         
         # 保存笔记本
         self._save_notebook(user_id, entries)
+        
+        check_result["notebook_updated"] = True
+        return check_result
     
     def delete_notebook(self, user_id: str):
         """
