@@ -11,6 +11,8 @@ interface TarotCardDrawerProps {
   onCardsDrawn: (cards: TarotCard[]) => void;
 }
 
+type ShufflePatternType = 'orbital' | 'cascade' | 'burst';
+
 interface ShuffleCardConfig {
   id: number;
   pathX: number[];
@@ -104,34 +106,91 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
   const handleShuffle = () => {
     if (isShuffling) return;
 
-    const cardCount = 16;
-    const configs: ShuffleCardConfig[] = Array.from({ length: cardCount }, (_, idx) => {
+    const cardCount = 14 + Math.floor(Math.random() * 7); // 14 ~ 20
+    const patternRoll = Math.random();
+    const patternType: ShufflePatternType =
+      patternRoll < 0.34 ? 'orbital' : patternRoll < 0.67 ? 'cascade' : 'burst';
+    const runSeed = Math.random() * Math.PI * 2;
+
+    const createOrbitalConfig = (idx: number): ShuffleCardConfig => {
       const direction = Math.random() > 0.5 ? 1 : -1;
-      const horizontalSwing = 140 + Math.random() * 180;
-      const verticalLift = 90 + Math.random() * 140;
-      const returnOffset = (Math.random() - 0.5) * 160;
-      const swirl = direction * (180 + Math.random() * 200);
-      const finalRotation = direction * (360 + Math.random() * 140);
-      const duration = 2.3 + Math.random() * 1.2;
-      const delay = idx * 0.04 + Math.random() * 0.2;
-      const peakScale = 1.05 + Math.random() * 0.18;
-      const endScale = 0.85 + Math.random() * 0.12;
+      const orbitRadius = 150 + Math.random() * 120;
+      const lift = 140 + Math.random() * 120;
+      const entryAngle = runSeed + (idx / cardCount) * Math.PI * 1.6 * direction;
+      const midAngle = entryAngle + direction * (Math.PI / 2 + Math.random() * 0.6);
+      const x1 = Math.cos(entryAngle) * orbitRadius;
+      const y1 = Math.sin(entryAngle) * orbitRadius * 0.5 - lift;
+      const x2 = Math.cos(midAngle) * orbitRadius * 0.65 + direction * (20 + Math.random() * 40);
+      const y2 = Math.sin(midAngle) * orbitRadius * 0.35 + (Math.random() - 0.5) * 140;
+      const firstSpin = direction * (130 + Math.random() * 70);
+      const secondSpin = firstSpin + direction * (160 + Math.random() * 120);
+      const finalSpin = direction * (360 + Math.random() * 90);
       return {
         id: idx,
-        pathX: [0, direction * horizontalSwing, direction * returnOffset, 0],
-        pathY: [
-          0,
-          -verticalLift,
-          verticalLift * 0.45 * (Math.random() > 0.5 ? 1 : -1),
-          0,
-        ],
-        rotate: [0, swirl, swirl * 1.35, finalRotation],
-        scale: [0.7 + Math.random() * 0.2, peakScale, 1, endScale],
-        duration,
-        delay,
-        zIndex: 40 + Math.floor(Math.random() * 40),
+        pathX: [0, x1, x2, 0],
+        pathY: [0, y1, y2, 0],
+        rotate: [0, firstSpin, secondSpin, finalSpin],
+        scale: [0.96, 1.24 + Math.random() * 0.12, 1.1 + Math.random() * 0.06, 1.02],
+        duration: 2.4 + Math.random() * 1.25,
+        delay: idx * 0.05 + Math.random() * 0.18,
+        zIndex: 60 + Math.floor(Math.random() * 60),
       };
-    });
+    };
+
+    const createCascadeConfig = (idx: number): ShuffleCardConfig => {
+      const offsetFromCenter = idx - cardCount / 2;
+      const direction = offsetFromCenter >= 0 ? 1 : -1;
+      const laneOffset = offsetFromCenter * (28 + Math.random() * 14);
+      const peakHeight = 150 + Math.random() * 120;
+      const x1 = laneOffset * 0.6;
+      const x2 = laneOffset * (1 + Math.random() * 0.25);
+      const y1 = -peakHeight;
+      const y2 = peakHeight * 0.25 * direction;
+      const firstSpin = direction * (110 + Math.random() * 60);
+      const secondSpin = firstSpin + direction * (170 + Math.random() * 90);
+      const finalSpin = direction * (360 + Math.random() * 70);
+      return {
+        id: idx,
+        pathX: [0, x1, x2, 0],
+        pathY: [0, y1, y2, 0],
+        rotate: [0, firstSpin, secondSpin, finalSpin],
+        scale: [0.94, 1.2 + Math.random() * 0.12, 1.08 + Math.random() * 0.05, 1.01],
+        duration: 2.1 + Math.random() * 0.85,
+        delay: idx * 0.06 + Math.random() * 0.16,
+        zIndex: 50 + Math.floor(Math.random() * 55),
+      };
+    };
+
+    const createBurstConfig = (idx: number): ShuffleCardConfig => {
+      const direction = Math.random() > 0.5 ? 1 : -1;
+      const burstReach = (Math.random() - 0.5) * 360;
+      const lift = 120 + Math.random() * 160;
+      const rebound = (Math.random() - 0.5) * 180;
+      const firstSpin = direction * (150 + Math.random() * 90);
+      const secondSpin = firstSpin + direction * (200 + Math.random() * 130);
+      const finalSpin = direction * (360 + Math.random() * 140);
+      return {
+        id: idx,
+        pathX: [0, burstReach * 0.7, rebound, 0],
+        pathY: [0, -lift, lift * 0.3 * (Math.random() - 0.5), 0],
+        rotate: [0, firstSpin, secondSpin, finalSpin],
+        scale: [0.98, 1.26 + Math.random() * 0.12, 1.12 + Math.random() * 0.08, 1.03],
+        duration: 1.9 + Math.random() * 0.8,
+        delay: idx * 0.04 + Math.random() * 0.2,
+        zIndex: 55 + Math.floor(Math.random() * 70),
+      };
+    };
+
+    const generator: ((idx: number) => ShuffleCardConfig) =
+      patternType === 'orbital'
+        ? createOrbitalConfig
+        : patternType === 'cascade'
+          ? createCascadeConfig
+          : createBurstConfig;
+
+    const configs: ShuffleCardConfig[] = Array.from({ length: cardCount }, (_, idx) =>
+      generator(idx)
+    );
 
     const longest = Math.max(...configs.map((c) => c.duration + c.delay));
 
@@ -442,7 +501,7 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
                       {shuffleConfig.map((card) => (
                         <motion.div
                           key={`${shuffleRunId}-${card.id}`}
-                          className="absolute w-24 h-36 rounded-xl overflow-hidden shadow-[0_16px_44px_rgba(225,196,142,0.22)] border border-mystic-gold/30"
+                          className="absolute w-28 h-44 rounded-xl overflow-hidden shadow-[0_16px_44px_rgba(225,196,142,0.26)] border border-mystic-gold/30"
                           style={{ zIndex: card.zIndex }}
                           initial={{
                             opacity: 0,

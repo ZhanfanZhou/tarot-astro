@@ -49,7 +49,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
           placeholder={placeholder}
           disabled={disabled}
           className={`
-            w-full px-6 py-4 pr-24 
+            w-full py-4 pr-24 pl-10 
             glass-morphism border-2 rounded-2xl 
             font-display text-base
             focus:outline-none transition-all duration-300

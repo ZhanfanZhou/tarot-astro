@@ -72,17 +72,16 @@ async def delete_conversation(conversation_id: str):
 async def exit_conversation(conversation_id: str):
     """
     对话退出时的处理
-    检查是否需要生成占卜笔记
+    检查是否需要创建定时任务生成占卜笔记
     
     触发条件：
     1. 对话内容有新增（消息数 > 1）
     2. 对话中抽过塔罗牌
     3. 对话内容有变化（end_time != updated_at）
-    4. 距离对话结束超过12小时
+    
+    满足条件后，创建定时任务，12小时后生成笔记
     """
     try:
-        from datetime import datetime, timedelta
-        
         # 获取对话
         conversation = await ConversationService.get_conversation(conversation_id)
         if not conversation:
@@ -109,15 +108,15 @@ async def exit_conversation(conversation_id: str):
             # 获取用户信息
             user = await StorageService.get_user(conversation.user_id)
             
-            # 调用笔记更新服务，返回详细检查结果
+            # 调用笔记更新服务，检查是否需要创建定时任务
             result = await notebook_service.update_entry(
                 user_id=conversation.user_id,
                 conversation=conversation,
                 user=user
             )
             
-            # 打印详细的生成条件检查
-            print(f"\n笔记生成条件检查:")
+            # 打印详细的检查结果
+            print(f"\n定时任务检查:")
             print(f"  - 对话是否有变化: {result['conversation_changed']}")
             if result['existing_entry']:
                 # 尝试获取旧的 end_time 显示
@@ -128,35 +127,34 @@ async def exit_conversation(conversation_id: str):
                         print(f"    * 当前对话 updated_at: {conversation.updated_at}")
                         break
             else:
-                print(f"    * 首次生成笔记")
+                print(f"    * 首次需要生成笔记")
             
-            print(f"  - 时间是否超过12小时: {result['time_elapsed']}")
-            try:
-                conversation_end_time = datetime.fromisoformat(conversation.updated_at)
-                current_time = datetime.utcnow()
-                time_diff = current_time - conversation_end_time
-                print(f"    * 对话结束于: {conversation_end_time}")
-                print(f"    * 当前时间: {current_time}")
-                print(f"    * 时间差: {time_diff} ({time_diff.total_seconds() / 3600:.2f} 小时)")
-            except:
-                pass
-            
-            print(f"  - 是否应该生成笔记: {result['should_generate']}")
-            print(f"  - 笔记是否已更新: {result.get('notebook_updated', False)}")
+            print(f"  - 是否应该调度: {result['should_schedule']}")
+            print(f"  - 任务是否已创建: {result.get('task_scheduled', False)}")
             print(f"{'='*60}\n")
             
-            if result.get('notebook_updated', False):
-                return {"message": "笔记已保存", "notebook_updated": True, "details": result}
+            if result.get('task_scheduled', False):
+                return {
+                    "message": "已创建定时任务，将在12小时后生成笔记", 
+                    "task_scheduled": True, 
+                    "details": result
+                }
+            elif result['should_schedule']:
+                return {
+                    "message": "任务已存在，无需重复创建", 
+                    "task_scheduled": False, 
+                    "details": result
+                }
             else:
                 return {
-                    "message": "不满足笔记生成条件", 
-                    "notebook_updated": False, 
+                    "message": "对话无变化，不需要生成笔记", 
+                    "task_scheduled": False, 
                     "details": result
                 }
         else:
             print(f"不满足基本条件，跳过笔记生成")
             print(f"{'='*60}\n")
-            return {"message": "不需要生成笔记", "notebook_updated": False}
+            return {"message": "不需要生成笔记", "task_scheduled": False}
     
     except Exception as e:
         print(f"[ConversationExit] 处理对话退出失败: {e}")
@@ -165,4 +163,12 @@ async def exit_conversation(conversation_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/tasks/pending")
+async def get_pending_tasks():
+    """获取待处理的笔记生成任务（调试用）"""
+    from services.notebook_task_scheduler import task_scheduler
+    return {
+        "tasks": task_scheduler.get_pending_tasks(),
+        "count": len(task_scheduler.tasks)
+    }
 

@@ -469,8 +469,6 @@ async def draw_cards(
         if not conversation:
             raise HTTPException(status_code=404, detail="对话不存在")
         
-        # 注意：移除has_drawn_cards的严格检查，允许用户多次抽牌（追问）
-        # 系统提示词会引导AI避免不必要的重复抽牌
         # 抽牌
         cards = TarotService.draw_cards(draw_request)
         

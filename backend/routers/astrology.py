@@ -259,82 +259,45 @@ async def send_message(request: SendMessageRequest):
                     
                     elif func_name == "draw_tarot_cards":
                         # 抽塔罗牌 - 保留原有的用户交互体验（显示抽牌动画窗口）
-                        # 检查是否已经抽过牌
-                        updated_conv = await ConversationService.get_conversation(request.conversation_id)
-                        if updated_conv.has_drawn_cards:
-                            # 已经抽过牌，返回错误
-                            function_result = {
-                                "success": False,
-                                "error": "已经抽过牌，不能再次抽牌"
-                            }
-                            
-                            print(f"[Astrology Router] ⚠️ 已经抽过牌，拒绝请求")
-                            
-                            # 告诉AI结果
-                            final_response = ""
-                            async for event2 in gemini_service.continue_with_function_result(
-                                updated_conv.messages,
-                                user,
-                                session_type=SessionType.ASTROLOGY,
-                                function_name=func_name,
-                                function_result=function_result
-                            ):
-                                if "content" in event2:
-                                    final_response += event2["content"]
-                                    yield f"data: {json.dumps({'content': event2['content']})}\n\n"
-                            
-                            if final_response.strip():
-                                # 检查是否需要附加抽牌结果
-                                tarot_cards_to_attach = None
-                                draw_request_to_attach = None
-                                if await should_attach_tarot_cards(request.conversation_id):
-                                    latest_conv = await ConversationService.get_conversation(request.conversation_id)
-                                    tarot_cards_to_attach, draw_request_to_attach = ConversationService.get_latest_tarot_cards(latest_conv)
-                                
-                                await ConversationService.add_message(
-                                    request.conversation_id,
-                                    MessageRole.ASSISTANT,
-                                    final_response,
-                                    tarot_cards=tarot_cards_to_attach,
-                                    draw_request=draw_request_to_attach
-                                )
-                        else:
-                            # 🎴 通知前端显示抽牌器（保留用户体验）
-                            print(f"[Astrology Router] 🎴 通知前端显示抽牌器，参数: {func_args}")
-                            
-                            # 修复：将 RepeatedComposite 类型转换为普通列表
-                            # 因为 json.dumps(..., default=str) 会把它转换成字符串
-                            if 'positions' in func_args:
-                                positions = func_args['positions']
-                                if hasattr(positions, '__iter__') and not isinstance(positions, (str, dict)):
-                                    func_args['positions'] = list(positions)
-                            
-                            # 修复：将 card_count 转换为 int（Gemini 返回的是 float）
-                            if 'card_count' in func_args and isinstance(func_args['card_count'], float):
-                                func_args['card_count'] = int(func_args['card_count'])
-                            
-                            # 确保 func_args 完全可序列化（转换所有 protobuf 类型）
-                            serializable_args = json.loads(json.dumps(func_args, default=str))
-                            print(f"[Astrology Router] 序列化后参数: {serializable_args}")
-                            print(f"[Astrology Router] positions 类型（序列化前）: {type(func_args.get('positions'))}")
-                            print(f"[Astrology Router] positions 值（序列化前）: {func_args.get('positions')}")
-                            print(f"[Astrology Router] positions 类型（序列化后）: {type(serializable_args.get('positions'))}")
-                            print(f"[Astrology Router] positions 值（序列化后）: {serializable_args.get('positions')}")
-                            yield f"data: {json.dumps({'draw_cards': serializable_args})}\n\n"
-                            
-                            print(f"[Astrology Router] ✅ 函数执行完成: {func_name}")
-                            print(f"[Astrology Router] 📋 等待用户点击'我准备好了'按钮...")
-                            
-                            # ⚠️ 重要修复：不要将函数结果喂回AI！
-                            # 原因：AI会认为抽牌已完成，立即开始解读，但用户还没有真正抽牌
-                            # 正确流程：
-                            # 1. 前端显示"我准备好了"按钮
-                            # 2. 用户点击按钮后弹出抽牌器
-                            # 3. 用户完成抽牌后调用 /draw 接口
-                            # 4. 前端发送"请根据抽牌结果进行解读"消息
-                            # 5. AI才开始解读抽牌结果
-                            # 
-                            # 因此这里不需要继续Agent Loop，直接结束即可
+                        # 注意：移除has_drawn_cards的严格检查，允许AI根据对话情况多次抽牌
+                        # 系统提示词会引导AI避免不必要的重复抽牌
+                        
+                        # 🎴 通知前端显示抽牌器（保留用户体验）
+                        print(f"[Astrology Router] 🎴 通知前端显示抽牌器，参数: {func_args}")
+                        
+                        # 修复：将 RepeatedComposite 类型转换为普通列表
+                        # 因为 json.dumps(..., default=str) 会把它转换成字符串
+                        if 'positions' in func_args:
+                            positions = func_args['positions']
+                            if hasattr(positions, '__iter__') and not isinstance(positions, (str, dict)):
+                                func_args['positions'] = list(positions)
+                        
+                        # 修复：将 card_count 转换为 int（Gemini 返回的是 float）
+                        if 'card_count' in func_args and isinstance(func_args['card_count'], float):
+                            func_args['card_count'] = int(func_args['card_count'])
+                        
+                        # 确保 func_args 完全可序列化（转换所有 protobuf 类型）
+                        serializable_args = json.loads(json.dumps(func_args, default=str))
+                        print(f"[Astrology Router] 序列化后参数: {serializable_args}")
+                        print(f"[Astrology Router] positions 类型（序列化前）: {type(func_args.get('positions'))}")
+                        print(f"[Astrology Router] positions 值（序列化前）: {func_args.get('positions')}")
+                        print(f"[Astrology Router] positions 类型（序列化后）: {type(serializable_args.get('positions'))}")
+                        print(f"[Astrology Router] positions 值（序列化后）: {serializable_args.get('positions')}")
+                        yield f"data: {json.dumps({'draw_cards': serializable_args})}\n\n"
+                        
+                        print(f"[Astrology Router] ✅ 函数执行完成: {func_name}")
+                        print(f"[Astrology Router] 📋 等待用户点击'我准备好了'按钮...")
+                        
+                        # ⚠️ 重要修复：不要将函数结果喂回AI！
+                        # 原因：AI会认为抽牌已完成，立即开始解读，但用户还没有真正抽牌
+                        # 正确流程：
+                        # 1. 前端显示"我准备好了"按钮
+                        # 2. 用户点击按钮后弹出抽牌器
+                        # 3. 用户完成抽牌后调用 /draw 接口
+                        # 4. 前端发送"请根据抽牌结果进行解读"消息
+                        # 5. AI才开始解读抽牌结果
+                        # 
+                        # 因此这里不需要继续Agent Loop，直接结束即可
                     
                     elif func_name == "request_user_profile":
                         # 请求用户补充个人信息

@@ -368,10 +368,38 @@ continue_with_function_result → format messages with function result
 
 **核心方法：**
 - `generate_summary(conversation, user)` - 使用 AI 生成对话摘要
-- `update_entry(user_id, conversation, user)` - 更新或创建笔记本条目
+- `generate_and_save_entry(user_id, conversation, user)` - 直接生成并保存笔记（供定时任务调用，不检查时间条件）
+- `update_entry(user_id, conversation, user)` - 检查是否需要创建定时任务（不再直接生成笔记）
 - `delete_notebook(user_id)` - 删除用户笔记本
 - `migrate_notebook(old_user_id, new_user_id)` - 迁移笔记本（已废弃，因为游客转注册时 user_id 保持不变）
 - `get_notebook(user_id)` - 获取用户笔记本
+
+#### 1.10 占卜笔记定时任务调度器 (services/notebook_task_scheduler.py)
+
+**功能：** 管理延迟12小时生成笔记的定时任务，确保任务持久化和顺序执行
+
+**核心类：**
+- `NotebookTask` - 任务数据类，包含 conversation_id、user_id、scheduled_time、created_at
+- `NotebookTaskScheduler` - 单例模式的任务调度器
+
+**核心方法：**
+- `add_task(conversation_id, user_id)` - 添加新任务（防重复）
+- `remove_task(conversation_id)` - 移除任务
+- `start_worker()` - 启动后台工作线程
+- `stop_worker()` - 停止后台工作线程
+- `get_pending_tasks()` - 获取待处理任务列表（用于调试）
+- `_worker_loop()` - 后台工作循环，每分钟检查到期任务
+- `_process_task(task)` - 处理单个任务，顺序执行（使用 asyncio.Lock）
+- `_load_tasks()` - 从文件加载任务列表
+- `_save_tasks()` - 保存任务列表到文件
+
+**特性：**
+- **单例模式**：全局唯一实例，避免重复初始化
+- **持久化存储**：任务列表保存到 `backend/data/notebook_task_list.json`
+- **自动恢复**：后端重启时自动加载待处理任务
+- **顺序执行**：使用 asyncio.Lock 保证任务不并行执行
+- **防重复**：同一对话不会创建多个任务
+- **生命周期管理**：通过 FastAPI lifespan 事件管理启动和关闭
 
 **数据结构：**
 ```python
@@ -399,18 +427,23 @@ NotebookEntry:
 - 限制在 300 字以内
 - 记录问题、抽到的牌、用户经历和反馈
 
-**触发条件：**
+**触发条件（创建定时任务）：**
 - 对话退出时（切换对话、新建对话、页面关闭、登出）
 - 且对话内容有新增（消息数 > 1）
 - 且对话中抽过塔罗牌
 - **且对话内容有变化**（end_time != conversation.updated_at）
-- **且距离对话结束超过12小时**
 
-**设计机制：**
+**笔记生成机制（定时任务）：**
+- **延迟12小时生成**：对话退出时不立即生成笔记，而是创建定时任务，12小时后由后台调度器执行
+- **定时任务调度器**（`NotebookTaskScheduler`）：
+  - 单例模式，应用启动时自动启动 worker 线程
+  - 每分钟检查一次，顺序执行到期任务（使用 asyncio.Lock 保证不并行）
+  - 任务列表持久化到 `backend/data/notebook_task_list.json`
+  - 后端重启时自动恢复待处理任务
+- **防重复任务**：同一对话不会创建多个定时任务
+- **防重复生成**：通过比对 end_time 和 updated_at 判断对话是否有新内容
 - 使用异步 AI 生成，避免阻塞
 - 自动去重：同一对话多次退出只更新同一条记录
-- **防重复生成**：通过比对 end_time 和 updated_at 判断对话是否有新内容
-- **延迟生成**：要求距离对话结束至少12小时，避免频繁生成
 - 不对外展示，仅用于内部记录
 - 错误容忍：生成失败时使用简单默认摘要
 - **详细调试输出**：对话退出时打印所有条件检查结果，方便排查问题
@@ -864,7 +897,9 @@ AI消息（左侧）:
 ```
 
 **洗牌动画：**
-- 每次生成约16张动画牌，随机化水平摆动、旋转、缩放与延迟，形成不重复的洗牌节奏（时长约2.3s~3.5s）
+- 每次随机生成 14-20 张动画牌，并从“轨道旋转”“瀑布穿梭”“爆裂散射”三种运动模式中随机挑选，让洗牌轨迹与节奏始终保持新鲜感（整体时长约 2s~3.6s）
+- 模式内部仍会为每张卡片随机分配旋转角度、抛物线高度、起止延迟与缩放关键帧，确保同一模式下也不存在重复
+- 洗牌阶段的卡片基础尺寸提升到 112×176px，并在动画过程中峰值放大到约 1.25 倍，营造更有沉浸感的视觉体量（扇形选牌阶段维持 96×144px 不变）
 - 洗牌舞台叠加 `TABLE_BACKGROUND_IMAGE` (`/assets/table.png`) 桌面纹理与柔和金色光晕，整体舞台面积放大至 4xl 区域
 
 **扇形展开算法：**

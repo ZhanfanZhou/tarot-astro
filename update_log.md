@@ -1,3 +1,100 @@
+## 2025-11-11 - 洗牌动画随机化与视觉优化
+
+**功能描述：**
+增强塔罗抽牌器的洗牌阶段表现，引入多种随机轨迹并放大洗牌用牌的尺寸，提升沉浸感。
+
+**核心改动：**
+- 新增三种洗牌动画模式（轨道旋转、瀑布穿梭、爆裂散射），每次洗牌都会随机选择模式与卡片数量（14-20 张），同时为单张卡片注入独立的旋转、路径与延迟随机量，保证高随机性。
+- 洗牌阶段的卡片基础尺寸提升为 112×176px，并在动画关键帧内峰值放大至约 1.25 倍，选牌阶段的卡片大小保持不变。
+- 更新文档记录（`arch.md`、`update_log.md`），同步说明新的洗牌机制。
+
+**影响范围：**
+- 修改：`frontend/src/components/TarotCardDrawer.tsx`
+- 更新：`arch.md`, `update_log.md`
+
+---
+
+## 2025-11-10 - 重构占卜笔记生成机制：定时任务延迟生成
+
+**功能描述：**
+重构占卜笔记生成机制，从"退出对话时立即生成"改为"创建定时任务，12小时后生成"，提升用户体验和系统可靠性。
+
+**核心改动：**
+
+**1. 新增定时任务调度器服务（`services/notebook_task_scheduler.py`）**
+- ✅ `NotebookTask` 数据类：包含 conversation_id、user_id、scheduled_time、created_at
+- ✅ `NotebookTaskScheduler` 单例调度器：
+  - 后台 worker 线程每分钟检查到期任务
+  - 使用 asyncio.Lock 保证任务顺序执行，不并行
+  - 任务列表持久化到 `backend/data/notebook_task_list.json`
+  - 后端重启时自动加载并恢复任务
+  - 防止同一对话重复创建任务
+
+**2. 修改笔记本服务（`services/notebook_service.py`）**
+- ✅ 新增 `generate_and_save_entry()` 方法：
+  - 供定时任务调用，直接生成并保存笔记
+  - 不检查时间条件，只负责生成
+- ✅ 重构 `update_entry()` 方法：
+  - 从"立即生成笔记"改为"检查并创建定时任务"
+  - 删除12小时时间检查条件
+  - 只保留对话变化检查（end_time != updated_at）
+  - 调用调度器的 `add_task()` 创建任务
+
+**3. 修改对话路由（`routers/conversations.py`）**
+- ✅ 更新 `exit_conversation()` 接口：
+  - 调用 `notebook_service.update_entry()` 检查并创建任务
+  - 返回任务创建状态（task_scheduled）
+  - 更新日志输出，显示任务创建结果
+- ✅ 新增 `GET /api/conversations/tasks/pending` 接口：
+  - 用于调试，查看待处理任务列表
+  - 返回任务数量和详细信息
+
+**4. 修改应用启动逻辑（`main.py`）**
+- ✅ 使用 FastAPI 新的 `lifespan` 事件管理器（替代已弃用的 `on_event`）
+- ✅ 应用启动时：
+  - 启动任务调度器 worker
+  - 加载并显示待处理任务
+  - 打印详细的启动信息
+- ✅ 应用关闭时：
+  - 优雅停止 worker 线程
+  - 保存任务状态
+
+**触发条件变更：**
+- ❌ 删除：距离对话结束超过12小时
+- ✅ 保留：对话有内容（消息数 > 1）
+- ✅ 保留：对话中抽过塔罗牌
+- ✅ 保留：对话内容有变化（end_time != updated_at）
+
+**生成时机变更：**
+- ❌ 旧机制：退出对话时立即生成（如果满足所有条件）
+- ✅ 新机制：退出对话时创建定时任务 → 12小时后后台自动生成
+
+**技术特性：**
+- **持久化**：任务列表保存到文件，服务器重启不丢失
+- **防重复**：同一对话多次退出只创建一个任务
+- **顺序执行**：使用锁机制保证任务按顺序处理
+- **错误处理**：任务执行失败时仍然移除任务，避免堆积
+- **调试友好**：提供 API 查看待处理任务
+
+**优势：**
+1. **用户体验更好**：退出对话时不需要等待笔记生成
+2. **避免频繁生成**：给用户12小时时间完善对话
+3. **服务器压力更小**：后台分散处理，不集中在退出时
+4. **可靠性更高**：任务持久化，不会因重启丢失
+
+**影响范围：**
+- 新增文件：`backend/services/notebook_task_scheduler.py`
+- 修改文件：`backend/services/notebook_service.py`, `backend/routers/conversations.py`, `backend/main.py`
+- 文档更新：`arch.md`, `update_log.md`
+- 数据文件：新增 `backend/data/notebook_task_list.json`
+
+**测试验证：**
+- ✅ 单元测试：任务添加、重复检测、持久化、恢复
+- ✅ 集成测试：后端启动、API调用、任务列表查询
+- ✅ 无 linter 错误
+
+---
+
 ## 2025-11-09 - 新增AI工具调用：读取占卜笔记本
 
 **功能描述：**
@@ -2372,3 +2469,20 @@ AI 提示层：系统提示词和抽牌结果标记引导 AI 行为
 - chore: soften tarot shuffle glow, randomize paths each run, and apply `/assets/table.png` background for shuffle/spread stages
 - fix: render a standalone assistant bubble with the draw button when Gemini 2.5 Pro only returns `draw_tarot_cards`, switching the label to “点我抽牌” when no text is provided and hiding empty paragraphs in `ChatMessage`
 - ui: raise the conversation delete button above overlays, ensure hover opacity applies, and ease its reveal in `Sidebar`
+
+## 2025-11-14 - 新增产品复盘文档 doc.md
+
+**功能描述：**
+整理并输出项目的整体产品复盘文档到 `doc.md`，从产品经理视角总结项目现状与演进。
+
+**核心内容：**
+- 描述项目的基本功能定位：AI 塔罗 & 星座占卜 + 长期记忆的陪伴型工具。
+- 按模块整理关键特性：个性化解读、科学占卜流程、沉浸式体验、多 Agent 人格化设计。
+- 明确产品理念：弱化玄学门槛、强调共创答案与情绪价值、技术为体验服务。
+- 提出未来盈利模式设想：会员订阅、主题内容包、虚拟皮肤、B 端合作等。
+- 从产品视角总结技术特点与演进路径，并梳理风险边界与后续优化方向。
+
+**影响范围：**
+- 新增：`doc.md`
+- 文档整理：为后续产品规划、对外展示或复盘沟通提供统一材料
+

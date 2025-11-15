@@ -71,33 +71,28 @@ class NotebookService:
         "temperature": 0.7,
         "top_p": 0.9,
         "top_k": 40,
-        "max_output_tokens": 500,  # 限制在300字左右
+        "max_output_tokens": 2000,  # 限制在300字左右
     }
     
-    # 笔记生成提示词
-    NOTEBOOK_PROMPT = """你是一位专业的占卜记录员，需要为用户生成简洁的占卜记录。
+    # 笔记生成提示词（生成结构化输出：摘要 + 抽到的牌列表）
+    NOTEBOOK_PROMPT = """你是一位专业的占卜记录员，需要根据对话记录为用户生成简洁的占卜记录。
 
-**重要要求：**
-1. 以用户的第一人称视角书写（"我"）
-2. 总结要简洁，不超过300字
-3. 重点记录：用户经历了什么、抽到了什么牌、用户的感受和反馈
-4. 使用温暖、理解的语气
-5. 不需要解读牌意，只记录事实和用户的反馈
-6. 如果用户没有明确反馈，可以根据对话内容推测用户的态度
+**要求**
+1. 占卜记录写到`summary`字段，不超过300字
+2. 重点记录：问卜者的问题是什么？问卜者经历了什么？抽到了什么牌？塔罗牌如何回答问卜者的问题？塔罗牌反映问卜者怎样的状态？问卜者是反馈是怎样的？
+3. 如果用户没有明确反馈，可以根据对话内容推测用户的态度，
+4. 要从对话内容中提取所有抽到的牌（可能有多次抽牌），输出到`cards_drawn`字段。`summary`字段中出现的牌用"[]"括起来，如[星币王后（正位）]
 
-**记录格式：**
-我[时间]进行了一次占卜。我想了解[问题]。抽到了[牌名]。在这次占卜中，[经历了什么]。[用户的感受/反馈]。
-
-现在请根据以下对话内容，生成占卜记录：
-
-**对话开始时间：** {start_time}
-**讨论的问题：** {question}
-**抽到的牌：** {cards}
-
-**对话内容：**
+现在根据<conversation>标签内对话内容，生成占卜记录：
+<conversation>
 {conversation_content}
-
-请生成占卜记录（不超过300字）："""
+<conversation>
+按 JSON 格式输出：
+{{
+    "summary": "占卜记录文本（不超过300字）",
+    "cards_drawn": ["星币侍从（正位）", "星币王后（正位）", "圣杯五（正位）"]
+}}
+"""
     
     def __init__(self):
         # 确保笔记本目录存在
@@ -153,23 +148,22 @@ class NotebookService:
                 question = msg.content[:100]  # 取前100字
                 break
         
-        # 提取抽到的牌
-        cards = []
-        for msg in conversation.messages:
-            if msg.tarot_cards:
-                for card in msg.tarot_cards:
-                    reversed_str = "逆位" if card.reversed else "正位"
-                    cards.append(f"{card.card_name}（{reversed_str}）")
-        
-        cards_str = "、".join(cards) if cards else "无"
-        
-        # 构建对话内容（只取用户和助手的消息，跳过系统消息）
+        # 构建对话内容（在 ASSISTANT 消息中显示抽牌信息，跳过 SYSTEM 消息）
         conversation_content = []
         for msg in conversation.messages:
             if msg.role == MessageRole.USER:
                 conversation_content.append(f"用户：{msg.content}")
             elif msg.role == MessageRole.ASSISTANT:
-                conversation_content.append(f"占卜师：{msg.content}")
+                # 如果这条消息包含抽牌信息，在内容后附加
+                content = f"占卜师：{msg.content}"
+                if msg.tarot_cards:
+                    cards_info = []
+                    for card in msg.tarot_cards:
+                        reversed_str = "逆位" if card.reversed else "正位"
+                        cards_info.append(f"{card.card_name}（{reversed_str}）")
+                    content += f"\n[本次解读的牌: {'、'.join(cards_info)}]"
+                conversation_content.append(content)
+            # 跳过 SYSTEM 消息（抽牌信息已经附加在 ASSISTANT 消息中）
         
         conversation_str = "\n".join(conversation_content[:20])  # 只取前20条消息
         print(f"[Notebook] 对话内容: {conversation_str}")
@@ -177,40 +171,51 @@ class NotebookService:
         # 格式化时间
         start_time = datetime.fromisoformat(conversation.created_at).strftime("%Y年%m月%d日")
         
-        # 构建提示词
+        # 构建提示词（不再传递 cards_str，让 AI 从对话中提取）
         prompt = self.NOTEBOOK_PROMPT.format(
             start_time=start_time,
             question=question,
-            cards=cards_str,
             conversation_content=conversation_str
         )
         
-        # 调用AI生成摘要
+        # 调用AI生成摘要（结构化输出）
         try:
+            # 配置JSON响应模式
+            generation_config = self.NOTEBOOK_GENERATION_CONFIG.copy()
+            generation_config["response_mime_type"] = "application/json"
+            
             model = genai.GenerativeModel(
                 model_name=self.NOTEBOOK_MODEL,
-                generation_config=self.NOTEBOOK_GENERATION_CONFIG
+                generation_config=generation_config
             )
             
             print(f"[Notebook] 正在为对话 {conversation.conversation_id} 生成摘要...")
             response = await model.generate_content_async(prompt)
-            summary = response.text.strip()
+            result_text = response.text.strip()
             
-            print(f"[Notebook] 摘要生成成功，长度: {len(summary)}")
-            return summary
+            # 解析JSON响应
+            result = json.loads(result_text)
+            summary = result.get("summary", "")
+            cards_drawn = result.get("cards_drawn", [])
+            
+            print(f"[Notebook] 摘要生成成功，长度: {len(summary)}, 抽到的牌: {len(cards_drawn)}张")
+            return summary, cards_drawn
         except Exception as e:
             print(f"[Notebook] 生成摘要失败: {e}")
-            # 返回一个简单的默认摘要
-            return f"我在{start_time}进行了占卜，抽到了{cards_str}。"
+            import traceback
+            traceback.print_exc()
+            # 返回默认值
+            return f"我在{start_time}进行了占卜。", []
     
-    async def update_entry(
+    async def generate_and_save_entry(
         self,
         user_id: str,
         conversation: Conversation,
         user: Optional[User] = None
     ) -> Dict[str, any]:
         """
-        更新或创建笔记本条目
+        直接生成并保存笔记（供定时任务调用）
+        不进行时间和变化检查
         
         Args:
             user_id: 用户ID
@@ -220,50 +225,18 @@ class NotebookService:
         Returns:
             包含生成状态的字典
         """
-        from datetime import datetime, timedelta
-        
         # 加载现有笔记本
         entries = self._load_notebook(user_id)
         
         # 查找是否已有该对话的记录
-        existing_entry = None
         existing_entry_idx = None
         for i, entry in enumerate(entries):
             if entry.conversation_id == conversation.conversation_id:
-                existing_entry = entry
                 existing_entry_idx = i
                 break
         
-        # 条件1: 检查对话是否有变化
-        conversation_changed = True
-        if existing_entry and existing_entry.end_time:
-            conversation_changed = existing_entry.end_time != conversation.updated_at
-        
-        # 条件2: 检查是否距离对话结束超过12小时
-        time_elapsed = False
-        try:
-            conversation_end_time = datetime.fromisoformat(conversation.updated_at)
-            current_time = datetime.utcnow()
-            time_diff = current_time - conversation_end_time
-            time_elapsed = time_diff > timedelta(hours=12)
-        except Exception as e:
-            print(f"[Notebook] 时间解析失败: {e}")
-            time_elapsed = False
-        
-        # 返回检查结果
-        check_result = {
-            "conversation_changed": conversation_changed,
-            "time_elapsed": time_elapsed,
-            "should_generate": conversation_changed and time_elapsed,
-            "existing_entry": existing_entry is not None
-        }
-        
-        # 如果不满足条件，直接返回
-        if not check_result["should_generate"]:
-            return check_result
-        
-        # 生成摘要
-        summary = await self.generate_summary(conversation, user)
+        # 生成摘要（AI 会从对话中自动提取抽到的牌）
+        summary, cards_drawn = await self.generate_summary(conversation, user)
         
         # 提取问题
         question = "未知问题"
@@ -272,23 +245,14 @@ class NotebookService:
                 question = msg.content[:100]
                 break
         
-        # 提取抽到的牌
-        cards = []
-        for msg in conversation.messages:
-            if msg.tarot_cards:
-                for card in msg.tarot_cards:
-                    reversed_str = "逆位" if card.reversed else "正位"
-                    cards.append(f"{card.card_name}（{reversed_str}）")
-        
-        # 创建新条目
+        # 创建新条目（使用 AI 提取的 cards_drawn）
         new_entry = NotebookEntry(
             conversation_id=conversation.conversation_id,
             start_time=conversation.created_at,
             question=question,
-            cards_drawn=cards,
+            cards_drawn=cards_drawn,
             summary=summary,
-            user_feedback="",
-            end_time=conversation.updated_at  # 保存对话结束时间
+            end_time=conversation.updated_at
         )
         
         # 更新或添加条目
@@ -302,7 +266,60 @@ class NotebookService:
         # 保存笔记本
         self._save_notebook(user_id, entries)
         
-        check_result["notebook_updated"] = True
+        return {
+            "notebook_updated": True,
+            "entry": new_entry.to_dict()
+        }
+    
+    async def update_entry(
+        self,
+        user_id: str,
+        conversation: Conversation,
+        user: Optional[User] = None
+    ) -> Dict[str, any]:
+        """
+        检查是否需要创建定时任务
+        
+        Args:
+            user_id: 用户ID
+            conversation: 对话对象
+            user: 用户对象（可选）
+            
+        Returns:
+            包含检查状态的字典
+        """
+        # 加载现有笔记本
+        entries = self._load_notebook(user_id)
+        
+        # 查找是否已有该对话的记录
+        existing_entry = None
+        for entry in entries:
+            if entry.conversation_id == conversation.conversation_id:
+                existing_entry = entry
+                break
+        
+        # 条件1: 检查对话是否有变化
+        conversation_changed = True
+        if existing_entry and existing_entry.end_time:
+            conversation_changed = existing_entry.end_time != conversation.updated_at
+        
+        # 返回检查结果
+        check_result = {
+            "conversation_changed": conversation_changed,
+            "should_schedule": conversation_changed,  # 只要有变化就应该调度
+            "existing_entry": existing_entry is not None
+        }
+        
+        # 如果对话无变化，不需要调度
+        if not conversation_changed:
+            return check_result
+        
+        # 创建定时任务
+        from services.notebook_task_scheduler import task_scheduler
+        task_added = await task_scheduler.add_task(conversation.conversation_id, user_id)
+        
+        check_result["task_scheduled"] = task_added
+        
         return check_result
     
     def delete_notebook(self, user_id: str):
