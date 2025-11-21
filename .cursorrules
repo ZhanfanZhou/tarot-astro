@@ -1,7 +1,7 @@
 # Instructions
 
 During your interaction with the user, if you find anything reusable in this project (e.g. version of a library, model name), especially about a fix to a mistake you made or a correction you received, you should take note in the `Lessons` section in the `.cursorrules` file so you will not make the same mistake again. 同时你需要维护一个程序架构设计文档`arch.md`，每次完成一个编码任务后，需要对`arch.md`进行更新。注意，Lessons不需要事无巨细记录，参考以下规则，在编码时：
-1.已移除的机制，已删除的功能不需要记录为learnings
+1.已移除的机制，已删除的功能不需要记录为learnings；删除功能把相关的learnings删除
 2.通过修改或新增处理机制的问题修复或优化，不直接记录为learnings，应该在程序架构设计说明文档中记录，并区分这个机制是只应用在单独某个功能，还是整体普遍的机制，说明清楚这个机制的设计动机，下次代码修改时应该遵守这些机制
 3.重构类修改，和修改机制类似，应该在程序架构设计说明文档中记录
 4.编码级问题修改，如API使用错误，类型错误，文件名非法字符修复等，可以记录到learnings
