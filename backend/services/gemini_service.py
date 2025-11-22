@@ -368,7 +368,7 @@ class GeminiService:
         })
         gemini_messages.append({
             "role": "model",
-            "parts": [{"text": "我明白了，我会按照这些指引进行塔罗占卜。"}]
+            "parts": [{"text": "我明白了。"}]
         })
         
         # 添加历史消息
@@ -377,7 +377,7 @@ class GeminiService:
             if msg.role == MessageRole.SYSTEM:
                 # 处理塔罗抽牌结果
                 if msg.tarot_cards:
-                    cards_desc = "[抽牌结果] 用户已完成抽牌，抽到的牌如下：\n"
+                    cards_desc = "[抽牌结果]如下：\n"
                     for i, card in enumerate(msg.tarot_cards, 1):
                         position = msg.draw_request.positions[i-1] if msg.draw_request and msg.draw_request.positions else f"第{i}张"
                         reversed_str = "（逆位）" if card.reversed else "（正位）"
@@ -386,11 +386,21 @@ class GeminiService:
                         "role": "user",
                         "parts": [{"text": cards_desc}]
                     })
+                    # 在抽牌结果后添加确认语
+                    gemini_messages.append({
+                        "role": "model",
+                        "parts": [{"text": "我看到了，让我为你解读这些牌。"}]
+                    })
                 # 处理星盘数据（内容以[星盘数据]开头）
                 elif msg.content.startswith("[星盘数据]"):
                     gemini_messages.append({
                         "role": "user",
                         "parts": [{"text": msg.content}]
+                    })
+                    # 在星盘数据后添加确认语
+                    gemini_messages.append({
+                        "role": "model",
+                        "parts": [{"text": "我看到了你的星盘数据，让我为你解读。"}]
                     })
                 continue
             
@@ -482,7 +492,7 @@ class GeminiService:
             
             # 如果有函数调用，处理它们
             if function_calls:
-                # 处理第一个函数调用（Gemini通常一次只调用一个函数）
+                # 处理第一个函数调用
                 func_call = function_calls[0]
                 
                 # 通知前端有函数调用
