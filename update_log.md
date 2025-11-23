@@ -1,3 +1,38 @@
+## 2025-11-23 - 优化用户资料补充交互流程
+
+**功能描述：**
+改进 `request_user_profile` 工具的交互体验，从"直接弹出资料填写窗口"改为"先显示按钮，用户点击后再弹出窗口"，与抽牌交互保持一致。
+
+**核心改动：**
+1. **前端状态管理（`frontend/src/App.tsx`）**
+   - 新增 `showProfileButton` 状态：控制是否显示"补充资料"按钮
+   - 新增 `pendingProfileRequest` 状态：存储待处理的资料请求信息
+   - 新增 `handleReadyToFillProfile` 函数：处理用户点击"补充资料"按钮
+   - 修改所有 `onNeedProfile` 回调：从直接弹窗改为设置按钮状态
+   - 添加资料提交/跳过时清除按钮状态的逻辑
+
+2. **消息组件更新（`frontend/src/components/ChatMessage.tsx`）**
+   - 添加 `showProfileButton` 和 `onReadyToFillProfile` props
+   - 新增"补充资料"按钮渲染逻辑（使用 FileUser 图标）
+   - 按钮样式：蓝色渐变（from-blue-500 to-cyan-500）
+
+3. **交互流程**
+   - AI 调用 `request_user_profile` → 后端返回 SSE `{need_profile: {...}}`
+   - 前端收到后显示"补充资料"按钮（而不是直接弹窗）
+   - 用户点击按钮 → 隐藏按钮，打开资料填写弹窗
+   - 用户填写/跳过 → 清除按钮状态
+
+**影响范围：**
+- 修改：`frontend/src/App.tsx`, `frontend/src/components/ChatMessage.tsx`
+- 后端无需修改（已正确返回 SSE 事件）
+
+**用户体验提升：**
+- 与抽牌交互保持一致的交互模式
+- 给用户更多控制权，不会突然弹出窗口打断对话
+- 视觉上更加统一和友好
+
+---
+
 ## 2025-11-11 - 洗牌动画随机化与视觉优化
 
 **功能描述：**

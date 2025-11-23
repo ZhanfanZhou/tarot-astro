@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { User, Sparkles } from 'lucide-react';
+import { User, Sparkles, FileUser } from 'lucide-react';
 import type { Message, SessionType } from '@/types';
 import { getCardInfo } from '@/config/tarotCards';
 
@@ -10,6 +10,8 @@ interface ChatMessageProps {
   sessionType?: SessionType;
   showDrawButton?: boolean; // 是否显示抽牌按钮
   onReadyToDraw?: () => void; // 点击抽牌按钮的回调
+  showProfileButton?: boolean; // 是否显示补充资料按钮
+  onReadyToFillProfile?: () => void; // 点击补充资料按钮的回调
 }
 
 const THINKING_MESSAGES = [
@@ -28,7 +30,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   isThinking = false, 
   sessionType, 
   showDrawButton = false,
-  onReadyToDraw 
+  onReadyToDraw,
+  showProfileButton = false,
+  onReadyToFillProfile
 }) => {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
@@ -162,6 +166,22 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
               <Sparkles size={18} className="animate-pulse" />
               {trimmedContent ? '我准备好了' : '点我抽牌'}
               <Sparkles size={18} className="animate-pulse" />
+            </motion.button>
+          )}
+          
+          {/* 补充资料按钮 */}
+          {!isUser && showProfileButton && onReadyToFillProfile && (
+            <motion.button
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={onReadyToFillProfile}
+              className={`${trimmedContent ? 'mt-4' : ''} px-6 py-3 bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-display font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 flex items-center gap-2 mx-auto`}
+            >
+              <FileUser size={18} className="animate-pulse" />
+              补充资料
+              <FileUser size={18} className="animate-pulse" />
             </motion.button>
           )}
           

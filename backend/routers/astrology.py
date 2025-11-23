@@ -121,6 +121,7 @@ async def send_message(request: SendMessageRequest):
             ):
                 if "content" in event:
                     # 流式输出文本内容
+                    print(f"[Astrology Router] 流式输出文本内容")
                     full_text_response += event["content"]
                     yield f"data: {json.dumps({'content': event['content']})}\n\n"
                 
@@ -319,6 +320,7 @@ async def send_message(request: SendMessageRequest):
                         # 将函数结果喂回AI
                         print(f"[Astrology Router] 🔄 将函数结果喂回AI...")
                         updated_conv = await ConversationService.get_conversation(request.conversation_id)
+                        print(f"[Astrology Router] 更新后的对话: {updated_conv.messages}")
                         
                         final_response = ""
                         async for event2 in gemini_service.continue_with_function_result(
@@ -334,6 +336,7 @@ async def send_message(request: SendMessageRequest):
                         
                         # 保存AI的最终回复
                         if final_response.strip():
+                            print(f"[Astrology Router] 最终回复: {final_response}")
                             # 检查是否需要附加抽牌结果
                             tarot_cards_to_attach = None
                             draw_request_to_attach = None
@@ -427,8 +430,10 @@ async def send_message(request: SendMessageRequest):
                             )
                 
                 elif "done" in event:
+                    print("[Astrology Router] 对话完成")
                     # 对话完成
                     if not has_function_call:
+                        print("[Astrology Router] 没有函数调用")
                         # 没有函数调用，保存AI回复
                         if full_text_response.strip():
                             # 检查是否需要附加抽牌结果

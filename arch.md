@@ -224,6 +224,12 @@ mark_cards_drawn → get_conversation → set flag → save_conversation
    适用场景：
    - 星座AI：当需要星盘分析但用户资料不完整时调用
    - 塔罗AI：当需要结合星盘进行深入解读时调用
+   
+   交互流程（类似抽牌流程）：
+   1. AI 调用工具 → 后端返回 SSE: {"need_profile": {...}}
+   2. 前端显示"补充资料"按钮（蓝色渐变，FileUser 图标）
+   3. 用户点击按钮 → 打开资料填写弹窗
+   4. 用户填写/跳过 → 清除按钮状态
    ```
 
 4. **read_divination_notebook** - 读取占卜笔记本工具
@@ -757,6 +763,10 @@ sendMessage 流程：
 
 **Props：**
 - `message: Message` - 消息对象
+- `showDrawButton` - 是否显示抽牌按钮
+- `onReadyToDraw` - 点击抽牌按钮的回调
+- `showProfileButton` - 是否显示补充资料按钮
+- `onReadyToFillProfile` - 点击补充资料按钮的回调
 
 **UI 结构：**
 ```
@@ -770,6 +780,12 @@ AI消息（左侧）:
 抽到的牌：
 位置1: 牌名 (正/逆位)
 位置2: 牌名 (正/逆位)
+
+如果需要抽牌，在消息下方显示：
+[✨ 我准备好了 ✨]  (金色渐变按钮)
+
+如果需要补充资料，在消息下方显示：
+[📋 补充资料 📋]  (蓝色渐变按钮)
 ```
 
 **设计机制：**
@@ -777,6 +793,10 @@ AI消息（左侧）:
 - 使用 Framer Motion 实现淡入动画
 - 系统消息不显示（role === 'system'）
 - 支持显示抽牌结果和位置含义
+- **交互按钮设计**：
+  - 抽牌按钮：金色渐变（mystic-gradient），Sparkles 图标
+  - 补充资料按钮：蓝色渐变（from-blue-500 to-cyan-500），FileUser 图标
+  - 按钮支持 hover 放大和 tap 缩小动画
 
 #### 3.3 聊天输入组件 (ChatInput.tsx)
 
@@ -925,6 +945,12 @@ AI消息（左侧）:
 #### 3.7 星盘资料填写弹窗组件 (AstrologyProfileModal.tsx)
 
 **功能：** 用户填写星盘所需的出生资料
+
+**触发方式：**
+- AI 调用 `request_user_profile` 工具
+- 前端先显示"补充资料"按钮（蓝色渐变，FileUser 图标）
+- 用户点击按钮后才打开弹窗
+- **设计理念**：与抽牌流程保持一致，给用户更多控制权，不会突然弹出打断对话
 
 **Props：**
 - `isOpen` - 是否打开
@@ -1103,6 +1129,11 @@ choice (选择) → guest (游客)
 - `streamingMessage` - 流式输出的消息
 - `showCardDrawer` - 是否显示抽牌器
 - `pendingDrawRequest` - 待处理的抽牌请求
+- `showDrawButton` - 是否显示抽牌按钮
+- `showProfileButton` - 是否显示补充资料按钮
+- `pendingProfileRequest` - 待处理的资料请求
+- `showAstrologyProfileModal` - 是否显示资料填写弹窗
+- `pendingAstrologyConversation` - 待处理资料的对话ID
 
 **生命周期：**
 ```
@@ -1158,7 +1189,8 @@ choice (选择) → guest (游客)
 - **本地状态优先**：使用 `addMessageToCurrentConversation` 方法直接修改 Zustand 状态
 - **服务端同步**：后续 `conversationApi.get()` 刷新确保与服务端数据保持一致
 - 提升用户体验：反馈迅速，即使 AI 响应较慢也不会影响消息显示
-- **抽牌按钮占位机制**：当 Gemini 只返回 `draw_tarot_cards` 函数调用而没有文本块时，`showDrawButton + pendingDrawRequest` 触发一个纯按钮的助手气泡，按钮文案改为“点我抽牌”，确保用户仍能看到交互入口；若 AI 同时返回文本，则按钮附着在最后一条助手消息上并显示“我准备好了”。
+- **抽牌按钮占位机制**：当 Gemini 只返回 `draw_tarot_cards` 函数调用而没有文本块时，`showDrawButton + pendingDrawRequest` 触发一个纯按钮的助手气泡，按钮文案改为"点我抽牌"，确保用户仍能看到交互入口；若 AI 同时返回文本，则按钮附着在最后一条助手消息上并显示"我准备好了"。
+- **资料按钮占位机制**：同样的机制应用于 `request_user_profile` 工具调用，`showProfileButton + pendingProfileRequest` 触发"补充资料"按钮（蓝色渐变），用户点击后打开资料填写弹窗。
 
 **handleCardsDrawn(cards):**
 ```
@@ -1401,7 +1433,10 @@ choice (选择) → guest (游客)
  │<───────────────────────────│                          │
  │  data: {"need_profile":{}}  │                          │
  │                            │                          │
- │  3. 前端弹出资料填写窗口    │                          │
+ │  3. 前端显示"补充资料"按钮  │                          │
+ │  [补充资料] 蓝色渐变按钮    │                          │
+ │  用户点击按钮               │                          │
+ │  → 弹出资料填写窗口         │                          │
  │  用户填写：性别、出生年月日  │                          │
  │  时分、出生城市             │                          │
  │                            │                          │
