@@ -51,7 +51,7 @@ gh repo create ftarot --public --source=. --remote=origin --push
 
 1. **立即在 Google AI Studio 重新生成 API Key**
    - 访问：https://makersuite.google.com/app/apikey
-   - 删除旧的 Key：`AIzaSyBk518YOPBWfA68H5PI4k19QeQDgsV0Jes`
+   - 删除旧的 Key：
    - 创建新的 Key
 
 2. **更新 `.env` 文件中的 Key**
