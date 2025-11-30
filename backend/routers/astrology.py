@@ -156,11 +156,13 @@ async def send_message(request: SendMessageRequest):
                     if func_name == "get_astrology_chart":
                         # 检查用户资料是否完整
                         if not user or not user.profile:
+                            print(f"[Astrology Router] 用户信息不完整，请先补充个人资料")
                             function_result = {
                                 "success": False,
                                 "error": "用户信息不完整，请先补充个人资料"
                             }
                         else:
+                            print(f"[Astrology Router] 用户信息完整，开始获取星盘数据{user.profile}")
                             profile = user.profile
                             
                             # 检查是否有完整的出生信息
@@ -227,6 +229,7 @@ async def send_message(request: SendMessageRequest):
                         
                         # 重新获取对话（包含星盘数据）
                         updated_conv = await ConversationService.get_conversation(request.conversation_id)
+                        print(f"[Astrology Router] 更新后的对话: {updated_conv.messages}")
                         
                         # 继续Agent Loop
                         final_response = ""
@@ -243,6 +246,7 @@ async def send_message(request: SendMessageRequest):
                         
                         # 保存AI的最终解读
                         if final_response.strip():
+                            print(f"[Astrology Router] 最终回复: {final_response}")
                             # 检查是否需要附加抽牌结果
                             tarot_cards_to_attach = None
                             draw_request_to_attach = None
@@ -306,7 +310,7 @@ async def send_message(request: SendMessageRequest):
                         
                         # 确保 func_args 完全可序列化（转换所有 protobuf 类型）
                         serializable_args = json.loads(json.dumps(func_args, default=str))
-                        # 通知前端显示弹窗
+                        # 通知前端显示
                         yield f"data: {json.dumps({'need_profile': serializable_args})}\n\n"
                         
                         # 构造函数结果（告诉AI已经请求用户填写）
@@ -318,39 +322,39 @@ async def send_message(request: SendMessageRequest):
                         print(f"[Astrology Router] ✅ 函数执行完成: {func_name}")
                         
                         # 将函数结果喂回AI
-                        print(f"[Astrology Router] 🔄 将函数结果喂回AI...")
-                        updated_conv = await ConversationService.get_conversation(request.conversation_id)
-                        print(f"[Astrology Router] 更新后的对话: {updated_conv.messages}")
+                        # print(f"[Astrology Router] 🔄 将函数结果喂回AI...")
+                        # updated_conv = await ConversationService.get_conversation(request.conversation_id)
+                        # print(f"[Astrology Router] 更新后的对话: {updated_conv.messages}")
                         
-                        final_response = ""
-                        async for event2 in gemini_service.continue_with_function_result(
-                            updated_conv.messages,
-                            user,
-                            session_type=SessionType.ASTROLOGY,
-                            function_name=func_name,
-                            function_result=function_result
-                        ):
-                            if "content" in event2:
-                                final_response += event2["content"]
-                                yield f"data: {json.dumps({'content': event2['content']})}\n\n"
+                        # final_response = ""
+                        # async for event2 in gemini_service.continue_with_function_result(
+                        #     updated_conv.messages,
+                        #     user,
+                        #     session_type=SessionType.ASTROLOGY,
+                        #     function_name=func_name,
+                        #     function_result=function_result
+                        # ):
+                        #     if "content" in event2:
+                        #         final_response += event2["content"]
+                        #         yield f"data: {json.dumps({'content': event2['content']})}\n\n"
                         
-                        # 保存AI的最终回复
-                        if final_response.strip():
-                            print(f"[Astrology Router] 最终回复: {final_response}")
-                            # 检查是否需要附加抽牌结果
-                            tarot_cards_to_attach = None
-                            draw_request_to_attach = None
-                            if await should_attach_tarot_cards(request.conversation_id):
-                                latest_conv = await ConversationService.get_conversation(request.conversation_id)
-                                tarot_cards_to_attach, draw_request_to_attach = ConversationService.get_latest_tarot_cards(latest_conv)
+                        # # 保存AI的最终回复
+                        # if final_response.strip():
+                        #     print(f"[Astrology Router] 最终回复: {final_response}")
+                        #     # 检查是否需要附加抽牌结果
+                        #     tarot_cards_to_attach = None
+                        #     draw_request_to_attach = None
+                        #     if await should_attach_tarot_cards(request.conversation_id):
+                        #         latest_conv = await ConversationService.get_conversation(request.conversation_id)
+                        #         tarot_cards_to_attach, draw_request_to_attach = ConversationService.get_latest_tarot_cards(latest_conv)
                             
-                            await ConversationService.add_message(
-                                request.conversation_id,
-                                MessageRole.ASSISTANT,
-                                final_response,
-                                tarot_cards=tarot_cards_to_attach,
-                                draw_request=draw_request_to_attach
-                            )
+                        #     await ConversationService.add_message(
+                        #         request.conversation_id,
+                        #         MessageRole.ASSISTANT,
+                        #         final_response,
+                        #         tarot_cards=tarot_cards_to_attach,
+                        #         draw_request=draw_request_to_attach
+                        #     )
                     
                     elif func_name == "read_divination_notebook":
                         # 读取占卜笔记本

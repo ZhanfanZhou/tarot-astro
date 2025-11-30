@@ -308,6 +308,7 @@ async def send_message(request: SendMessageRequest):
                         # 将函数结果喂回AI
                         print(f"[Tarot Router] 🔄 将函数结果喂回AI...")
                         updated_conv = await ConversationService.get_conversation(request.conversation_id)
+                        print(f"[Tarot Router] 更新后的对话: {updated_conv.messages}")
                         
                         final_response = ""
                         async for event2 in gemini_service.continue_with_function_result(
@@ -323,6 +324,7 @@ async def send_message(request: SendMessageRequest):
                         
                         # 保存AI的最终回复
                         if final_response.strip():
+                            print(f"[Tarot Router] 最终回复: {final_response}")
                             # 检查是否需要附加抽牌结果
                             tarot_cards_to_attach = None
                             draw_request_to_attach = None

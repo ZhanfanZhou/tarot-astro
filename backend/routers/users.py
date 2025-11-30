@@ -24,6 +24,7 @@ async def register(register_data: UserRegister):
         user.password_hash = None
         return user
     except ValueError as e:
+        # 这里捕获了 ValueError 并返回 400
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
