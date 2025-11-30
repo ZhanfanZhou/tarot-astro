@@ -120,9 +120,6 @@ const SessionButtons: React.FC<SessionButtonsProps> = ({
               <h3 className="font-display font-bold text-xl mb-2 text-white">
                 {button.label}
               </h3>
-              <p className="text-sm text-gray-400 font-display">
-                {button.description}
-              </p>
             </div>
 
             {/* 即将推出标签 */}

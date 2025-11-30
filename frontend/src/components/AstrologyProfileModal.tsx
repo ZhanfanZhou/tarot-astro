@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Calendar, Clock, MapPin } from 'lucide-react';
+import { X, Calendar, Clock, MapPin, Loader2 } from 'lucide-react';
 import type { UserProfile, Gender } from '@/types';
 
 interface AstrologyProfileModalProps {
   isOpen: boolean;
   currentProfile?: UserProfile;
   onClose: () => void;
-  onSubmit: (profile: UserProfile) => void;
+  onSubmit: (profile: UserProfile) => Promise<void>;
   onSkip: () => void;
 }
 
@@ -32,6 +32,8 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
   const [birthHour, setBirthHour] = useState<number | undefined>(currentProfile?.birth_hour);
   const [birthMinute, setBirthMinute] = useState<number | undefined>(currentProfile?.birth_minute);
   const [birthCity, setBirthCity] = useState<string | undefined>(currentProfile?.birth_city);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string>('');
 
   useEffect(() => {
     if (isOpen && currentProfile) {
@@ -42,15 +44,17 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
       setBirthHour(currentProfile.birth_hour);
       setBirthMinute(currentProfile.birth_minute);
       setBirthCity(currentProfile.birth_city);
+      setError('');
+      setIsSubmitting(false);
     }
   }, [isOpen, currentProfile]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     // 验证必填字段
     if (!birthYear || !birthMonth || !birthDay || birthHour === undefined || birthMinute === undefined || !birthCity) {
-      alert('请填写完整的出生信息');
+      setError('请填写完整的出生信息');
       return;
     }
 
@@ -65,7 +69,16 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
       birth_city: birthCity,
     };
 
-    onSubmit(profile);
+    setIsSubmitting(true);
+    setError('');
+
+    try {
+      await onSubmit(profile);
+      // 成功后会由父组件关闭弹窗
+    } catch (err: any) {
+      setError(err.message || '保存失败，请重试');
+      setIsSubmitting(false);
+    }
   };
 
   // 生成年份选项（1950-2024）
@@ -113,6 +126,13 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
 
             {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-6">
+              {/* 错误提示 */}
+              {error && (
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+                  {error}
+                </div>
+              )}
+
               {/* 性别 */}
               <div>
                 <label className="block text-sm font-medium mb-2">性别</label>
@@ -126,8 +146,12 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => setGender(option.value)}
-                      className={`px-4 py-2 rounded-lg transition-colors ${
+                      onClick={() => {
+                        setGender(option.value);
+                        setError('');
+                      }}
+                      disabled={isSubmitting}
+                      className={`px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                         gender === option.value
                           ? 'bg-primary text-white'
                           : 'bg-dark-bg hover:bg-dark-hover'
@@ -148,8 +172,12 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
                 <div className="grid grid-cols-3 gap-2">
                   <select
                     value={birthYear || ''}
-                    onChange={(e) => setBirthYear(Number(e.target.value))}
-                    className="px-4 py-2 bg-dark-bg rounded-lg border border-gray-700 focus:border-primary focus:outline-none"
+                    onChange={(e) => {
+                      setBirthYear(Number(e.target.value));
+                      setError('');
+                    }}
+                    className="px-4 py-2 bg-dark-bg rounded-lg border border-gray-700 focus:border-primary focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isSubmitting}
                     required
                   >
                     <option value="">年份</option>
@@ -161,8 +189,12 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
                   </select>
                   <select
                     value={birthMonth || ''}
-                    onChange={(e) => setBirthMonth(Number(e.target.value))}
-                    className="px-4 py-2 bg-dark-bg rounded-lg border border-gray-700 focus:border-primary focus:outline-none"
+                    onChange={(e) => {
+                      setBirthMonth(Number(e.target.value));
+                      setError('');
+                    }}
+                    className="px-4 py-2 bg-dark-bg rounded-lg border border-gray-700 focus:border-primary focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isSubmitting}
                     required
                   >
                     <option value="">月份</option>
@@ -174,8 +206,12 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
                   </select>
                   <select
                     value={birthDay || ''}
-                    onChange={(e) => setBirthDay(Number(e.target.value))}
-                    className="px-4 py-2 bg-dark-bg rounded-lg border border-gray-700 focus:border-primary focus:outline-none"
+                    onChange={(e) => {
+                      setBirthDay(Number(e.target.value));
+                      setError('');
+                    }}
+                    className="px-4 py-2 bg-dark-bg rounded-lg border border-gray-700 focus:border-primary focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isSubmitting}
                     required
                   >
                     <option value="">日期</option>
@@ -197,8 +233,12 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
                 <div className="grid grid-cols-2 gap-2">
                   <select
                     value={birthHour !== undefined ? birthHour : ''}
-                    onChange={(e) => setBirthHour(Number(e.target.value))}
-                    className="px-4 py-2 bg-dark-bg rounded-lg border border-gray-700 focus:border-primary focus:outline-none"
+                    onChange={(e) => {
+                      setBirthHour(Number(e.target.value));
+                      setError('');
+                    }}
+                    className="px-4 py-2 bg-dark-bg rounded-lg border border-gray-700 focus:border-primary focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isSubmitting}
                     required
                   >
                     <option value="">小时</option>
@@ -210,8 +250,12 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
                   </select>
                   <select
                     value={birthMinute !== undefined ? birthMinute : ''}
-                    onChange={(e) => setBirthMinute(Number(e.target.value))}
-                    className="px-4 py-2 bg-dark-bg rounded-lg border border-gray-700 focus:border-primary focus:outline-none"
+                    onChange={(e) => {
+                      setBirthMinute(Number(e.target.value));
+                      setError('');
+                    }}
+                    className="px-4 py-2 bg-dark-bg rounded-lg border border-gray-700 focus:border-primary focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isSubmitting}
                     required
                   >
                     <option value="">分钟</option>
@@ -235,8 +279,12 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
                 </label>
                 <select
                   value={birthCity || ''}
-                  onChange={(e) => setBirthCity(e.target.value)}
-                  className="w-full px-4 py-2 bg-dark-bg rounded-lg border border-gray-700 focus:border-primary focus:outline-none"
+                  onChange={(e) => {
+                    setBirthCity(e.target.value);
+                    setError('');
+                  }}
+                  className="w-full px-4 py-2 bg-dark-bg rounded-lg border border-gray-700 focus:border-primary focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={isSubmitting}
                   required
                 >
                   <option value="">请选择城市</option>
@@ -255,14 +303,17 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
               <div className="flex gap-3 pt-4">
                 <button
                   type="submit"
-                  className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl font-bold hover:scale-105 transition-transform"
+                  disabled={isSubmitting}
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl font-bold hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-2"
                 >
-                  保存并继续
+                  {isSubmitting && <Loader2 className="animate-spin" size={18} />}
+                  {isSubmitting ? '保存中...' : '保存并继续'}
                 </button>
                 <button
                   type="button"
                   onClick={onSkip}
-                  className="flex-1 px-6 py-3 bg-dark-bg hover:bg-dark-hover rounded-xl font-bold transition-colors"
+                  disabled={isSubmitting}
+                  className="flex-1 px-6 py-3 bg-dark-bg hover:bg-dark-hover rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   暂时跳过
                 </button>
