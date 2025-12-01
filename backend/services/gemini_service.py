@@ -52,7 +52,8 @@ class GeminiService:
         "当需要对用户的本命盘分析时调用：例如本命盘分析/各行星落座/星座解析/上升星座/黄道十二宫状态/宫位状态/以及和用户黄道十二宫相关的问题回答。"
         "在面对泛化问题/通用问题如（星座解析/星座运势等，可以在解析基本星座知识的基础上，再结合用户星盘数据进行更深入的解析。"
         "在抽取塔罗牌后，或用户询问塔罗牌的含义时，可以结合用户星盘数据进行更个性化的解读。"
-        "不要在无出生信息时调用，若缺少出生信息，必须先调用`request_user_profile`。"
+        "\n**重要提示**：如果调用此工具时返回 success=False，说明用户信息不完整，你必须立即调用 request_user_profile 工具请求用户补充信息。"
+        "不要向用户解释错误或询问用户，直接调用 request_user_profile 工具即可。"
         ),
         parameters={
             "type": "object",
@@ -233,9 +234,10 @@ class GeminiService:
     - 玄学无关的问题，必须明确拒绝。
 
 ## **选择适合的工具，提供个性化星座解读**：
-    - 要获取星盘资料，先检查<用户资料>部分，判断用户是否有完整的星盘信息（出生年月日、时间、城市）
-    - 如果资料完整，使用 `get_astrology_chart` 工具获取星盘数据，你不需要询问用户是否需要获取星盘数据
-    - 如果资料不完整，使用 `request_user_profile` 工具请求用户补充信息。（用户无法提要知会结果可能不准）
+    - 当需要获取星盘资料时，直接调用 `get_astrology_chart` 工具，你不需要询问用户是否需要获取星盘数据
+    - **重要**：如果 `get_astrology_chart` 返回失败（success=False），说明用户信息不完整，你必须**立即**调用 `request_user_profile` 工具请求用户补充信息
+    - 不要向用户解释 `get_astrology_chart` 失败的原因，不要询问用户，直接调用 `request_user_profile` 工具即可
+    - `request_user_profile` 调用后，系统会自动显示资料补充表单，等待用户填写完成后，你可以再次尝试调用 `get_astrology_chart`
     - **根据问题类型使用适合的解读风格**（重要），下面是可参考的类型&风格
     - 人生方向类：职业、天赋、定位、使命
         解读核心：以本命盘为基础，重点看太阳、天顶、土星、北交点与宫主星。要帮客户看清“能量流向”与“自我实现的路径”，而不是告诉他们“你适合当什么”。核心是 帮助客户理解“如何成为自己”
@@ -274,10 +276,10 @@ class GeminiService:
 你可以回答的还有问卜者的可行行动，心态，观念的转变，对问卜者经历的深挖，进行更深度的探讨
 """
 
-    # ASTROLOGY_SYSTEM_PROMPT = """你是一位专业的塔罗师，现在需要协助我完成一系列占卜测试任务，你必须按照我的指令，
-    # 当我跟你说抽塔罗，你回复好的，然后使用`draw_tarot_cards`工具抽3张牌，使用无牌阵，得到抽牌结果后，你只需要做简单解读即可，因为这是测试任务；
-    # 当我说看星盘，你使用`get_astrology_chart` 工具获取星盘数据，然后你只需告诉我太阳星座，月亮星座是什么就够了；
-    # 当我说填资料，你回复好的，然后使用`request_user_profile` 工具请求用户补充信息，然后你把结果简单告知我即可"""
+    ASTROLOGY_SYSTEM_PROMPT = """你是一位专业的塔罗师，现在需要协助我完成一系列占卜测试任务，你必须按照我的指令，
+    当我跟你说抽塔罗，你回复好的，然后使用`draw_tarot_cards`工具抽3张牌，使用无牌阵，得到抽牌结果后，你只需要做简单解读即可，因为这是测试任务；
+    当我说看星盘，你使用`get_astrology_chart` 工具获取星盘数据，然后你只需告诉我太阳星座，月亮星座是什么就够了；
+    当我说填资料，你回复好的，然后使用`request_user_profile` 工具请求用户补充信息，然后你把结果简单告知我即可"""
 
     def __init__(self):
         # 定义工具集合 - 两个会话都可以使用所有工具
@@ -400,16 +402,22 @@ class GeminiService:
         self, 
         messages: List[Message],
         user: Optional[User] = None,
-        session_type: SessionType = SessionType.TAROT
+        session_type: SessionType = SessionType.TAROT,
+        function_executor: Optional[callable] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         流式生成回复（支持Function Calling的Agent Loop）
         
+        Args:
+            messages: 消息历史
+            user: 用户信息
+            session_type: 会话类型
+            function_executor: 函数执行器 async callable(func_name, func_args) -> Dict
+        
         Yields:
             Dict包含以下可能的键：
             - content: str - 文本内容
-            - function_call: Dict - 函数调用请求
-            - function_response: Dict - 函数调用结果
+            - function_call: Dict - 函数调用请求（仅当 function_executor 为 None 时）
             - done: bool - 是否完成
         """
         # 选择工具集
@@ -464,7 +472,7 @@ class GeminiService:
             
             # 如果有文本内容，立即流式输出
             if text_content:
-                print(f"[Gemini Agent] 💬 生成文本内容（{text_content}）")
+                print(f"[Gemini Agent] 💬 生成文本内容")
                 # 将文本分块流式输出
                 chunk_size = 50
                 for i in range(0, len(text_content), chunk_size):
@@ -475,20 +483,45 @@ class GeminiService:
             if function_calls:
                 # 处理第一个函数调用
                 func_call = function_calls[0]
+                func_name = func_call.name
+                func_args = dict(func_call.args)
                 
-                # 通知前端有函数调用
-                yield {
-                    "function_call": {
-                        "name": func_call.name,
-                        "args": dict(func_call.args)
+                # 如果提供了函数执行器，在loop内部执行函数
+                if function_executor:
+                    print(f"[Gemini Agent] 🔧 执行函数: {func_name}")
+                    
+                    # 通知前端有函数调用（用于显示UI，如抽牌动画、资料补充按钮等）
+                    yield {
+                        "function_call": {
+                            "name": func_name,
+                            "args": func_args
+                        }
                     }
-                }
-                
-                # 等待外部执行函数并返回结果
-                # 注意：实际的函数执行由路由层处理，这里只是标记需要执行
-                # Agent Loop会在下一轮继续，等待function response被添加到消息历史中
-                print(f"[Gemini Agent] ⏸️  等待函数执行: {func_call.name}")
-                break  # 退出循环，等待外部提供函数结果
+                    
+                    # 执行函数
+                    function_result = await function_executor(func_name, func_args)
+                    print(f"[Gemini Agent] ✅ 函数执行完成")
+                    print(f"[Gemini Agent] 函数结果详情: {json.dumps(function_result, ensure_ascii=False, indent=2)}")
+                    
+                    # 将函数结果发送回AI，准备下一轮loop
+                    last_message = [genai.protos.Part(
+                        function_response=genai.protos.FunctionResponse(
+                            name=func_name,
+                            response=function_result
+                        )
+                    )]
+                    # 继续loop，AI可能会继续调用其他函数或生成文本
+                    print(f"[Gemini Agent] 🔄 将函数结果喂回AI，继续Agent Loop...")
+                else:
+                    # 没有函数执行器，通知外部执行函数，然后退出
+                    print(f"[Gemini Agent] ⏸️  通知外部执行函数: {func_name}")
+                    yield {
+                        "function_call": {
+                            "name": func_name,
+                            "args": func_args
+                        }
+                    }
+                    break  # 退出循环，等待外部提供函数结果
             else:
                 # 没有函数调用，对话结束
                 print(f"[Gemini Agent] ✅ 对话完成（无函数调用）")
@@ -508,7 +541,7 @@ class GeminiService:
         function_result: Dict[str, Any] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        在收到函数执行结果后继续Agent Loop
+        在收到函数执行结果后继续Agent Loop（支持嵌套函数调用）
         
         Args:
             messages: 消息历史（包含函数调用和结果）
@@ -530,7 +563,7 @@ class GeminiService:
         # 格式化消息（包含函数结果）
         gemini_messages = self._format_messages_for_gemini(messages, user, session_type)
         
-        print(f"\n[Gemini Agent] 继续Agent Loop，函数结果: {function_name}")
+        print(f"\n[Gemini Agent] 继续Agent Loop，函数: {function_name}, 结果: {function_result.get('success', 'N/A')}")
         
         # 创建聊天会话
         chat = model.start_chat(history=gemini_messages)
@@ -543,16 +576,43 @@ class GeminiService:
                     response=function_result
                 )
             )],
-            stream=True
+            stream=False  # 改为非流式，以便检测新的函数调用
         )
         
-        # 流式输出AI的最终响应
-        async for chunk in response:
-            if hasattr(chunk, 'text') and chunk.text:
-                yield {"content": chunk.text}
-            elif hasattr(chunk, 'parts'):
-                for part in chunk.parts:
-                    if hasattr(part, 'text') and part.text:
-                        yield {"content": part.text}
+        # 检查响应中是否有新的函数调用或文本内容
+        function_calls = []
+        text_content = ""
         
-        yield {"done": True}
+        for part in response.parts:
+            if hasattr(part, 'function_call') and part.function_call:
+                function_calls.append(part.function_call)
+                print(f"[Gemini Agent] 🔧 检测到嵌套函数调用: {part.function_call.name}")
+                print(f"[Gemini Agent] 参数: {dict(part.function_call.args)}")
+            elif hasattr(part, 'text') and part.text:
+                text_content += part.text
+        
+        # 如果有文本内容，流式输出
+        if text_content:
+            print(f"[Gemini Agent] 💬 生成文本内容")
+            # 将文本分块流式输出
+            chunk_size = 50
+            for i in range(0, len(text_content), chunk_size):
+                chunk = text_content[i:i+chunk_size]
+                yield {"content": chunk}
+        
+        # 如果有新的函数调用，通知前端（但不执行，交给 router 层处理）
+        if function_calls:
+            func_call = function_calls[0]
+            print(f"[Gemini Agent] 📢 通知前端有新的函数调用: {func_call.name}")
+            yield {
+                "function_call": {
+                    "name": func_call.name,
+                    "args": dict(func_call.args)
+                }
+            }
+            # 注意：这里不继续执行，等待 router 层处理
+            # router 层应该执行函数，然后再次调用 continue_with_function_result
+        else:
+            # 没有新的函数调用，对话完成
+            print(f"[Gemini Agent] ✅ Agent Loop 完成")
+            yield {"done": True}

@@ -14,8 +14,9 @@ CONVERSATIONS_FILE = DATA_DIR / "conversations.json"
 
 # Gemini API配置
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = "gemini-3-pro-preview"  # 使用Gemini 2.5 Flash
-# GEMINI_MODEL = "gemini-3-pro"  # 使用Gemini 2.5 Pro
+# GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-3-pro-preview"
+# GEMINI_MODEL = "gemini-3-pro"
 
 # 星盘API配置
 ASTROLOGY_API_URL = "http://www.xingpan.vip/astrology/chart/natal"

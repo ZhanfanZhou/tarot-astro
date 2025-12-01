@@ -39,6 +39,8 @@ const App: React.FC = () => {
   const [showDrawButton, setShowDrawButton] = useState(false); // 是否显示抽牌按钮
   const [showAstrologyProfileModal, setShowAstrologyProfileModal] = useState(false);
   const [pendingAstrologyConversation, setPendingAstrologyConversation] = useState<string | null>(null);
+  const [showProfileButton, setShowProfileButton] = useState(false); // 是否显示补充资料按钮
+  const [pendingProfileRequest, setPendingProfileRequest] = useState<any>(null); // 待处理的资料请求
   const isCreatingSessionRef = useRef(false); // 防止重复创建会话
   const previousConversationIdRef = useRef<string | null>(null); // 追踪上一次的对话ID，用于退出时保存笔记
   
@@ -167,7 +169,8 @@ const App: React.FC = () => {
               // 塔罗AI也可以请求用户资料
               console.log('塔罗AI请求用户资料:', instruction);
               setPendingAstrologyConversation(newConv.conversation_id);
-              setShowAstrologyProfileModal(true);
+              setPendingProfileRequest(instruction);
+              setShowProfileButton(true); // 显示补充资料按钮而非立即弹窗
             },
             async (instruction) => {
               // 塔罗AI也可以请求获取星盘数据
@@ -213,7 +216,8 @@ const App: React.FC = () => {
               // AI检测到需要资料
               console.log('星座AI请求用户资料:', instruction);
               setPendingAstrologyConversation(newConv.conversation_id);
-              setShowAstrologyProfileModal(true);
+              setPendingProfileRequest(instruction);
+              setShowProfileButton(true); // 显示补充资料按钮而非立即弹窗
             },
             async (instruction) => {
               // AI请求获取星盘数据
@@ -346,6 +350,8 @@ const App: React.FC = () => {
 
       // 关闭弹窗
       setShowAstrologyProfileModal(false);
+      setShowProfileButton(false); // 清除补充资料按钮状态
+      setPendingProfileRequest(null); // 清除待处理的资料请求
       
       // 如果没有挂起的对话，仅保存资料即可
       if (!conversationId) {
@@ -398,6 +404,8 @@ const App: React.FC = () => {
   const handleAstrologyProfileSkip = async () => {
     // 用户跳过填写资料，关闭弹窗，让用户继续自由对话
     setShowAstrologyProfileModal(false);
+    setShowProfileButton(false); // 清除补充资料按钮状态
+    setPendingProfileRequest(null); // 清除待处理的资料请求
     // 不清空 pendingAstrologyConversation，以便用户后续想填写时还可以使用
   };
 
@@ -430,7 +438,8 @@ const App: React.FC = () => {
             // AI检测到需要资料
             console.log('星座AI请求用户资料:', instruction);
             setPendingAstrologyConversation(currentConversation.conversation_id);
-            setShowAstrologyProfileModal(true);
+            setPendingProfileRequest(instruction);
+            setShowProfileButton(true); // 显示补充资料按钮而非立即弹窗
           },
           async (instruction) => {
             // AI请求获取星盘数据
@@ -473,7 +482,8 @@ const App: React.FC = () => {
             // 塔罗AI也可以请求用户资料（用于结合星盘的深入解读）
             console.log('塔罗AI请求用户资料:', instruction);
             setPendingAstrologyConversation(currentConversation.conversation_id);
-            setShowAstrologyProfileModal(true);
+            setPendingProfileRequest(instruction);
+            setShowProfileButton(true); // 显示补充资料按钮而非立即弹窗
           },
           async (instruction) => {
             // 塔罗AI也可以请求获取星盘数据
@@ -537,6 +547,12 @@ const App: React.FC = () => {
     setShowCardDrawer(true); // 显示抽牌器
   };
 
+  // 用户点击"补充资料"按钮，打开资料填写窗口
+  const handleReadyToFillProfile = () => {
+    setShowProfileButton(false); // 隐藏按钮
+    setShowAstrologyProfileModal(true); // 显示资料填写窗口
+  };
+
   const handleCardsDrawn = async () => {
     if (!currentConversation || !pendingDrawRequest) return;
 
@@ -573,7 +589,8 @@ const App: React.FC = () => {
                 // AI检测到需要资料
                 console.log('星座AI请求用户资料:', instruction);
                 setPendingAstrologyConversation(currentConversation.conversation_id);
-                setShowAstrologyProfileModal(true);
+                setPendingProfileRequest(instruction);
+                setShowProfileButton(true); // 显示补充资料按钮而非立即弹窗
               },
               async (instruction) => {
                 // AI请求获取星盘数据
@@ -698,6 +715,13 @@ const App: React.FC = () => {
     currentConversation &&
     showDrawButton &&
     pendingDrawRequest &&
+    !hasAssistantMessageAtEnd &&
+    streamingMessage.trim().length === 0
+  );
+  const shouldRenderStandaloneProfilePrompt = Boolean(
+    currentConversation &&
+    showProfileButton &&
+    pendingProfileRequest &&
     !hasAssistantMessageAtEnd &&
     streamingMessage.trim().length === 0
   );
@@ -883,6 +907,10 @@ const App: React.FC = () => {
                     isLastAssistantMessage && 
                     showDrawButton && 
                     pendingDrawRequest !== null;
+                  const shouldShowProfileButton = 
+                    isLastAssistantMessage && 
+                    showProfileButton && 
+                    pendingProfileRequest !== null;
                   
                   return message.role !== 'system' && (
                     <ChatMessage 
@@ -891,6 +919,8 @@ const App: React.FC = () => {
                       sessionType={currentConversation.session_type}
                       showDrawButton={shouldShowDrawButton}
                       onReadyToDraw={handleReadyToDraw}
+                      showProfileButton={shouldShowProfileButton}
+                      onReadyToFillProfile={handleReadyToFillProfile}
                     />
                   );
                 })}
@@ -905,6 +935,8 @@ const App: React.FC = () => {
                     sessionType={currentConversation.session_type}
                     showDrawButton={showDrawButton}
                     onReadyToDraw={handleReadyToDraw}
+                    showProfileButton={showProfileButton}
+                    onReadyToFillProfile={handleReadyToFillProfile}
                   />
                 )}
                 
@@ -919,6 +951,20 @@ const App: React.FC = () => {
                     sessionType={currentConversation.session_type}
                     showDrawButton={true}
                     onReadyToDraw={handleReadyToDraw}
+                  />
+                )}
+                
+                {shouldRenderStandaloneProfilePrompt && (
+                  <ChatMessage
+                    key="profile-button-placeholder"
+                    message={{
+                      role: MessageRole.ASSISTANT,
+                      content: '',
+                      timestamp: new Date().toISOString(),
+                    }}
+                    sessionType={currentConversation.session_type}
+                    showProfileButton={true}
+                    onReadyToFillProfile={handleReadyToFillProfile}
                   />
                 )}
 
