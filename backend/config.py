@@ -18,7 +18,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = "gemini-3-pro-preview"
 # GEMINI_MODEL = "gemini-3-pro"
 
-# 星盘API配置
+# 星盘API配置 https://api.xingpan.vip/astrology/Apiinterface.html
 ASTROLOGY_API_URL = "http://www.xingpan.vip/astrology/chart/natal"
 ASTROLOGY_ACCESS_TOKEN = os.getenv("ASTROLOGY_ACCESS_TOKEN", "")  # 需要从环境变量设置
 
