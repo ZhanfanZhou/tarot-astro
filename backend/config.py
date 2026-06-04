@@ -15,7 +15,7 @@ CONVERSATIONS_FILE = DATA_DIR / "conversations.json"
 # Gemini API配置
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # GEMINI_MODEL = "gemini-2.5-flash"
-GEMINI_MODEL = "gemini-3-pro-preview"
+GEMINI_MODEL = "gemini-3.1-flash-lite"
 # GEMINI_MODEL = "gemini-3-pro"
 
 # 星盘API配置 https://api.xingpan.vip/astrology/Apiinterface.html

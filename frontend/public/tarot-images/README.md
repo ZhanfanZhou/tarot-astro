@@ -1,61 +1,64 @@
-# 塔罗牌图片资源
-
-此目录用于存放78张塔罗牌的图片资源。
-
-## 目录结构
+# Tarot images
 
 ```
 tarot-images/
-├── card-back.jpg           # 卡背图片
-├── placeholder.jpg         # 默认占位图片
-├── major/                  # 大阿尔卡那（22张）
-│   ├── 00-fool.jpg
-│   ├── 01-magician.jpg
-│   ├── ...
-│   └── 21-world.jpg
-├── wands/                  # 权杖牌组（14张）
-│   ├── 01-ace.jpg
-│   ├── 02.jpg
-│   ├── ...
-│   └── king.jpg
-├── cups/                   # 圣杯牌组（14张）
-│   ├── 01-ace.jpg
-│   ├── 02.jpg
-│   ├── ...
-│   └── king.jpg
-├── swords/                 # 宝剑牌组（14张）
-│   ├── 01-ace.jpg
-│   ├── 02.jpg
-│   ├── ...
-│   └── king.jpg
-└── pentacles/              # 星币牌组（14张）
-    ├── 01-ace.jpg
-    ├── 02.jpg
-    ├── ...
-    └── king.jpg
+├── card-back.png      shared UI assets (used by the chat app)
+├── card-back2.svg
+├── placeholder2.svg
+└── decks/
+    └── <deck-id>/                a single tarot deck (one art style, 78 cards)
+        ├── deck.json             deck metadata (see below)
+        ├── major/                22 Major Arcana
+        ├── cups/  wands/         14 each of the four Minor suits
+        ├── swords/ pentacles/
+        └── …
 ```
 
-## 图片规格
+The `/showcase` page auto-discovers everything under `decks/` at build time
+(via Vite `import.meta.glob`). There is **no hardcoded file list** — adding or
+removing files just works after a rebuild.
 
-- **格式**: JPG/PNG
-- **推荐尺寸**: 宽度 400-600px，高度 700-1000px（保持2:3.5的宽高比）
-- **文件大小**: 单张不超过 500KB
+## Adding a deck
 
-## 如何添加图片
+Drop a new folder under `decks/` containing a `deck.json` and the suit
+subfolders. No code changes required.
 
-1. 按照上述目录结构创建子文件夹
-2. 将对应的塔罗牌图片放入相应文件夹
-3. 确保文件名与配置文件（`src/config/tarotCards.ts`）中的命名一致
-4. 如果某些图片暂时缺失，系统会自动使用占位图片
+```jsonc
+// decks/<deck-id>/deck.json
+{
+  "id": "classic-rws",                 // must match the folder name
+  "name": "Classic Rider–Waite",       // shown in the deck switcher + labels
+  "artist": "",                         // optional
+  "style": "Short description of the art style",
+  "accent": "#C9A96E",                 // optional accent colour (hex)
+  "order": 1                            // optional sort order in the switcher
+}
+```
 
-## 版权说明
+## Naming cards
 
-请确保使用的塔罗牌图片具有合法的使用权限或遵守相应的版权协议。
+- One file per card, named after the card in **kebab-case**:
+  `cups/ace-of-cups.png`, `major/the-high-priestess.png`, `major/justice.png`.
+- Matching is case/spacing-insensitive and tolerates a 1-character typo, so a
+  slightly-off name still lands on the right card — but never on a *different*
+  card.
+- Cards line up across decks automatically: the same card name in two decks is
+  treated as the same position, which is what powers cross-deck preview.
 
-## 推荐资源
+## Multiple versions of one card
 
-可以从以下来源获取塔罗牌图片：
-- Rider-Waite Tarot（公共领域）
-- 自行绘制或委托设计
-- 购买商业授权的塔罗牌图片包
+When a card has more than one take (e.g. the designer kept two), add the extra
+ones with a `__<variant>` suffix on the same base name:
 
+```
+major/justice.png                      ← primary
+major/justice__alt.png                 ← alternate version
+pentacles/nine-of-pentacles.png        ← primary
+pentacles/nine-of-pentacles__backup.png
+```
+
+The file **without** a `__` suffix is the primary shown in the grid. All
+versions (within a deck and across decks) appear in the preview's version strip.
+
+> Note: the chat app (`src/config/tarotCards.ts`) uses its own separate image
+> scheme and is unrelated to the `decks/` structure above.
