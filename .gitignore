@@ -62,6 +62,9 @@ htmlcov/
 .pytest_cache/
 .mypy_cache/
 
+# 塔罗牌图片资源（体积大 ~266MB，通过 sync-assets.sh 用 rsync 同步到服务器，不进 git）
+frontend/public/tarot-images/decks/
+
 
 
 
