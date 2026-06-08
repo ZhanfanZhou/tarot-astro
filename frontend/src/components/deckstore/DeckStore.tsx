@@ -4,6 +4,7 @@ import { STORE_DECKS, StoreDeck } from '../../data/storeDecks';
 import StorefrontView from './StorefrontView';
 import DeckDetailView from './DeckDetailView';
 import CheckoutPanel from './CheckoutPanel';
+import WalletChip from '../wallet/WalletChip';
 
 interface DeckStoreProps {
   open: boolean;
@@ -39,7 +40,11 @@ export default function DeckStore({ open, onClose, onEnterDeck }: DeckStoreProps
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); back(); }
+      if (e.key === 'Escape') {
+        // 卡牌放大层在场时，让它先处理 Esc，商店不抢
+        if (document.querySelector('[data-ds-zoom]')) return;
+        e.stopPropagation(); back();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -66,7 +71,10 @@ export default function DeckStore({ open, onClose, onEnterDeck }: DeckStoreProps
             <div className="deckstore-topbar">
               <button className="deckstore-back" onClick={back}>‹ {selectedId ? '返回商店' : '返回牌廊'}</button>
               <span className="deckstore-title">发现新牌组</span>
-              <button className="deckstore-close" onClick={onClose} aria-label="关闭商店">✕</button>
+              <div className="deckstore-topbar-right">
+                <WalletChip />
+                <button className="deckstore-close" onClick={onClose} aria-label="关闭商店">✕</button>
+              </div>
             </div>
 
             <div className="deckstore-body">
@@ -134,6 +142,7 @@ export default function DeckStore({ open, onClose, onEnterDeck }: DeckStoreProps
               transition: all .2s; font-family: inherit;
             }
             .deckstore-close:hover { background: rgba(255,255,255,.14); color: #fff; }
+            .deckstore-topbar-right { display: flex; align-items: center; gap: 12px; }
             .deckstore-body {
               flex: 1; overflow-y: auto; padding: 32px 28px 64px;
               scrollbar-width: thin; scrollbar-color: rgba(201,169,110,.4) transparent;
@@ -223,8 +232,8 @@ export default function DeckStore({ open, onClose, onEnterDeck }: DeckStoreProps
             .ds-tile:hover .ds-tile-go { transform: translateX(3px); }
 
             /* detail */
-            .ds-detail { display: grid; grid-template-columns: minmax(0, 380px) 1fr; gap: 40px; align-items: start; }
-            .ds-detail-left { display: flex; flex-direction: column; gap: 16px; }
+            .ds-detail { display: flex; flex-direction: column; gap: 36px; }
+            .ds-detail-head { display: grid; grid-template-columns: minmax(0, 340px) 1fr; gap: 36px; align-items: start; }
             .ds-detail-cover {
               position: relative; aspect-ratio: 3/4; border-radius: 16px; overflow: hidden; background: #10101a;
               border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
@@ -247,6 +256,74 @@ export default function DeckStore({ open, onClose, onEnterDeck }: DeckStoreProps
             .ds-progress-bar { height: 5px; border-radius: 999px; background: rgba(255,255,255,.08); overflow: hidden; }
             .ds-progress-fill { height: 100%; border-radius: 999px; background: var(--accent); }
             .ds-progress-label { font-size: 11px; color: rgba(237,230,214,.5); letter-spacing: .05em; }
+
+            /* full card grid */
+            .ds-cards { display: flex; flex-direction: column; gap: 16px; }
+            .ds-cards-head { display: flex; align-items: baseline; justify-content: space-between; border-top: 1px solid var(--line, rgba(201,169,110,.16)); padding-top: 20px; }
+            .ds-cards-title { font-family: 'Cinzel', serif; font-size: 16px; letter-spacing: 2px; color: var(--ivory, #ede6d6); }
+            .ds-cards-count { font-size: 12px; color: rgba(237,230,214,.5); letter-spacing: .04em; }
+            .ds-cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 14px; }
+            @media (min-width: 768px) { .ds-cards-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 16px; } }
+            .ds-card-cell {
+              display: flex; flex-direction: column; gap: 6px; padding: 0;
+              background: none; border: none; cursor: pointer; text-align: center;
+            }
+            .ds-card-cell.locked { cursor: default; }
+            .ds-card-thumb {
+              position: relative; aspect-ratio: 2/3; border-radius: 8px; overflow: hidden; background: #10101a;
+              border: 1px solid var(--line, rgba(201,169,110,.16));
+              transition: border-color .2s, box-shadow .2s, transform .2s;
+            }
+            .ds-card-cell:not(.locked):hover .ds-card-thumb {
+              border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+              box-shadow: 0 10px 26px rgba(0,0,0,.5), 0 0 16px color-mix(in srgb, var(--accent) 20%, transparent);
+              transform: translateY(-3px);
+            }
+            .ds-card-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+            .ds-card-cell.locked .ds-card-thumb img { filter: grayscale(1) brightness(.5); }
+            .ds-card-todo {
+              position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+              font-size: 11px; letter-spacing: .1em; color: rgba(237,230,214,.65);
+              background: rgba(8,8,16,.5);
+            }
+            .ds-card-name { font-size: 11px; color: rgba(237,230,214,.6); line-height: 1.25; }
+            .ds-card-cell:not(.locked):hover .ds-card-name { color: rgba(237,230,214,.95); }
+
+            /* card zoom lightbox */
+            .ds-zoom-backdrop {
+              position: fixed; inset: 0; z-index: 1300;
+              background: rgba(2,2,8,.9); backdrop-filter: blur(10px);
+              display: flex; align-items: center; justify-content: center; padding: 28px;
+            }
+            .ds-zoom-stage { position: relative; display: flex; flex-direction: column; align-items: center; gap: 14px; max-width: min(92vw, 520px); }
+            .ds-zoom-img-wrap {
+              position: relative; border-radius: 12px; overflow: hidden;
+              border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+              box-shadow: 0 30px 70px rgba(0,0,0,.7);
+            }
+            .ds-zoom-img { display: block; width: auto; height: auto; max-width: 100%; max-height: min(78vh, 720px); }
+            .ds-zoom-tint { position: absolute; inset: 0; pointer-events: none; }
+            .ds-zoom-info { display: flex; align-items: center; gap: 12px; }
+            .ds-zoom-name { font-family: 'Cinzel', serif; font-size: 16px; color: var(--ivory, #ede6d6); letter-spacing: 1px; }
+            .ds-zoom-counter { font-size: 11px; color: rgba(237,230,214,.4); padding-left: 12px; border-left: 1px solid rgba(255,255,255,.12); }
+            .ds-zoom-arrow {
+              position: fixed; top: 50%; transform: translateY(-50%);
+              width: 50px; height: 50px; border-radius: 50%;
+              border: 1px solid rgba(201,169,110,.3); background: rgba(14,14,26,.55); color: #C9A96E;
+              font-size: 28px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+              backdrop-filter: blur(6px); transition: all .2s; line-height: 1; z-index: 1301;
+            }
+            .ds-zoom-arrow:hover { background: rgba(201,169,110,.2); border-color: #C9A96E; transform: translateY(-50%) scale(1.08); }
+            .ds-zoom-arrow.prev { left: max(16px, 3vw); }
+            .ds-zoom-arrow.next { right: max(16px, 3vw); }
+            .ds-zoom-close {
+              position: fixed; top: 22px; right: 22px; z-index: 1301;
+              width: 36px; height: 36px; border-radius: 50%;
+              border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.06); color: rgba(255,255,255,.75);
+              font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .2s;
+            }
+            .ds-zoom-close:hover { background: rgba(255,255,255,.14); color: #fff; }
+            @media (max-width: 640px) { .ds-zoom-arrow { width: 42px; height: 42px; font-size: 24px; } .ds-zoom-arrow.prev { left: 8px; } .ds-zoom-arrow.next { right: 8px; } }
 
             /* checkout */
             .ds-checkout-scrim {
@@ -278,6 +355,7 @@ export default function DeckStore({ open, onClose, onEnterDeck }: DeckStoreProps
               transition: all .2s; font-family: inherit;
             }
             .ds-pay-method.active { color: var(--gold, #C9A96E); border-color: var(--gold, #C9A96E); background: rgba(201,169,110,.1); }
+            .ds-pay-method:disabled { opacity: .4; cursor: default; font-size: 11px; }
             .ds-balance { display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: rgba(237,230,214,.6); }
             .ds-balance .low { color: #ff8c64; }
             .ds-topup {
@@ -318,8 +396,8 @@ export default function DeckStore({ open, onClose, onEnterDeck }: DeckStoreProps
             /* responsive */
             @media (max-width: 760px) {
               .ds-hero { grid-template-columns: 1fr; gap: 22px; }
-              .ds-detail { grid-template-columns: 1fr; gap: 24px; }
-              .ds-detail-left { max-width: 320px; }
+              .ds-detail-head { grid-template-columns: 1fr; gap: 24px; }
+              .ds-detail-cover { max-width: 320px; }
               .deckstore-body { padding: 24px 18px 56px; }
             }
           `}</style>

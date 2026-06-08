@@ -1,15 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Menu } from 'lucide-react';
 import Sidebar from './components/Sidebar';
+import TopBar from './components/TopBar';
 import ChatMessage from './components/ChatMessage';
-import ChatInput from './components/ChatInput';
+import Composer from './components/Composer';
 import QuickReplies from './components/QuickReplies';
 import SessionButtons from './components/SessionButtons';
+import GalleryBanner from './components/GalleryBanner';
+import RecentReadings from './components/RecentReadings';
+import WalletChip from './components/wallet/WalletChip';
 import TarotCardDrawer from './components/TarotCardDrawer';
 import AuthModal from './components/AuthModal';
 import AstrologyProfileModal from './components/AstrologyProfileModal';
 import ConvertToRegisteredModal from './components/ConvertToRegisteredModal';
 import MysticBackground from './components/MysticBackground';
+import Toaster from './components/ui/Toaster';
+import ConfirmDialog from './components/ui/ConfirmDialog';
+import { toast } from './stores/useToastStore';
+import { confirmDialog } from './stores/useConfirmStore';
 import { useAuthStore } from './stores/useAuthStore';
 import { useConversationStore } from './stores/useConversationStore';
 import { userApi, conversationApi, tarotApi, astrologyApi } from './services/api';
@@ -43,7 +52,10 @@ const App: React.FC = () => {
   const [pendingProfileRequest, setPendingProfileRequest] = useState<any>(null); // 待处理的资料请求
   const isCreatingSessionRef = useRef(false); // 防止重复创建会话
   const previousConversationIdRef = useRef<string | null>(null); // 追踪上一次的对话ID，用于退出时保存笔记
-  
+  // 侧边栏：桌面常驻、移动端抽屉；初始按视口决定
+  const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1024);
+  const closeSidebarOnMobile = () => { if (typeof window !== 'undefined' && window.innerWidth < 1024) setSidebarOpen(false); };
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // 检查用户登录状态
@@ -103,7 +115,7 @@ const App: React.FC = () => {
       setUser(newUser);
     } catch (error) {
       console.error('创建游客失败:', error);
-      alert('登录失败，请重试');
+      toast.error('登录失败，请重试');
     }
   };
 
@@ -135,6 +147,7 @@ const App: React.FC = () => {
 
   const handleSelectSession = async (sessionType: SessionType) => {
     if (!user) return;
+    closeSidebarOnMobile();
 
     // 防抖：防止重复创建会话
     if (isCreatingSessionRef.current) {
@@ -191,7 +204,7 @@ const App: React.FC = () => {
           setStreamingMessage('');
         } catch (error) {
           console.error('塔罗AI开场失败:', error);
-          alert('初始化失败，请重试');
+          toast.error('初始化失败，请重试');
         } finally {
           setIsLoading(false);
         }
@@ -273,14 +286,14 @@ const App: React.FC = () => {
           }
         } catch (error) {
           console.error('AI开场失败:', error);
-          alert('初始化失败，请重试');
+          toast.error('初始化失败，请重试');
         } finally {
           setIsLoading(false);
         }
       }
     } catch (error) {
       console.error('创建对话失败:', error);
-      alert('创建对话失败，请重试');
+      toast.error('创建对话失败，请重试');
     } finally {
       isCreatingSessionRef.current = false;
     }
@@ -300,6 +313,7 @@ const App: React.FC = () => {
   };
 
   const handleNewConversation = async () => {
+    closeSidebarOnMobile();
     // 如果有当前对话，先保存笔记
     if (currentConversation) {
       await handleExitConversation(currentConversation.conversation_id);
@@ -309,31 +323,60 @@ const App: React.FC = () => {
   };
 
   const handleSelectConversation = async (conversation: any) => {
+    closeSidebarOnMobile();
     try {
       // 如果有当前对话且不是同一个对话，先保存笔记
       if (currentConversation && currentConversation.conversation_id !== conversation.conversation_id) {
         await handleExitConversation(currentConversation.conversation_id);
       }
-      
+
       const fullConv = await conversationApi.get(conversation.conversation_id);
       setCurrentConversation(fullConv);
       previousConversationIdRef.current = fullConv.conversation_id;
     } catch (error) {
       console.error('加载对话失败:', error);
+      toast.error('加载对话失败，请重试');
     }
   };
 
   const handleDeleteConversation = async (conversationId: string) => {
-    if (!confirm('确定要删除这个对话吗？')) return;
+    const ok = await confirmDialog({
+      title: '删除占卜',
+      message: '确定要删除这个对话吗？此操作无法撤销。',
+      confirmText: '删除',
+      tone: 'danger',
+    });
+    if (!ok) return;
 
     try {
       await conversationApi.delete(conversationId);
       removeConversation(conversationId);
+      if (currentConversation?.conversation_id === conversationId) setCurrentConversation(null);
+      toast.success('已删除');
     } catch (error) {
       console.error('删除对话失败:', error);
-      alert('删除失败，请重试');
+      toast.error('删除失败，请重试');
     }
   };
+
+  // TopBar 操作
+  const handleCopyAllReadings = async () => {
+    if (!currentConversation) return;
+    const text = currentConversation.messages
+      .filter((m) => m.role === MessageRole.ASSISTANT && m.content?.trim())
+      .map((m) => m.content.trim())
+      .join('\n\n— — —\n\n');
+    if (!text) { toast.info('暂无可复制的解读'); return; }
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('已复制全部解读');
+    } catch {
+      toast.error('复制失败');
+    }
+  };
+
+  const handleScrollToLatest = () =>
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
 
   const handleAstrologyProfileSubmit = async (profile: UserProfile) => {
     if (!user) return;
@@ -535,7 +578,7 @@ const App: React.FC = () => {
       }
     } catch (error) {
       console.error('发送消息失败:', error);
-      alert('发送失败，请重试');
+      toast.error('发送失败，请重试');
     } finally {
       setIsLoading(false);
     }
@@ -630,14 +673,14 @@ const App: React.FC = () => {
           setStreamingMessage('');
         } catch (error) {
           console.error('AI解读失败:', error);
-          alert('解读失败，请重试');
+          toast.error('解读失败，请重试');
         } finally {
           setIsLoading(false);
         }
       }, 500);
     } catch (error) {
       console.error('抽牌失败:', error);
-      alert('抽牌失败，请重试');
+      toast.error('抽牌失败，请重试');
     }
   };
 
@@ -651,26 +694,29 @@ const App: React.FC = () => {
 
     // 游客用户特殊处理
     if (user.user_type === 'guest') {
-      const choice = window.confirm(
-        '您是游客用户，退出后将无法找回对话历史！\n\n' +
-        '点击"确定"删除所有数据并退出\n' +
-        '点击"取消"返回（您也可以选择转换为注册用户保留数据）'
-      );
+      const proceed = await confirmDialog({
+        title: '退出登录',
+        message: '您是游客用户，退出后将无法找回对话历史。是否继续？\n（也可以转换为注册用户以保留数据）',
+        confirmText: '继续退出',
+        cancelText: '返回',
+        tone: 'danger',
+      });
+      if (!proceed) return;
 
-      if (!choice) return;
+      // 是否永久删除数据
+      const deleteData = await confirmDialog({
+        title: '处理游客数据',
+        message: '是否永久删除所有对话记录和个人信息？\n选择「保留并转换」可转为注册用户保留数据。',
+        confirmText: '永久删除',
+        cancelText: '保留并转换',
+        tone: 'danger',
+      });
 
-      // 用户选择删除数据
-      const confirmDelete = window.confirm(
-        '是否要删除所有对话记录和个人信息？\n\n' +
-        '点击"确定"将永久删除数据\n' +
-        '点击"取消"可以转换为注册用户保留数据'
-      );
-
-      if (confirmDelete) {
+      if (deleteData) {
         // 删除用户及其对话
         try {
           await userApi.deleteUser(user.user_id);
-          alert('数据已删除');
+          toast.success('数据已删除');
         } catch (error) {
           console.error('删除数据失败:', error);
         }
@@ -682,9 +728,13 @@ const App: React.FC = () => {
       }
     } else {
       // 注册用户正常退出
-      if (!confirm('确定要退出登录吗？')) {
-        return;
-      }
+      const ok = await confirmDialog({
+        title: '退出登录',
+        message: '确定要退出登录吗？',
+        confirmText: '退出',
+        tone: 'danger',
+      });
+      if (!ok) return;
     }
 
     // 清空前端状态
@@ -701,10 +751,10 @@ const App: React.FC = () => {
       const updatedUser = await userApi.convertGuestToRegistered(user.user_id, username, password);
       setUser(updatedUser);
       setShowConvertModal(false);
-      alert('转换成功！现在您可以随时登录查看历史记录了');
+      toast.success('转换成功！现在您可以随时登录查看历史记录了');
     } catch (error: any) {
       console.error('转换失败:', error);
-      alert(error.response?.data?.detail || '转换失败，请重试');
+      toast.error(error.response?.data?.detail || '转换失败，请重试');
     }
   };
 
@@ -728,50 +778,26 @@ const App: React.FC = () => {
 
   return (
     <div className="w-full h-full flex relative">
-      {/* 神秘背景（包含静态图和动态效果） */}
+      {/* 星象虚空背景（星场 / 星云 / 星轨） */}
       <MysticBackground />
-      
-      {/* 背景装饰层 */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden z-10">
-        {/* 浮动的神秘符号 */}
-        <motion.div
-          className="absolute top-20 left-10 w-20 h-20 opacity-10"
-          animate={{
-            y: [0, -20, 0],
-            rotate: [0, 180, 360],
-          }}
-          transition={{
-            duration: 20,
-            repeat: Infinity,
-            ease: 'easeInOut',
-          }}
-        >
-          <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="50" cy="50" r="40" stroke="currentColor" strokeWidth="2" className="text-mystic-gold" />
-            <path d="M50 10 L50 90 M10 50 L90 50" stroke="currentColor" strokeWidth="1" className="text-mystic-gold" />
-          </svg>
-        </motion.div>
-        
-        <motion.div
-          className="absolute bottom-40 right-20 w-16 h-16 opacity-10"
-          animate={{
-            y: [0, 20, 0],
-            scale: [1, 1.2, 1],
-          }}
-          transition={{
-            duration: 15,
-            repeat: Infinity,
-            ease: 'easeInOut',
-          }}
-        >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="text-secondary">
-            <path d="M12 2l2.09 6.26L20 10l-5.91 1.74L12 18l-2.09-6.26L4 10l5.91-1.74z" />
-          </svg>
-        </motion.div>
-      </div>
 
-      {/* Sidebar */}
-      <div className="relative z-20">
+      {/* Sidebar — 桌面常驻可折叠 / 移动端覆盖抽屉 */}
+      <AnimatePresence>
+        {sidebarOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm lg:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+      <aside
+        className={`fixed lg:static inset-y-0 left-0 z-40 h-full flex-shrink-0 transition-[transform,width] duration-300 ease-out lg:overflow-hidden ${
+          sidebarOpen ? 'translate-x-0 w-72 lg:w-72' : '-translate-x-full w-72 lg:translate-x-0 lg:w-0'
+        }`}
+      >
         <Sidebar
           conversations={conversations}
           currentConversationId={currentConversation?.conversation_id}
@@ -779,87 +805,70 @@ const App: React.FC = () => {
           onSelectConversation={handleSelectConversation}
           onDeleteConversation={handleDeleteConversation}
           onOpenSettings={() => setShowSettings(true)}
+          onClose={() => setSidebarOpen(false)}
+          isHome={!currentConversation}
         />
-      </div>
+      </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col relative z-20">
+      <div className="flex-1 flex flex-col relative z-20 min-w-0">
+        <AnimatePresence mode="wait">
         {!currentConversation ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 relative">
-            {/* 中心光效 */}
-            <motion.div
-              className="absolute inset-0 flex items-center justify-center pointer-events-none"
-              animate={{
-                scale: [1, 1.1, 1],
-                opacity: [0.1, 0.2, 0.1],
-              }}
-              transition={{
-                duration: 4,
-                repeat: Infinity,
-                ease: 'easeInOut',
-              }}
+          <motion.div
+            key="hub"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="flex-1 overflow-y-auto relative"
+          >
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className={`absolute top-4 left-4 z-10 p-2 rounded-lg hover:bg-white/[0.05] transition-colors ${sidebarOpen ? 'lg:hidden' : ''}`}
+              style={{ color: 'var(--ivory-dim)' }}
+              aria-label="打开侧边栏"
             >
-              <div className="w-96 h-96 rounded-full bg-gradient-to-r from-primary/30 to-secondary/30 blur-3xl" />
-            </motion.div>
-
+              <Menu size={20} />
+            </button>
+            <div className="absolute top-4 right-4 z-10">
+              <WalletChip />
+            </div>
+            <div className="min-h-full flex flex-col items-center justify-center px-6 py-14">
             <motion.div
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 24 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.8 }}
-              className="text-center mb-12 relative z-10"
+              transition={{ duration: 1, ease: [0.2, 0.8, 0.2, 1] }}
+              className="text-center mb-14 relative z-10"
             >
-              {/* 神秘符号装饰 */}
+              {/* 仪式性饰纹 */}
               <motion.div
-                className="absolute -top-10 left-1/2 -translate-x-1/2 w-20 h-20 opacity-30"
-                animate={{ rotate: 360 }}
-                transition={{ duration: 30, repeat: Infinity, ease: 'linear' }}
+                initial={{ opacity: 0, letterSpacing: '0.1em' }}
+                animate={{ opacity: 0.7, letterSpacing: '0.9em' }}
+                transition={{ delay: 0.3, duration: 1.2 }}
+                className="text-mystic-gold text-xs mb-6"
+                style={{ letterSpacing: '0.9em' }}
               >
-                <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="50" cy="50" r="45" stroke="url(#headerGrad)" strokeWidth="2" />
-                  <path d="M50 5 L50 95 M5 50 L95 50" stroke="url(#headerGrad)" strokeWidth="1" />
-                  <defs>
-                    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#FFD700" />
-                      <stop offset="100%" stopColor="#FFF4A3" />
-                    </linearGradient>
-                  </defs>
-                </svg>
+                ✦&nbsp;&nbsp;✦&nbsp;&nbsp;✦
               </motion.div>
 
-              <motion.h1
-                className="text-6xl font-display font-bold mb-6 mystic-text"
-                animate={{
-                  textShadow: [
-                    '0 0 20px rgba(255, 215, 0, 0.5)',
-                    '0 0 40px rgba(255, 215, 0, 0.8)',
-                    '0 0 20px rgba(255, 215, 0, 0.5)',
-                  ],
-                }}
-                transition={{
-                  duration: 3,
-                  repeat: Infinity,
-                  ease: 'easeInOut',
-                }}
-              >
-                ✨ 小x的秘密圣殿 ✨
-              </motion.h1>
-              
-              <p className="text-gray-300 text-xl font-display tracking-wide">
-              anyway the wind blows
+              <h1 className="text-5xl md:text-6xl font-display font-bold mystic-text mystic-text--shimmer tracking-[0.04em] leading-tight">
+                小&thinsp;x&thinsp;的秘密圣殿
+              </h1>
+
+              <p className="mt-6 eyebrow" style={{ letterSpacing: '0.42em' }}>
+                anyway the wind blows
               </p>
-              
-              {/* 装饰性分割线 */}
+
+              {/* 分割饰线 */}
               <motion.div
-                className="flex items-center justify-center gap-4 mt-8"
+                className="flex items-center justify-center gap-4 mt-9"
                 initial={{ opacity: 0, scaleX: 0 }}
                 animate={{ opacity: 1, scaleX: 1 }}
-                transition={{ delay: 0.5, duration: 0.8 }}
+                transition={{ delay: 0.55, duration: 0.9 }}
               >
-                <div className="h-px w-20 bg-gradient-to-r from-transparent via-mystic-gold to-transparent" />
-                <svg className="w-4 h-4 text-mystic-gold" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 2l2.09 6.26L20 10l-5.91 1.74L12 18l-2.09-6.26L4 10l5.91-1.74z" />
-                </svg>
-                <div className="h-px w-20 bg-gradient-to-r from-transparent via-mystic-gold to-transparent" />
+                <div className="h-px w-16 bg-gradient-to-r from-transparent to-mystic-gold/60" />
+                <span className="text-mystic-gold/80 text-sm">✦</span>
+                <div className="h-px w-16 bg-gradient-to-l from-transparent to-mystic-gold/60" />
               </motion.div>
             </motion.div>
 
@@ -867,37 +876,33 @@ const App: React.FC = () => {
               onSelectSession={handleSelectSession}
               disabled={isLoading}
             />
-          </div>
-        ) : (
-          <>
-            {/* 会话标题栏 */}
-            <div className="glass-morphism px-6 py-4 border-b border-dark-border">
-              <div className="max-w-4xl mx-auto flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  {currentConversation.session_type === 'tarot' ? (
-                    <div className="w-10 h-10 rounded-xl bg-mystic-gradient flex items-center justify-center overflow-hidden">
-                      <img src="/assets/avatar_tarot.png" alt="tarot" className="w-full h-full object-cover" />
-                    </div>
-                  ) : (
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center overflow-hidden">
-                      <img src="/assets/avatar.png" alt="astrology" className="w-full h-full object-cover" />
-                    </div>
-                  )}
-                  <div>
-                    <h2 className="font-display font-semibold text-lg">
-                      {currentConversation.title}
-                    </h2>
-                    <p className="text-xs text-gray-400">
-                      {currentConversation.session_type === 'tarot' ? '塔罗占卜' : '占星'}
-                    </p>
-                  </div>
-                </div>
-              </div>
+
+            <div className="w-full max-w-2xl mt-12 space-y-6">
+              <GalleryBanner />
+              <RecentReadings conversations={conversations} onSelect={handleSelectConversation} />
             </div>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="conv"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="flex-1 flex flex-col min-h-0"
+          >
+            <TopBar
+              conversation={currentConversation}
+              onToggleSidebar={() => setSidebarOpen((v) => !v)}
+              onCopyAll={handleCopyAllReadings}
+              onScrollToLatest={handleScrollToLatest}
+              onDelete={() => handleDeleteConversation(currentConversation.conversation_id)}
+            />
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-6">
-              <div className="max-w-4xl mx-auto space-y-6">
+            <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6">
+              <div className="max-w-[720px] mx-auto space-y-6">
                 {currentConversation.messages.map((message, idx) => {
                   // 检查是否是最后一条 AI 消息且有待处理的抽牌请求
                   const isLastAssistantMessage = 
@@ -933,6 +938,7 @@ const App: React.FC = () => {
                       timestamp: new Date().toISOString(),
                     }}
                     sessionType={currentConversation.session_type}
+                    isStreaming
                     showDrawButton={showDrawButton}
                     onReadyToDraw={handleReadyToDraw}
                     showProfileButton={showProfileButton}
@@ -984,29 +990,30 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Input */}
-            <div className="glass-morphism p-6 border-t border-dark-border/50">
-              <div className="max-w-4xl mx-auto space-y-4">
-                {/* Quick Replies */}
+            {/* Composer */}
+            <div
+              className="px-4 sm:px-6 pt-4 border-t border-mystic-gold/12 bg-gradient-to-b from-dark-bg/30 to-dark-bg/70 backdrop-blur-xl"
+              style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+            >
+              <div className="max-w-[720px] mx-auto space-y-3">
                 <QuickReplies
                   conversationType={currentConversation.session_type}
                   onReplyClick={handleSendMessage}
                 />
-                
-                {/* Chat Input */}
-                <ChatInput
+                <Composer
                   onSend={handleSendMessage}
                   disabled={isLoading}
                   placeholder={
                     currentConversation.has_drawn_cards
-                      ? '   继续深入探讨，或提出新的疑问...'
-                      : '   输入你的问题，开启心灵对话...'
+                      ? '继续深入探讨，或提出新的疑问…'
+                      : '输入你的问题，开启心灵对话…'
                   }
                 />
               </div>
             </div>
-          </>
+          </motion.div>
         )}
+        </AnimatePresence>
       </div>
 
       {/* Modals */}
@@ -1051,21 +1058,23 @@ const App: React.FC = () => {
             onClick={() => setShowSettings(false)}
           >
             <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
+              initial={{ scale: 0.94, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.94, opacity: 0, y: 16 }}
+              transition={{ type: 'spring', damping: 24, stiffness: 300 }}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-md bg-dark-surface rounded-2xl shadow-2xl p-6"
+              className="w-full max-w-md rounded-2xl p-7 bg-dark-surface border border-mystic-gold/20 shadow-cosmic"
             >
-              <h2 className="text-2xl font-bold mb-6">设置</h2>
-              
+              <div className="eyebrow mb-2">Settings</div>
+              <h2 className="text-2xl font-display font-semibold mb-6 mystic-text">设置</h2>
+
               <div className="space-y-4">
-                <div className="p-4 bg-dark-bg rounded-lg">
-                  <div className="text-sm text-gray-400 mb-1">当前用户</div>
-                  <div className="font-medium">
+                <div className="p-4 rounded-xl bg-white/[0.02] border border-mystic-gold/10">
+                  <div className="eyebrow mb-2" style={{ fontSize: '10px', letterSpacing: '0.24em' }}>当前用户</div>
+                  <div className="font-medium text-ivory" style={{ color: 'var(--ivory)' }}>
                     {user?.username || user?.profile?.nickname || '游客'}
                   </div>
-                  <div className="text-xs text-gray-500 mt-1">
+                  <div className="text-xs mt-1" style={{ color: 'var(--ivory-faint)' }}>
                     {user?.user_type === 'guest' ? '游客模式' : '注册用户'}
                   </div>
                 </div>
@@ -1077,7 +1086,7 @@ const App: React.FC = () => {
                       setShowSettings(false);
                       setShowConvertModal(true);
                     }}
-                    className="w-full px-6 py-3 bg-primary/20 text-primary hover:bg-primary/30 rounded-xl transition-colors"
+                    className="w-full px-6 py-3 rounded-xl border border-mystic-gold/40 text-mystic-gold hover:bg-mystic-gold/10 transition-colors tracking-wide"
                   >
                     转为注册用户
                   </button>
@@ -1085,7 +1094,7 @@ const App: React.FC = () => {
 
                 <button
                   onClick={handleLogout}
-                  className="w-full px-6 py-3 bg-red-500/20 text-red-500 hover:bg-red-500/30 rounded-xl transition-colors"
+                  className="w-full px-6 py-3 rounded-xl border border-red-400/30 text-red-300/90 hover:bg-red-500/15 transition-colors tracking-wide"
                 >
                   退出登录
                 </button>
@@ -1103,6 +1112,10 @@ const App: React.FC = () => {
           currentProfile={user?.profile}
         />
       </div>
+
+      {/* 全局轻提示 & 确认框（替代原生 alert/confirm） */}
+      <Toaster />
+      <ConfirmDialog />
     </div>
   );
 };

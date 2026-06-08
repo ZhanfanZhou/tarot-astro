@@ -93,8 +93,8 @@ export default function CheckoutPanel({ deck, onCancel, onEnterDeck }: CheckoutP
               <button className={`ds-pay-method ${method === 'stardust' ? 'active' : ''}`} onClick={() => setMethod('stardust')}>
                 ✦ 星尘余额
               </button>
-              <button className={`ds-pay-method ${method === 'coin' ? 'active' : ''}`} onClick={() => setMethod('coin')}>
-                🪙 金币
+              <button className="ds-pay-method" disabled title="敬请期待">
+                🪙 金币 · 敬请期待
               </button>
             </div>
 
