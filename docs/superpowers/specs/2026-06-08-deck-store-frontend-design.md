@@ -171,3 +171,51 @@ interface StoreDeck {
 - 不新增后端接口、不改 manifest 扫描逻辑。
 - 不实际生成临时新牌组的图片资源（仅模拟陈列）。
 - 「充值」「通知我」为模拟反馈，不接任何真实系统。
+
+---
+
+## 15. 扩展（2026-06-09）：钱包陈列、卡牌浏览、链路补全
+
+第一版上线后围绕「预览→购买」链路补全的支撑功能。仍**仅前端**、不改后端。
+
+### 15.1 钱包陈列（hub + store）
+
+- 此前星尘余额只在结账面板出现 → 现在**主页（hub）右上角**和**商店顶栏**都常驻钱包胸章。
+- `components/wallet/WalletChip.tsx`：紧凑金色胶囊 `✦ {balance}`（`toLocaleString` 千分位）+ 「充值」按钮；自包含，内部管理 `TopUpModal`。读 `useDeckWallet` 的 `balance`。复用于 hub 与 store，二者只需放置定位。
+  - hub：`App.tsx` hub 容器内 `absolute top-4 right-4`（与左上 `Menu` 对称）。
+  - store：`DeckStore` 顶栏右侧分组 `.deckstore-topbar-right`（与 ✕ 同组）。
+
+### 15.2 充值（模拟，预设套餐）
+
+- `data/stardustPackages.ts`：`STARDUST_PACKAGES`（1000 / 3000+200 / 6000+800「热门」/ 12000+2400「超值」）。星尘即模拟币，充值 = `topUp(stardust+bonus)`，下无真实货币。
+- `components/wallet/TopUpModal.tsx`：固定遮罩（`z-index:1400`，高于商店 1200）。`pick → processing(~1s) → success` 状态机，含 timer cleanup（卸载/关闭取消计时器）。默认选中「热门」。成功后 `topUp` 入账、显示新余额。
+- 结账面板「余额不足」时的旧 `+5000` 入口保留（轻量兜底）；正式充值走 `TopUpModal`。
+
+### 15.3 牌组详情：浏览全部卡牌 + 放大
+
+- 痛点：详情此前只展示固定 5 张预览。现在 `available/owned` 牌组可**翻阅全部 78 张**。
+- `data/deckCardImages.ts`：单一数据源。Vite glob `classic-rws/**/*.thumb.webp`（+ `*.png` 供放大），剔除 `__alt/__backup` 变体，按规范顺序排序（大阿卡纳固定序，副牌 ace→king），导出 `ALL_CARD_IMAGES: CardImage[]`（实测完整 78 张）。占位「可获取」牌组复用此集合，叠加各自 accent duotone，**零新增图片资产**。
+- `DeckDetailView` 重构为**纵向**：上为 `.ds-detail-head`（封面 | 信息+CTA 两栏），下为 `.ds-cards` 全宽卡牌网格（`auto-fill`）。
+  - `available/owned`：78 张全部可点。
+  - `partial`：前 `completed` 张可点放大，其余灰显「设计中」（与 `/78` 进度条一致）。
+  - `coming-soon`：无网格（仅程序化封面 + 通知我）。
+- `components/deckstore/CardZoomLightbox.tsx`：点击卡牌 → 放大层（`z-index:1300`），`‹ ›` 翻页、计数、Esc/点击外关闭，按 accent 叠 duotone，原图 `fullUrl`（失败回退 `thumbUrl`）。
+  - **Esc 协调**：放大层挂 `[data-ds-zoom]`；`DeckStore` 的 Esc 处理在检测到该元素时**让位**（先关放大层，不连带弹出商店）。
+
+### 15.4 链路补全/收尾
+
+- 结账伪支付的「🪙 金币」由可选改为 **disabled「敬请期待」**，消除选了金币仍扣星尘的信任漏洞（星尘为唯一可选）。
+- 已拥有牌组在网格/详情通过 `badgeFor` 的「✓ 已拥有」体现（沿用既有）。
+
+### 15.5 验收（扩展项）
+
+- `npm run build` 通过。
+- hub 与 store 顶栏均见余额胸章；充值套餐弹窗 → 余额增加并持久化（刷新保留）。
+- 详情可浏览全部 78 张并逐张放大翻页；partial 仅已完成卡可放大；coming-soon 无网格。
+- 放大层 Esc 只关自己、不连带退出商店。
+- 金币方式不可选。
+
+### 15.6 明确不做（扩展 YAGNI）
+
+- 不做交易流水/收据、不做「我的牌组」独立页面、不做真实充值或多币种。
+- 不为修复仓库级坏掉的 `npm run lint` 引入 eslint flat config（验收以 `npm run build` 为准，见 [[project_frontend_verification_gate]]）。
