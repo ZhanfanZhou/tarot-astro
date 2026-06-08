@@ -1,0 +1,173 @@
+# 牌组商店（发现新牌组）— 前端设计文档
+
+**日期:** 2026-06-08
+**范围:** 仅前端（frontend）。不触碰 `services/api.ts`，不改后端。
+**入口:** `/showcase` 页面新增「✦ 发现新牌组」入口，打开一个全屏 overlay 商店，可预览、购买（模拟结账）不同塔罗牌组。
+
+---
+
+## 1. 目标与约束
+
+- 在 `TarotShowcase` 页面新增「发现新牌组」入口；点击进入一个**类商店**界面。
+- **不跳转新路由**：商店是挂载在 `TarotShowcase` 内、由本地 state 切换的全屏 overlay。允许遮挡牌廊浏览，但**退出返回牌廊必须简单易交互**（硬性要求）。
+- 商店内可**预览**和**购买**不同牌组；购买/支付为**纯前端模拟**，无真实扣款。
+- 当前只有一套真实牌组 `classic-rws`，其余牌组用**占位**模拟，不需要实际生成临时图片资源。
+- 最高优先级：用**优雅、高级**的方式做好牌组的陈列与转化（merchandising），这影响购买率。
+- 严格遵循「Astral Atelier」设计语言（近黑 `--void` + 古金 `--gold` + 月光蓝 `--moon` + 象牙 `--ivory` + 发丝金边 `--line`，Cinzel / Noto Serif SC 衬线字体），以 `/showcase` 为审美基准。
+
+---
+
+## 2. 信息架构与交互形态
+
+- **形态:** 全屏 overlay（Approach A — Storefront），淡入叠加在牌廊之上，背景牌廊虚化。
+- **内部视图状态机**（由 `DeckStore` 持有）：
+  - `storefront` —— 精选 Hero + 牌组网格
+  - `detail` —— 单个牌组详情（预览 + 文案 + 购买 CTA）
+  - `checkout` —— 模拟结账面板（覆盖在 detail 之上）
+- **入口:** 在现有 deck-switcher 行尾追加一个独立 chip `✦ 发现新牌组`（古金、微微辉光，读作「更多」而非又一套牌组）。
+- 关闭 overlay 后回到牌廊**原位**，showcase 既有 state（activeDeck/activeSuit/scroll）不受影响。
+
+---
+
+## 3. 退出 / 返回（硬性要求）
+
+- 右上角大号 `✕`（大点击区域）。
+- 左上角 `‹ 返回牌廊` chip，复用现有 `.showcase-back` 样式与位置语言。
+- **Esc 逐级返回:** `checkout → detail → storefront → 关闭`，每次按键回退一层。
+- 在 `storefront` 层点击 backdrop 关闭整个商店。
+- 任意层级都有清晰的返回上一层的 affordance（detail 有返回 storefront；checkout 有返回 detail）。
+
+---
+
+## 4. 数据模型与目录
+
+### 4.1 `data/storeDecks.ts`
+
+```ts
+type DeckState = 'available' | 'partial' | 'coming-soon';
+// 'owned' 不入此枚举 —— 由 wallet 派生
+
+interface StoreDeck {
+  id: string;
+  name: string;
+  tagline: string;          // 一句诗意短语（陈列文案）
+  artist: string;
+  style: string;
+  description: string;      // detail 视图的叙事文案
+  price: number;            // 单位 ✦星尘（模拟货币）
+  accent: string;           // hex；驱动该牌组的辉光 / duotone
+  state: DeckState;
+  completed?: number;       // 仅 partial：已完成 N（满 78）
+  previewCards: string[];   // 预览缩略图 url（.thumb.webp）
+  liveDeckId?: string;      // 仅当 manifest 中存在真实牌组时设置（如 classic-rws）
+}
+```
+
+### 4.2 种子目录
+
+- `classic-rws`：**真实**牌组，种子为**已拥有**锚点，`liveDeckId: 'classic-rws'`，作为 Hero 精选。
+- 3–4 套**占位**牌组，覆盖 `available` / `partial` / `coming-soon` 三种状态。
+- 占位牌组**复用 `classic-rws` 的缩略图**，叠加各自 accent 的 CSS duotone 滤镜 → 观感为不同艺术风格，**零新增图片资产**。
+- `coming-soon` 用程序化 CSS 封面（渐变 + 星象纹样 + 锁）。
+- 将来上线真实牌组：把图片放入 `frontend/public/tarot-images/decks/<id>/`，在目录里把对应条目 `state` 改为 `available` 并设 `liveDeckId` 即可。
+
+### 4.3 货币
+
+- 模拟货币 **✦星尘（stardust）**，无真实金额语义。价格示例 `1280 星尘`。
+- wallet 初始余额充足（如 `8888 星尘`），保证默认结账总能成功。
+- 余额不足时显示温和的「余额不足」+ 模拟「充值」（**可选、低优先级**）。
+
+---
+
+## 5. 状态持久化 — `stores/useDeckWallet.ts`
+
+- 轻量 zustand store，遵循现有 store 模式（`useToastStore` 等）。
+- 持久化到 `localStorage`（key 例：`tarot.deckWallet`）：
+  - `ownedDeckIds: string[]`（种子含 `classic-rws`）
+  - `balance: number`（星尘余额）
+- API：`owns(id)`、`purchase(id, price)`（扣余额 + 加入 owned，写回 localStorage）、`balance`。
+- 刷新后保持「已拥有 + 余额」状态。
+
+---
+
+## 6. 牌组状态与 CTA
+
+| 状态 | 含义 | 徽章 | 主 CTA | 行为 |
+|---|---|---|---|---|
+| 已拥有 Owned | 已解锁（wallet 派生；`classic-rws` 初始即是） | 古金 ✓ 已拥有 | 进入牌廊 | 有 `liveDeckId` → 关闭商店并切到该牌组；占位牌组 → 轻提示「即将上线」toast |
+| 可获取 Available | 全套已设计，可预览可购 | 价格 | 获取（结账） | 进入 checkout |
+| 抢先体验 Partial | 仅部分卡已完成 | 设计中 · N/78 | 抢先获取 | 进入 checkout；预览仅显示已完成卡 |
+| 敬请期待 Coming soon | 仅概念 | 即将上架 | 通知我 | toast 反馈，不结账 |
+
+---
+
+## 7. Storefront 视图（`StorefrontView.tsx`）
+
+- **Hero**（精选 1 套）：超大 duotone 封面 + 扇形铺开的预览卡；Cinzel 名称、tagline、价格/状态徽章、主 CTA。入场 staggered 动效。
+- **网格**：`grid-template-columns: repeat(auto-fill, minmax(...))` 的 `DeckTile`：封面、名称、artist、状态徽章、价格。Hover 上浮 + accent 辉光，呼应现有 `.card-item` 手感。
+- 点击 Hero 或 tile → 进入 detail（cross-fade，沿用该牌组 accent）。
+- 从 2 套到 20 套都保持优雅（网格自适应）。
+
+---
+
+## 8. Detail 视图（`DeckDetailView.tsx`）
+
+- 桌面两栏 / 移动堆叠：
+  - 左：大封面 + 该牌组卡面的横向预览条（partial 仅显示已完成卡，其余显示「设计中」占位）。
+  - 右：名称、叙事文案、style/artist 元信息、价格、主 CTA。
+- 顶部有返回 storefront 的 affordance。
+
+---
+
+## 9. Checkout（模拟结账，`CheckoutPanel.tsx`）
+
+由 `获取` / `抢先获取` 触发，sheet 以 spring 动效覆盖 detail：
+
+1. 行项目（缩略图 + 名称 + 价格）、伪支付方式选择器（✦星尘余额 / 🪙金币，纯装饰）、当前余额。
+2. `确认支付` → 按钮形变为「结算中…」spinner（约 1.2s）。
+3. 成功：对勾迸发 + 「已收入囊中」；wallet 扣星尘 + 写入 owned（持久化）；牌组在各处翻为「已拥有」；CTA 变为 进入牌廊 / 完成。
+4. 余额默认充足总会成功；余额不足时温和「余额不足」+ 模拟「充值」（可选）。
+
+---
+
+## 10. 封面处理（`coverArt.ts`）
+
+- 占位牌组封面 = `classic-rws` 缩略图 + 按 accent 的 CSS duotone（颜色叠加 / `mix-blend-mode` + 渐变），各成一格风格。
+- `coming-soon` = 程序化 CSS 封面（渐变 + 星座纹 + 锁），不依赖任何卡面图。
+- helper 输出可复用的 style/className，供 Hero / Tile / Detail 统一调用。
+
+---
+
+## 11. 美学与动效
+
+- 严格 Astral Atelier：复用 `--void/--gold/--moon/--ivory/--line` CSS 变量，Cinzel + Noto Serif SC，发丝金边，充足留白。
+- Framer-motion：overlay 淡入 + scale；Hero / tile 入场 stagger；detail cross-fade；checkout spring 滑入。
+- Per-deck accent 仅驱动**细微辉光**；避免嘈杂/繁忙动画（符合「高级简约大气」基调）。
+
+---
+
+## 12. 与 TarotShowcase 的集成
+
+- `TarotShowcase` 新增本地 state `storeOpen`，在 deck-switcher 行尾渲染入口 chip。
+- 渲染 `<DeckStore open={storeOpen} onClose={...} onEnterDeck={(liveDeckId) => { setActiveDeck(liveDeckId); setStoreOpen(false); }} />`。
+- 占位牌组不在 manifest 中，不会出现在 showcase 的 deck-switcher，互不干扰。
+
+---
+
+## 13. 范围与验收
+
+- **仅前端**：不改 `services/api.ts`、不改后端、不改既有空消息/流式/抽牌/星盘序列。
+- 验收：
+  - `cd frontend && npm run build`（tsc 通过、构建成功）。
+  - 手动走查：浏览 → 预览（含 partial 仅显示已完成卡）→ 结账动效 → 成功翻为已拥有 → 退出回到牌廊原位。
+  - 逐级 Esc 返回正确。
+  - 刷新后 `localStorage` 的「已拥有 + 余额」保持。
+
+---
+
+## 14. 明确不做（YAGNI）
+
+- 不接真实支付 / 真实货币。
+- 不新增后端接口、不改 manifest 扫描逻辑。
+- 不实际生成临时新牌组的图片资源（仅模拟陈列）。
+- 「充值」「通知我」为模拟反馈，不接任何真实系统。
