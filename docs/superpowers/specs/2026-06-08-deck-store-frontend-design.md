@@ -239,26 +239,47 @@ interface StoreDeck {
 
 后端已完成钱包 + 星尘解锁牌组 + 应用牌组 + 真钱充值（支付宝/微信，当前走模拟支付）。
 接口与凭证清单见 `docs/superpowers/specs/2026-06-09-deck-store-backend-payments-setup.md`。
-本次仅做后端；前端仍是 localStorage，待迁移如下（**TODO**）：
+**✅ 已于 2026-06-09 完成前端接入（提交 `cbbe805`）。** 下列原 TODO 均已落地：
 
-- [ ] **钱包改为后端来源**：把 `stores/useDeckWallet.ts` 从 localStorage 改为调用
+- [x] **钱包改为后端来源**：把 `stores/useDeckWallet.ts` 从 localStorage 改为调用
       `GET /api/wallet/{user_id}`，按 `user_id`（游客/注册皆有）持久化；
       `owns(id)` / `balance` / `ownedDeckIds` 读后端，启动时拉取一次并缓存。
-- [ ] **解锁牌组走后端**：`CheckoutPanel` 的「确认支付（用星尘）」改调
+- [x] **解锁牌组走后端**：`CheckoutPanel` 的「确认支付（用星尘）」改调
       `POST /api/wallet/{user_id}/purchase {deck_id}`；`success:false` 时按
       `reason`（`insufficient_balance` / `not_purchasable`）做温和提示。价格以
       `GET /api/store/catalog` 为准（可替换前端硬编码 `storeDecks.ts` 的 price）。
-- [ ] **充值走真实支付下单**：`TopUpModal` 的套餐改调
+- [x] **充值走真实支付下单**：`TopUpModal` 的套餐改调
       `POST /api/payments/topup {user_id, package_id, provider, method}`，
       用返回的 `pay.qr_code`（扫码）/`redirect_url`（跳转）拉起支付；轮询
       `GET /api/payments/order/{order_id}` 直到 `paid` 后刷新余额。
       模拟期可直接 `POST /api/payments/mock/pay/{order_id}` 走通。
       套餐与人民币价格读 `GET /api/store/packages`（替换 `stardustPackages.ts`）。
-- [ ] **「应用卡牌」落地到实际占卜（前端尚未完成）**：后端已存
+- [x] **「应用卡牌」落地到实际占卜**：后端已存
       `active_deck_id`（`POST /api/wallet/{user_id}/active-deck`）。前端需：
       ① 在牌组详情/已拥有处加「应用此牌组」CTA 调该接口；
       ② 实际占卜的 `TarotCardDrawer` / 牌面渲染读取 `active_deck_id`，
       按对应牌组目录（manifest）取图，使抽到的牌用所选牌组的图（占位牌组
       可沿用 duotone 处理直到有真实图片资产）。
-- [ ] 迁移后删除 localStorage 种子逻辑，避免双源不一致；保留一次性迁移读取旧
+- [x] 迁移后删除 localStorage 种子逻辑，避免双源不一致；保留一次性迁移读取旧
       localStorage 余额的兜底（可选）。
+
+### 16.1 接入实现要点（2026-06-09 完成，提交 `cbbe805`）
+
+- **API 客户端**：`services/api.ts` 新增 `walletApi`（get/purchase/setActiveDeck）、
+  `storeApi`（catalog/packages）、`paymentsApi`（topup/getOrder/mockPay）+ 对应 DTO。
+- **`useDeckWallet`**：改为后端缓存（`balance / ownedDeckIds / activeDeckId / loaded`），
+  `load(userId)` 拉取一次、`refresh()` 复拉、`purchase/setActiveDeck` 回填响应。**已移除 localStorage**。
+  用户就绪后由 `App.tsx`（hub）与 `WalletChip`（任意路由，幂等）引导 `load`。
+- **解锁**：`CheckoutPanel` 改 `await purchase(deck.id)`，按 `reason`
+  （`insufficient_balance / not_purchasable`）温和提示；余额不足 → 内嵌 `TopUpModal`。
+- **充值**：`TopUpModal` 改为真实下单 —— `storeApi.packages()` 取含 ¥ 价的套餐 →
+  选套餐 + 渠道（支付宝/微信，method=qr）→ `paymentsApi.topup` → **轮询 `getOrder` 直到 `paid`** →
+  `wallet.refresh()`。模拟期：`pay.mock_pay_url` 存在时提供「模拟支付完成」按钮调 `mockPay`；
+  `redirect_url` 存在则 `window.open`。**QR 图像渲染留待接真实渠道时再引入二维码库**（模拟期 mock 通道无需扫码）。
+- **应用牌组**：`DeckDetailView` 已拥有处加「应用到占卜 / ✓ 当前占卜牌组」CTA → `setActiveDeck`。
+- **占卜牌面按 active_deck_id 取图**：`data/activeDeckImage.ts` 的 `resolveActiveCardImage`
+  解析 `config/tarotCards.ts` 的 classic 路径 —— classic-rws 原图；占位牌组沿用 classic 图叠 accent duotone；
+  真实牌组（有自己目录）走路径替换。`ChatMessage` 的 `TarotCardDisplay` 与 `CardPreview` 均接入。
+- **测试**：`useDeckWallet.test.ts` 重写为 mock `walletApi` 验证拉取/回填/失败原因；
+  `WalletChip.test.tsx` 改为直接写入 store 余额。`vitest run` 25 passing；`npm run build` 通过。
+- **未尽**：可视化 QA 由用户完成；真实支付宝/微信凭证与 QR 渲染待配置后接入（见后端 spec §2）。
