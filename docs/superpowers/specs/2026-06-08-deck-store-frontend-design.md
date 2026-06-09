@@ -219,3 +219,46 @@ interface StoreDeck {
 
 - 不做交易流水/收据、不做「我的牌组」独立页面、不做真实充值或多币种。
 - 不为修复仓库级坏掉的 `npm run lint` 引入 eslint flat config（验收以 `npm run build` 为准，见 [[project_frontend_verification_gate]]）。
+
+---
+
+## 16. 遗留前端任务（待办）
+
+截至 2026-06-09，商城前端主链路已完成，以下为已知遗留/后续项：
+
+- **可视化走查 QA（未做）**：桌面 + 移动端真机点测全链路（hub 余额 → 充值 → 商店 → 详情翻 78 张 → 放大翻页 → 购买 → 退出 → 刷新持久化）。目前仅 `npm run build`（tsc）+ 静态审查，未在浏览器实跑。
+- **自动化测试（已完成 2026-06-09）**：已落地 Vitest + jsdom + @testing-library，`npm test`（`vitest run`）共 26 个单测通过，覆盖 `useDeckWallet`（购买/幂等/余额不足/充值/持久化）、`coverArt` 的 `badgeFor`/`ctaFor`/`hexA`、`deckCardImages`（78 张与排序）、`stardustPackages`、`WalletChip` 冒烟。测试文件经 `tsconfig` 排除，不影响 `npm run build`。**后续可扩展**：组件交互流（结账/充值状态机、放大层翻页）的 RTL 测试。
+- **真实牌组接入**：当某占位牌组的实际美术就绪 → 图片落 `frontend/public/tarot-images/decks/<id>/` → 在 `data/storeDecks.ts` 把该条目 `state` 改 `available` 并设 `liveDeckId`（详见 §4.2）。
+- **充值入口统一（小清理）**：结账「余额不足」处旧的 `+5000` 兜底按钮与正式 `TopUpModal` 并存，未来可统一为只弹 `TopUpModal`。
+- **「我的牌组」收藏视图（暂缓）**：当前已拥有仅靠网格/详情徽章体现，未做独立收藏页（YAGNI，待需求）。
+- **会话内钱包入口（待定）**：余额胸章目前仅在 hub 与商店顶栏；会话页是否需要入口未定。
+
+---
+
+## 16. 下一步待办：前端接入后端钱包/支付（2026-06-09）
+
+后端已完成钱包 + 星尘解锁牌组 + 应用牌组 + 真钱充值（支付宝/微信，当前走模拟支付）。
+接口与凭证清单见 `docs/superpowers/specs/2026-06-09-deck-store-backend-payments-setup.md`。
+本次仅做后端；前端仍是 localStorage，待迁移如下（**TODO**）：
+
+- [ ] **钱包改为后端来源**：把 `stores/useDeckWallet.ts` 从 localStorage 改为调用
+      `GET /api/wallet/{user_id}`，按 `user_id`（游客/注册皆有）持久化；
+      `owns(id)` / `balance` / `ownedDeckIds` 读后端，启动时拉取一次并缓存。
+- [ ] **解锁牌组走后端**：`CheckoutPanel` 的「确认支付（用星尘）」改调
+      `POST /api/wallet/{user_id}/purchase {deck_id}`；`success:false` 时按
+      `reason`（`insufficient_balance` / `not_purchasable`）做温和提示。价格以
+      `GET /api/store/catalog` 为准（可替换前端硬编码 `storeDecks.ts` 的 price）。
+- [ ] **充值走真实支付下单**：`TopUpModal` 的套餐改调
+      `POST /api/payments/topup {user_id, package_id, provider, method}`，
+      用返回的 `pay.qr_code`（扫码）/`redirect_url`（跳转）拉起支付；轮询
+      `GET /api/payments/order/{order_id}` 直到 `paid` 后刷新余额。
+      模拟期可直接 `POST /api/payments/mock/pay/{order_id}` 走通。
+      套餐与人民币价格读 `GET /api/store/packages`（替换 `stardustPackages.ts`）。
+- [ ] **「应用卡牌」落地到实际占卜（前端尚未完成）**：后端已存
+      `active_deck_id`（`POST /api/wallet/{user_id}/active-deck`）。前端需：
+      ① 在牌组详情/已拥有处加「应用此牌组」CTA 调该接口；
+      ② 实际占卜的 `TarotCardDrawer` / 牌面渲染读取 `active_deck_id`，
+      按对应牌组目录（manifest）取图，使抽到的牌用所选牌组的图（占位牌组
+      可沿用 duotone 处理直到有真实图片资产）。
+- [ ] 迁移后删除 localStorage 种子逻辑，避免双源不一致；保留一次性迁移读取旧
+      localStorage 余额的兜底（可选）。
