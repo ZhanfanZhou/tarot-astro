@@ -7,44 +7,44 @@ export default {
   theme: {
     extend: {
       colors: {
-        // 主色调 - 神秘紫色系
+        // 主色调 — 古铜金 (神谕之声 · 暖)
         primary: {
-          DEFAULT: '#8B5CF6',
-          light: '#A78BFA',
-          dark: '#6D28D9',
+          DEFAULT: '#C9A96E',
+          light: '#F0D090',
+          dark: '#8A6D3B',
         },
-        // 副色调 - 粉紫渐变
+        // 副色调 — 月光银蓝 (问卜之人 · 冷)
         secondary: {
-          DEFAULT: '#EC4899',
-          light: '#F472B6',
-          dark: '#DB2777',
+          DEFAULT: '#A8D8EA',
+          light: '#C9E8F5',
+          dark: '#6E9DB5',
         },
-        // 金色 - 神秘学元素
+        // 古铜金 — 神秘学元素
         mystic: {
-          gold: '#FFD700',
-          'gold-light': '#FFF4A3',
-          'gold-dark': '#B8860B',
+          gold: '#C9A96E',
+          'gold-light': '#F0D090',
+          'gold-dark': '#8A6D3B',
         },
-        // 星空色
+        // 星象色
         cosmic: {
-          blue: '#1E3A8A',
-          purple: '#4C1D95',
-          indigo: '#312E81',
+          blue: '#A8D8EA',
+          gold: '#C9A96E',
+          ink: '#06060F',
         },
-        // 深色主题
+        // 近黑虚空主题
         dark: {
-          bg: '#0A0A0F',
-          surface: '#13131A',
-          elevated: '#1A1A25',
-          hover: '#232330',
-          border: '#2D2D3D',
+          bg: '#06060F',
+          surface: '#0B0B16',
+          elevated: '#12121E',
+          hover: '#1A1A28',
+          border: '#232334',
         }
       },
       backgroundImage: {
-        'cosmic-gradient': 'linear-gradient(135deg, #0A0A0F 0%, #1E1B4B 50%, #4C1D95 100%)',
-        'mystic-gradient': 'linear-gradient(135deg, #6D28D9 0%, #8B5CF6 50%, #EC4899 100%)',
-        'gold-gradient': 'linear-gradient(135deg, #B8860B 0%, #FFD700 50%, #FFF4A3 100%)',
-        'card-gradient': 'linear-gradient(180deg, rgba(139, 92, 246, 0.1) 0%, rgba(236, 72, 153, 0.1) 100%)',
+        'cosmic-gradient': 'radial-gradient(ellipse at 50% 30%, #0E0E1C 0%, #08080F 55%, #040409 100%)',
+        'mystic-gradient': 'linear-gradient(135deg, #8A6D3B 0%, #C9A96E 50%, #F0D090 100%)',
+        'gold-gradient': 'linear-gradient(135deg, #8A6D3B 0%, #C9A96E 45%, #F0D090 100%)',
+        'card-gradient': 'linear-gradient(180deg, rgba(201, 169, 110, 0.08) 0%, rgba(168, 216, 234, 0.06) 100%)',
       },
       animation: {
         'fade-in': 'fadeIn 0.5s ease-in-out',
@@ -87,18 +87,20 @@ export default {
           '100%': { backgroundPosition: '1000px 0' },
         },
         glow: {
-          '0%, 100%': { boxShadow: '0 0 20px rgba(139, 92, 246, 0.5)' },
-          '50%': { boxShadow: '0 0 40px rgba(236, 72, 153, 0.8)' },
+          '0%, 100%': { boxShadow: '0 0 18px rgba(201, 169, 110, 0.22)' },
+          '50%': { boxShadow: '0 0 36px rgba(201, 169, 110, 0.45)' },
         },
       },
       boxShadow: {
-        'mystic': '0 0 30px rgba(139, 92, 246, 0.3)',
-        'gold': '0 0 20px rgba(255, 215, 0, 0.4)',
-        'cosmic': '0 10px 50px rgba(76, 29, 149, 0.5)',
+        'mystic': '0 0 30px rgba(201, 169, 110, 0.18)',
+        'gold': '0 0 24px rgba(201, 169, 110, 0.32)',
+        'cosmic': '0 24px 60px rgba(0, 0, 0, 0.6)',
+        'moon': '0 0 24px rgba(168, 216, 234, 0.22)',
       },
       fontFamily: {
-        'display': ['Georgia', 'serif'],
-        'mystic': ['Cinzel', 'Georgia', 'serif'],
+        'display': ['Cinzel', 'Noto Serif SC', 'serif'],
+        'mystic': ['Cinzel', 'Noto Serif SC', 'serif'],
+        'serif-cn': ['Noto Serif SC', 'Georgia', 'serif'],
       },
     },
   },

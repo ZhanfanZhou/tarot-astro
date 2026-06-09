@@ -1,5 +1,5 @@
-import React from 'react';
-import { motion } from 'framer-motion';
+import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { SessionType } from '../types';
 
 interface QuickRepliesProps {
@@ -35,66 +35,65 @@ const ASTROLOGY_QUICK_REPLIES = [
 
 const QuickReplies: React.FC<QuickRepliesProps> = ({ conversationType, onReplyClick }) => {
   const replies = conversationType === SessionType.TAROT ? TAROT_QUICK_REPLIES : ASTROLOGY_QUICK_REPLIES;
+  const [open, setOpen] = useState(true);
+
+  const chipBase: React.CSSProperties = {
+    border: '1px solid var(--line-soft)',
+    background: 'rgba(255,255,255,0.02)',
+    color: 'var(--ivory-dim)',
+  };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: -10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="mb-4"
-    >
+    <div className="flex items-start gap-2">
+      {/* 灵感 toggle (stays put as chips wrap) */}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] tracking-[0.12em] transition-colors"
+        style={{ border: '1px solid rgba(201,169,110,0.35)', color: 'var(--gold)', background: 'rgba(201,169,110,0.06)' }}
+        aria-expanded={open}
+      >
+        <span style={{ transform: open ? 'none' : 'rotate(-90deg)', transition: 'transform .25s', display: 'inline-block' }}>✦</span>
+        灵感
+      </button>
 
-
-      {/* 快速回复按钮 */}
-      <div className="flex flex-wrap gap-2">
-        {replies.map((reply, index) => (
-          <motion.button
-            key={index}
-            onClick={() => onReplyClick(reply)}
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: index * 0.03 }}
-            whileHover={{ 
-              scale: 1.05,
-              boxShadow: '0 0 20px rgba(255, 215, 0, 0.3)',
-            }}
-            whileTap={{ scale: 0.95 }}
-            className="group relative px-4 py-2 text-sm font-display
-                     glass-morphism border border-dark-border/50
-                     hover:border-mystic-gold/50
-                     rounded-full
-                     transition-all duration-300
-                     overflow-hidden"
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            // 仅淡入淡出：动画 height:auto 会让 framer 在换行的 flex 容器上反复测量，
+            // 触发整列对话每帧重排（页面卡死/崩溃）。透明度动画走合成层，不引发回流。
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="flex-1 min-w-0"
           >
-            {/* 悬停时的光效 */}
-            <motion.div
-              className="absolute inset-0 bg-mystic-gradient opacity-0 group-hover:opacity-10 transition-opacity"
-              initial={false}
-            />
-            
-            {/* 文字 */}
-            <span className="relative z-10 text-gray-300 group-hover:text-white transition-colors">
-              {reply}
-            </span>
-
-            {/* 装饰性光点 */}
-            <motion.div
-              className="absolute top-1 right-1 w-1 h-1 rounded-full bg-mystic-gold opacity-0 group-hover:opacity-100"
-              animate={{
-                scale: [1, 1.5, 1],
-                opacity: [0.5, 1, 0.5],
-              }}
-              transition={{
-                duration: 1.5,
-                repeat: Infinity,
-              }}
-            />
-          </motion.button>
-        ))}
-      </div>
-    </motion.div>
+            <div className="flex flex-wrap gap-2 pb-0.5">
+              {replies.map((reply, index) => (
+                <button
+                  key={index}
+                  onClick={() => onReplyClick(reply)}
+                  className="px-3.5 py-1.5 text-[13px] rounded-full transition-all duration-200 whitespace-nowrap"
+                  style={chipBase}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = 'rgba(201,169,110,0.45)';
+                    e.currentTarget.style.color = 'var(--ivory)';
+                    e.currentTarget.style.background = 'rgba(201,169,110,0.07)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = 'var(--line-soft)';
+                    e.currentTarget.style.color = 'var(--ivory-dim)';
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
+                  }}
+                >
+                  {reply}
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 };
 
 export default QuickReplies;
-

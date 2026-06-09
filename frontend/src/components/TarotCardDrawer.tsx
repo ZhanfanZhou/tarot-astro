@@ -303,23 +303,23 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   <motion.div
-                    className="w-12 h-12 rounded-xl bg-mystic-gradient flex items-center justify-center shadow-mystic"
+                    className="w-12 h-12 rounded-full bg-mystic-gradient flex items-center justify-center shadow-mystic"
                     animate={{
                       boxShadow: [
-                        '0 0 20px rgba(139, 92, 246, 0.5)',
-                        '0 0 40px rgba(236, 72, 153, 0.8)',
-                        '0 0 20px rgba(139, 92, 246, 0.5)',
+                        '0 0 20px rgba(201, 169, 110, 0.4)',
+                        '0 0 38px rgba(201, 169, 110, 0.7)',
+                        '0 0 20px rgba(201, 169, 110, 0.4)',
                       ],
                     }}
                     transition={{
-                      duration: 2,
+                      duration: 2.4,
                       repeat: Infinity,
                     }}
                   >
-                    <Sparkles size={24} className="text-white" />
+                    <Sparkles size={22} style={{ color: '#1a1407' }} />
                   </motion.div>
                   <div>
-                    <h2 className="text-2xl font-display font-bold text-white">
+                    <h2 className="text-2xl font-display font-semibold mystic-text">
                       抽取塔罗牌
                     </h2>
                     <p className="text-gray-400 font-display mt-1">
@@ -414,7 +414,7 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
                     filter: 'brightness(0.88)',
                   }}
                 />
-                <div className="absolute inset-0 bg-[#0a0718]/72" />
+                <div className="absolute inset-0 bg-[#06060f]/78" />
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,228,185,0.18),transparent_78%)] mix-blend-screen" />
               </div>
 
@@ -486,9 +486,9 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
                         }}
                         transition={{ duration: 9, ease: 'easeInOut', repeat: Infinity, repeatType: 'mirror' }}
                       >
-                        <div className="absolute inset-0 rounded-full bg-[radial-gradient(ellipse_at_center,rgba(253,244,215,0.25),rgba(125,94,211,0.08)_58%,transparent_85%)] blur-[120px] mix-blend-screen" />
+                        <div className="absolute inset-0 rounded-full bg-[radial-gradient(ellipse_at_center,rgba(253,244,215,0.25),rgba(168,216,234,0.08)_58%,transparent_85%)] blur-[120px] mix-blend-screen" />
                         <motion.div
-                          className="absolute inset-[18%] rounded-full bg-[conic-gradient(from_0deg,rgba(254,240,199,0.22),rgba(148,163,255,0.06),rgba(254,240,199,0.22))] opacity-60 blur-[90px] mix-blend-screen"
+                          className="absolute inset-[18%] rounded-full bg-[conic-gradient(from_0deg,rgba(254,240,199,0.22),rgba(168,216,234,0.07),rgba(254,240,199,0.22))] opacity-60 blur-[90px] mix-blend-screen"
                           animate={{ rotate: [0, 360] }}
                           transition={{ duration: 26, repeat: Infinity, ease: 'linear' }}
                         />
@@ -629,7 +629,7 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
                                     ${
                                       isSelected
                                         ? 'ring-4 ring-mystic-gold shadow-mystic-gold'
-                                        : 'ring-2 ring-white/30 hover:ring-mystic-purple/60'
+                                        : 'ring-2 ring-white/25 hover:ring-mystic-gold/60'
                                     }
                                   `}
                                 >
@@ -646,9 +646,9 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
                                     className="absolute inset-0 rounded-lg pointer-events-none"
                                     animate={{
                                       boxShadow: [
-                                        '0 0 18px rgba(255, 215, 0, 0.5)',
-                                        '0 0 34px rgba(255, 215, 0, 0.85)',
-                                        '0 0 18px rgba(255, 215, 0, 0.5)',
+                                        '0 0 18px rgba(201, 169, 110, 0.5)',
+                                        '0 0 34px rgba(240, 208, 144, 0.85)',
+                                        '0 0 18px rgba(201, 169, 110, 0.5)',
                                       ],
                                     }}
                                     transition={{

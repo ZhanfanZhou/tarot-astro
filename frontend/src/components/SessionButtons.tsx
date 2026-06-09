@@ -7,35 +7,44 @@ interface SessionButtonsProps {
   disabled?: boolean;
 }
 
+interface SessionDef {
+  type: SessionType;
+  icon: string;
+  label: string;
+  en: string;
+  tagline: string;
+  accent: string;       // ring / glow color
+  comingSoon?: boolean;
+}
+
 const SessionButtons: React.FC<SessionButtonsProps> = ({
   onSelectSession,
   disabled = false,
 }) => {
-  const buttons = [
+  const buttons: SessionDef[] = [
     {
       type: 'tarot' as SessionType,
       icon: '/assets/avatar_tarot.png',
       label: '塔罗占卜',
-      // description: '探索命运的奥秘',
-      gradient: 'from-purple-600 via-pink-500 to-rose-500',
-      glowColor: 'rgba(139, 92, 246, 0.15)', // 柔和的紫色光晕
+      en: 'TAROT',
+      tagline: '于牌阵中窥见命运的纹路',
+      accent: '#C9A96E', // antique gold
     },
     {
       type: 'astrology' as SessionType,
       icon: '/assets/avatar.png',
       label: '占星',
-      // description: '聆听星辰的指引',
-      gradient: 'from-blue-600 via-cyan-500 to-teal-500',
-      glowColor: 'rgba(59, 130, 246, 0.15)', // 柔和的蓝色光晕
-      comingSoon: false,
+      en: 'ASTROLOGY',
+      tagline: '聆听星辰絮语般的指引',
+      accent: '#A8D8EA', // moonlight blue
     },
     {
       type: 'chat' as SessionType,
       icon: '/assets/avatar3.png',
       label: '聊愈',
-      // description: '倾诉心声的港湾',
-      // gradient: 'from-green-600 via-emerald-500 to-teal-500',
-      glowColor: 'rgba(142, 41, 15, 0.15)',
+      en: 'SOLACE',
+      tagline: '倾诉心声的静谧港湾',
+      accent: '#B98A6E', // warm ember
       comingSoon: true,
     },
   ];
@@ -45,138 +54,86 @@ const SessionButtons: React.FC<SessionButtonsProps> = ({
       {buttons.map((button, index) => (
         <motion.div
           key={button.type}
-          initial={{ opacity: 0, y: 30 }}
+          initial={{ opacity: 0, y: 32 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: index * 0.1, duration: 0.5 }}
+          transition={{ delay: 0.15 + index * 0.12, duration: 0.7, ease: [0.2, 0.8, 0.2, 1] }}
           className="relative"
         >
           <motion.button
             onClick={() => !button.comingSoon && onSelectSession(button.type)}
             disabled={disabled || button.comingSoon}
-            whileHover={!button.comingSoon ? { scale: 1.05, y: -8 } : {}}
-            whileTap={!button.comingSoon ? { scale: 0.95 } : {}}
+            whileHover={!button.comingSoon ? { y: -8 } : {}}
+            whileTap={!button.comingSoon ? { scale: 0.985 } : {}}
+            style={{ '--accent': button.accent } as React.CSSProperties}
             className={`
-              relative group flex flex-col items-center gap-4 p-8 
-              rounded-3xl glass-morphism border-2 
-              transition-all duration-300 w-64 overflow-hidden
+              group relative flex flex-col items-center gap-5 px-8 pt-9 pb-8
+              w-60 rounded-[20px] overflow-hidden text-center
+              bg-dark-surface/70 backdrop-blur-xl
+              border transition-all duration-500
               ${
                 button.comingSoon
-                  ? 'opacity-40 cursor-not-allowed border-dark-border'
-                  : 'hover:border-mystic-gold cursor-pointer border-dark-border/50'
+                  ? 'opacity-45 cursor-not-allowed border-white/8'
+                  : 'cursor-pointer border-white/10 hover:border-[var(--accent)]'
               }
             `}
           >
-            {/* 图标容器 */}
-            <motion.div
-              className={`
-                relative w-20 h-20 rounded-2xl bg-gradient-to-br ${button.gradient} 
-                flex items-center justify-center shadow-2xl overflow-hidden
-              `}
-              animate={{
-                boxShadow: !button.comingSoon
-                  ? [
-                      `0 0 30px 8px ${button.glowColor}`,
-                      `0 0 50px 15px ${button.glowColor}`,
-                      `0 0 30px 8px ${button.glowColor}`,
-                    ]
-                  : undefined,
-              }}
-              transition={{
-                duration: 2,
-                repeat: Infinity,
-              }}
-            >
-              {/* 装饰性边框 */}
-              <div className="absolute inset-1 border border-white/20 rounded-xl" />
-              
-              {/* 图标 */}
-              {button.icon.startsWith('/') ? (
-                <img src={button.icon} alt={button.label} className="w-full h-full object-cover rounded-xl" />
-              ) : (
-                <span className="text-5xl relative z-10">{button.icon}</span>
-              )}
+            {/* hover wash + glow */}
+            {!button.comingSoon && (
+              <span
+                className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+                style={{
+                  background: `radial-gradient(120% 90% at 50% 0%, ${button.accent}1f 0%, transparent 60%)`,
+                  boxShadow: `inset 0 0 50px ${button.accent}14`,
+                }}
+              />
+            )}
 
-              {/* 边缘光晕环 */}
-              {!button.comingSoon && (
-                <motion.div
-                  className="absolute inset-0 rounded-2xl"
-                  animate={{ rotate: 360 }}
-                  transition={{
-                    duration: 10,
-                    repeat: Infinity,
-                    ease: 'linear',
-                  }}
-                  style={{
-                    background: `conic-gradient(from 0deg, transparent 70%, ${button.glowColor} 85%, transparent 100%)`,
-                    filter: 'blur(12px)',
-                    opacity: 0.8,
-                  }}
-                />
-              )}
-            </motion.div>
+            {/* avatar in a ringed medallion */}
+            <span className="relative">
+              <span
+                className="absolute -inset-2 rounded-full opacity-0 group-hover:opacity-100 blur-md transition-opacity duration-500"
+                style={{ background: `radial-gradient(circle, ${button.accent}33, transparent 70%)` }}
+              />
+              <span
+                className="relative block w-24 h-24 rounded-full overflow-hidden ring-1 ring-offset-4 ring-offset-dark-surface transition-all duration-500"
+                style={{ '--tw-ring-color': `${button.accent}66` } as React.CSSProperties}
+              >
+                <img src={button.icon} alt={button.label} className="w-full h-full object-cover" />
+              </span>
+            </span>
 
-            {/* 文字内容 */}
-            <div className="relative z-10 text-center">
-              <h3 className="font-display font-bold text-xl mb-2 text-white">
+            {/* text */}
+            <span className="relative z-10 flex flex-col items-center gap-2">
+              <span
+                className="text-[10px] tracking-[0.34em] font-display"
+                style={{ color: button.comingSoon ? 'var(--ivory-faint)' : `${button.accent}` }}
+              >
+                {button.en}
+              </span>
+              <span className="font-display font-semibold text-xl tracking-[0.12em]" style={{ color: 'var(--ivory)' }}>
                 {button.label}
-              </h3>
-            </div>
+              </span>
+              <span className="text-xs leading-relaxed" style={{ color: 'var(--ivory-dim)' }}>
+                {button.tagline}
+              </span>
+            </span>
 
-            {/* 即将推出标签 */}
+            {/* coming soon ribbon */}
             {button.comingSoon && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="absolute top-4 right-4 px-3 py-1 bg-dark-elevated rounded-full text-xs text-gray-500 font-medium border border-dark-border"
-              >
+              <span className="absolute top-4 right-4 px-2.5 py-1 rounded-full text-[10px] tracking-wider border border-white/10 bg-white/[0.03]"
+                    style={{ color: 'var(--ivory-faint)' }}>
                 即将推出
-              </motion.div>
+              </span>
             )}
 
-            {/* 装饰性星星 */}
+            {/* enter cue */}
             {!button.comingSoon && (
-              <>
-                <motion.div
-                  className="absolute top-6 left-6 w-1 h-1 bg-mystic-gold rounded-full"
-                  animate={{
-                    opacity: [0, 1, 0],
-                    scale: [0, 1.5, 0],
-                  }}
-                  transition={{
-                    duration: 2,
-                    repeat: Infinity,
-                    delay: index * 0.3,
-                  }}
-                />
-                <motion.div
-                  className="absolute bottom-8 right-8 w-1 h-1 bg-mystic-gold rounded-full"
-                  animate={{
-                    opacity: [0, 1, 0],
-                    scale: [0, 1.5, 0],
-                  }}
-                  transition={{
-                    duration: 2,
-                    repeat: Infinity,
-                    delay: index * 0.3 + 1,
-                  }}
-                />
-              </>
-            )}
-
-            {/* 悬停提示箭头 */}
-            {!button.comingSoon && (
-              <motion.div
-                className="absolute bottom-4 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity"
-                animate={{
-                  y: [0, 5, 0],
-                }}
-                transition={{
-                  duration: 1.5,
-                  repeat: Infinity,
-                }}
+              <motion.span
+                className="relative z-10 mt-1 text-xs tracking-[0.3em] font-display opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+                style={{ color: button.accent }}
               >
-                <div className="w-6 h-6 border-b-2 border-r-2 border-mystic-gold rotate-45" />
-              </motion.div>
+                进入 ›
+              </motion.span>
             )}
           </motion.button>
         </motion.div>
@@ -186,7 +143,3 @@ const SessionButtons: React.FC<SessionButtonsProps> = ({
 };
 
 export default SessionButtons;
-
-
-
-

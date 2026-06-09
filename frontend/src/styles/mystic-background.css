@@ -1,180 +1,132 @@
 /**
- * 神秘背景样式
- * 包含背景图和各种动态效果
+ * Astral void background — deep near-black, drifting starfield, soft nebulae.
+ * Pure CSS, no photo dependency. To layer in a custom image later, drop it on
+ * `.mystic-background__image` (kept empty by default).
  */
 
 .mystic-background {
   position: fixed;
   inset: 0;
-  z-index: -1;
+  /* z-index 0 (not -1): a negative-z fixed backdrop makes Chrome paint a
+     white rectangle behind backdrop-filter elements (the Composer/TopBar),
+     showing as a thick light band at the bottom edge. Foreground content sits
+     above via explicit z-20 / z-40 / z-50. */
+  z-index: 0;
   overflow: hidden;
+  background:
+    radial-gradient(ellipse 130% 100% at 50% 22%,
+      #11111f 0%,
+      #0a0a14 42%,
+      #06060f 70%,
+      #030308 100%);
 }
 
-/* 静态背景图 */
+/* Optional custom backdrop slot — empty unless an image is supplied via CSS var */
 .mystic-background__image {
   position: absolute;
   inset: 0;
-  background-image: url('/assets/bg.png');
+  background-image: var(--backdrop-image, none);
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  filter: brightness(0.85);
-  /* 调试：添加背景色确认元素存在 */
-  background-color: rgba(139, 0, 0, 0.3);
-}
-
-/* 窗帘飘动效果 */
-.mystic-background__curtain {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 30%;
+  opacity: var(--backdrop-opacity, 0);
+  filter: brightness(0.4) saturate(0.7) contrast(1.05);
   pointer-events: none;
-  background: linear-gradient(
-    to bottom,
-    rgba(139, 0, 0, 0.1) 0%,
-    rgba(139, 0, 0, 0.05) 50%,
-    rgba(139, 0, 0, 0.1) 100%
-  );
-  mix-blend-mode: overlay;
-  transform-origin: top;
 }
 
-.mystic-background__curtain--left {
-  left: 0;
-  background: linear-gradient(
-    to right,
-    rgba(139, 0, 0, 0.15) 0%,
-    rgba(139, 0, 0, 0.05) 50%,
-    transparent 100%
-  );
-}
-
-.mystic-background__curtain--right {
-  right: 0;
-  background: linear-gradient(
-    to left,
-    rgba(139, 0, 0, 0.15) 0%,
-    rgba(139, 0, 0, 0.05) 50%,
-    transparent 100%
-  );
-}
-
-/* 水晶球光芒效果 - 中心位置 */
-.mystic-background__glow {
+/* ── Starfield — two parallax layers of fine gold / ivory / moon points ─────── */
+.mystic-background__stars,
+.mystic-background__stars--far {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  inset: -10%;
+  pointer-events: none;
+  background-repeat: repeat;
+}
+
+.mystic-background__stars {
+  background-image:
+    radial-gradient(1.4px 1.4px at 12% 18%, rgba(237,230,214,.85), transparent 100%),
+    radial-gradient(1.2px 1.2px at 28% 62%, rgba(237,230,214,.55), transparent 100%),
+    radial-gradient(1.3px 1.3px at 54% 24%, rgba(201,169,110,.7),  transparent 100%),
+    radial-gradient(1.1px 1.1px at 71% 78%, rgba(168,216,234,.55), transparent 100%),
+    radial-gradient(1.5px 1.5px at 86% 38%, rgba(237,230,214,.7),  transparent 100%),
+    radial-gradient(1.2px 1.2px at 20% 88%, rgba(201,169,110,.5),  transparent 100%),
+    radial-gradient(1.3px 1.3px at 44% 70%, rgba(237,230,214,.6),  transparent 100%),
+    radial-gradient(2px   2px   at 38% 8%,  rgba(201,169,110,.6),  transparent 100%),
+    radial-gradient(1.6px 1.6px at 64% 52%, rgba(168,216,234,.5),  transparent 100%);
+  background-size: 700px 700px;
+  animation: starDrift 200s linear infinite;
+}
+
+.mystic-background__stars--far {
+  background-image:
+    radial-gradient(1px 1px at 8% 42%,  rgba(237,230,214,.4), transparent 100%),
+    radial-gradient(1px 1px at 33% 12%, rgba(201,169,110,.35), transparent 100%),
+    radial-gradient(1px 1px at 58% 84%, rgba(237,230,214,.3), transparent 100%),
+    radial-gradient(1px 1px at 78% 22%, rgba(168,216,234,.3), transparent 100%),
+    radial-gradient(1px 1px at 92% 64%, rgba(237,230,214,.35), transparent 100%),
+    radial-gradient(1px 1px at 48% 48%, rgba(201,169,110,.3), transparent 100%);
+  background-size: 480px 480px;
+  opacity: .7;
+  animation: starDrift 320s linear infinite reverse;
+}
+
+@keyframes starDrift {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(-700px, -360px, 0); }
+}
+
+/* ── Nebulae — large, soft, slow-breathing glows (animated in component) ────── */
+.mystic-background__nebula {
+  position: absolute;
   border-radius: 50%;
   pointer-events: none;
   mix-blend-mode: screen;
+  filter: blur(60px);
+}
+.mystic-background__nebula--gold {
+  width: 46vw; height: 46vw;
+  top: -8vw; left: 50%;
+  transform: translateX(-50%);
+  background: radial-gradient(circle, rgba(201,169,110,.22) 0%, rgba(138,109,59,.08) 40%, transparent 70%);
+}
+.mystic-background__nebula--moon {
+  width: 40vw; height: 40vw;
+  bottom: -12vw; left: 18%;
+  background: radial-gradient(circle, rgba(168,216,234,.16) 0%, rgba(110,157,181,.06) 42%, transparent 72%);
 }
 
-.mystic-background__glow--outer {
-  width: 400px;
-  height: 400px;
-  background: radial-gradient(
-    circle,
-    rgba(138, 43, 226, 0.4) 0%,
-    rgba(75, 0, 130, 0.2) 30%,
-    transparent 70%
-  );
-}
-
-.mystic-background__glow--middle {
-  width: 300px;
-  height: 300px;
-  background: radial-gradient(
-    circle,
-    rgba(255, 215, 0, 0.5) 0%,
-    rgba(255, 165, 0, 0.3) 30%,
-    transparent 70%
-  );
-}
-
-/* 水晶球闪烁效果 */
-.mystic-background__sparkle {
+/* ── Faint constellation ring — slow celestial rotation (rendered in JSX) ───── */
+.mystic-background__ring {
   position: absolute;
-  top: 50%;
-  left: 50%;
+  top: 50%; left: 50%;
+  width: min(120vh, 1100px);
+  height: min(120vh, 1100px);
   transform: translate(-50%, -50%);
-  width: 200px;
-  height: 200px;
   border-radius: 50%;
-  background: radial-gradient(
-    circle,
-    rgba(255, 255, 255, 0.8) 0%,
-    rgba(255, 255, 255, 0.4) 20%,
-    rgba(173, 216, 230, 0.2) 40%,
-    transparent 60%
-  );
+  border: 1px solid rgba(201,169,110,.07);
   pointer-events: none;
-  mix-blend-mode: screen;
-  filter: blur(10px);
 }
-
-/* 闪烁的星星 */
-.mystic-background__star {
+.mystic-background__ring::before {
+  content: '';
   position: absolute;
-  width: 3px;
-  height: 3px;
+  inset: 12%;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.8),
-              0 0 20px rgba(255, 215, 0, 0.6);
-  pointer-events: none;
+  border: 1px dashed rgba(168,216,234,.05);
 }
 
-/* 径向光效 - 波纹扩散 */
-.mystic-background__radial {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 500px;
-  height: 500px;
-  border-radius: 50%;
-  background: radial-gradient(
-    circle,
-    transparent 0%,
-    rgba(138, 43, 226, 0.3) 40%,
-    rgba(75, 0, 130, 0.1) 60%,
-    transparent 80%
-  );
-  pointer-events: none;
-  mix-blend-mode: screen;
-}
-
-/* 响应式调整 */
-@media (max-width: 768px) {
-  .mystic-background__glow--outer {
-    width: 250px;
-    height: 250px;
-  }
-  
-  .mystic-background__glow--middle {
-    width: 180px;
-    height: 180px;
-  }
-  
-  .mystic-background__sparkle {
-    width: 120px;
-    height: 120px;
-  }
-  
-  .mystic-background__radial {
-    width: 300px;
-    height: 300px;
-  }
-}
-
-/* 添加背景暗化遮罩，确保内容可读性 */
+/* Top + bottom vignette to seat content and deepen the void */
 .mystic-background::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.3);
   pointer-events: none;
+  background:
+    radial-gradient(ellipse 90% 70% at 50% 50%, transparent 55%, rgba(3,3,8,.55) 100%),
+    linear-gradient(to bottom, rgba(3,3,8,.5) 0%, transparent 22%, transparent 78%, rgba(3,3,8,.55) 100%);
 }
 
+@media (max-width: 768px) {
+  .mystic-background__nebula--gold { width: 80vw; height: 80vw; }
+  .mystic-background__nebula--moon { width: 70vw; height: 70vw; }
+}

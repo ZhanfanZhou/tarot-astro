@@ -103,24 +103,27 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
           }}
         >
           <motion.div
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.9, opacity: 0 }}
-            className="relative w-full max-w-2xl bg-dark-surface rounded-2xl shadow-2xl p-8 max-h-[90vh] overflow-y-auto"
+            initial={{ scale: 0.94, opacity: 0, y: 16 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.94, opacity: 0, y: 16 }}
+            transition={{ type: 'spring', damping: 24, stiffness: 300 }}
+            className="relative w-full max-w-2xl bg-dark-surface border border-mystic-gold/20 rounded-2xl shadow-cosmic p-8 max-h-[90vh] overflow-y-auto"
           >
             {/* Header */}
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-start justify-between mb-6">
               <div>
-                <h2 className="text-2xl font-bold">完善星盘资料</h2>
-                <p className="text-gray-400 mt-1">
+                <div className="eyebrow mb-1.5" style={{ fontSize: '10px', letterSpacing: '0.28em' }}>ASTROLOGY · 星盘资料</div>
+                <h2 className="text-2xl font-display font-semibold mystic-text">完善星盘资料</h2>
+                <p className="text-sm mt-1.5" style={{ color: 'var(--ivory-dim)' }}>
                   提供准确的出生信息，获取更精准的星盘解读
                 </p>
               </div>
               <button
                 onClick={onClose}
-                className="p-2 hover:bg-dark-hover rounded-lg transition-colors"
+                className="p-2 hover:bg-white/[0.05] rounded-lg transition-colors"
+                style={{ color: 'var(--ivory-dim)' }}
               >
-                <X size={24} />
+                <X size={22} />
               </button>
             </div>
 
@@ -151,10 +154,10 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
                         setError('');
                       }}
                       disabled={isSubmitting}
-                      className={`px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                      className={`px-4 py-2 rounded-lg text-sm border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                         gender === option.value
-                          ? 'bg-primary text-white'
-                          : 'bg-dark-bg hover:bg-dark-hover'
+                          ? 'bg-gold-gradient text-dark-bg border-transparent font-medium'
+                          : 'bg-white/[0.02] border-mystic-gold/15 hover:border-mystic-gold/40'
                       }`}
                     >
                       {option.label}
@@ -166,8 +169,8 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
               {/* 出生日期 */}
               <div>
                 <label className="block text-sm font-medium mb-2 flex items-center gap-2">
-                  <Calendar size={18} />
-                  出生日期 <span className="text-red-400">*</span>
+                  <Calendar size={16} className="text-mystic-gold/70" />
+                  出生日期 <span className="text-mystic-gold">*</span>
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   <select
@@ -176,7 +179,7 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
                       setBirthYear(Number(e.target.value));
                       setError('');
                     }}
-                    className="px-4 py-2 bg-dark-bg rounded-lg border border-gray-700 focus:border-primary focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-4 py-2 bg-dark-bg rounded-lg border border-mystic-gold/15 focus:border-mystic-gold/55 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                     disabled={isSubmitting}
                     required
                   >
@@ -193,7 +196,7 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
                       setBirthMonth(Number(e.target.value));
                       setError('');
                     }}
-                    className="px-4 py-2 bg-dark-bg rounded-lg border border-gray-700 focus:border-primary focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-4 py-2 bg-dark-bg rounded-lg border border-mystic-gold/15 focus:border-mystic-gold/55 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                     disabled={isSubmitting}
                     required
                   >
@@ -210,7 +213,7 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
                       setBirthDay(Number(e.target.value));
                       setError('');
                     }}
-                    className="px-4 py-2 bg-dark-bg rounded-lg border border-gray-700 focus:border-primary focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-4 py-2 bg-dark-bg rounded-lg border border-mystic-gold/15 focus:border-mystic-gold/55 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                     disabled={isSubmitting}
                     required
                   >
@@ -227,8 +230,8 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
               {/* 出生时间 */}
               <div>
                 <label className="block text-sm font-medium mb-2 flex items-center gap-2">
-                  <Clock size={18} />
-                  出生时间 <span className="text-red-400">*</span>
+                  <Clock size={16} className="text-mystic-gold/70" />
+                  出生时间 <span className="text-mystic-gold">*</span>
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   <select
@@ -237,7 +240,7 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
                       setBirthHour(Number(e.target.value));
                       setError('');
                     }}
-                    className="px-4 py-2 bg-dark-bg rounded-lg border border-gray-700 focus:border-primary focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-4 py-2 bg-dark-bg rounded-lg border border-mystic-gold/15 focus:border-mystic-gold/55 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                     disabled={isSubmitting}
                     required
                   >
@@ -254,7 +257,7 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
                       setBirthMinute(Number(e.target.value));
                       setError('');
                     }}
-                    className="px-4 py-2 bg-dark-bg rounded-lg border border-gray-700 focus:border-primary focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-4 py-2 bg-dark-bg rounded-lg border border-mystic-gold/15 focus:border-mystic-gold/55 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                     disabled={isSubmitting}
                     required
                   >
@@ -274,8 +277,8 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
               {/* 出生城市 */}
               <div>
                 <label className="block text-sm font-medium mb-2 flex items-center gap-2">
-                  <MapPin size={18} />
-                  出生城市 <span className="text-red-400">*</span>
+                  <MapPin size={16} className="text-mystic-gold/70" />
+                  出生城市 <span className="text-mystic-gold">*</span>
                 </label>
                 <select
                   value={birthCity || ''}
@@ -283,7 +286,7 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
                     setBirthCity(e.target.value);
                     setError('');
                   }}
-                  className="w-full px-4 py-2 bg-dark-bg rounded-lg border border-gray-700 focus:border-primary focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full px-4 py-2 bg-dark-bg rounded-lg border border-mystic-gold/15 focus:border-mystic-gold/55 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                   disabled={isSubmitting}
                   required
                 >
@@ -304,7 +307,7 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl font-bold hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-2"
+                  className="flex-1 px-6 py-3 bg-gold-gradient text-dark-bg rounded-xl font-semibold tracking-wide hover:scale-[1.03] transition-transform disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-2"
                 >
                   {isSubmitting && <Loader2 className="animate-spin" size={18} />}
                   {isSubmitting ? '保存中...' : '保存并继续'}
@@ -313,7 +316,8 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
                   type="button"
                   onClick={onSkip}
                   disabled={isSubmitting}
-                  className="flex-1 px-6 py-3 bg-dark-bg hover:bg-dark-hover rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 px-6 py-3 rounded-xl tracking-wide border border-mystic-gold/20 hover:bg-white/[0.04] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ color: 'var(--ivory-dim)' }}
                 >
                   暂时跳过
                 </button>

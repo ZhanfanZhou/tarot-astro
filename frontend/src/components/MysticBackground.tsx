@@ -2,125 +2,43 @@ import React from 'react';
 import { motion } from 'framer-motion';
 
 /**
- * 神秘背景组件
- * 包含静态背景图和动态效果（窗帘飘动、水晶球闪烁、光芒）
+ * 星象虚空背景
+ * 深近黑底 + 漂移星场 + 缓慢呼吸的金/银蓝星云 + 旋转的星轨环。
+ * 纯 CSS/动效，不依赖照片。如需自定义底图，可在 .mystic-background__image
+ * 上通过 --backdrop-image / --backdrop-opacity 注入。
  */
 const MysticBackground: React.FC = () => {
   return (
     <div className="mystic-background">
-      {/* 静态背景图 */}
+      {/* 可选自定义底图槽位（默认不显示） */}
       <div className="mystic-background__image" />
-      
-      {/* 窗帘飘动效果 - 左侧 */}
+
+      {/* 双层视差星场 */}
+      <div className="mystic-background__stars--far" />
+      <div className="mystic-background__stars" />
+
+      {/* 缓慢旋转的星轨环 */}
       <motion.div
-        className="mystic-background__curtain mystic-background__curtain--left"
-        animate={{
-          x: [-2, 2, -2],
-          scaleX: [1, 1.005, 1],
-        }}
-        transition={{
-          duration: 4,
-          repeat: Infinity,
-          ease: 'easeInOut',
-        }}
+        className="mystic-background__ring"
+        animate={{ rotate: 360 }}
+        transition={{ duration: 240, repeat: Infinity, ease: 'linear' }}
       />
-      
-      {/* 窗帘飘动效果 - 右侧 */}
+
+      {/* 金色星云（神谕暖光）— 极缓呼吸 */}
       <motion.div
-        className="mystic-background__curtain mystic-background__curtain--right"
-        animate={{
-          x: [2, -2, 2],
-          scaleX: [1, 1.005, 1],
-        }}
-        transition={{
-          duration: 4.5,
-          repeat: Infinity,
-          ease: 'easeInOut',
-          delay: 0.5,
-        }}
+        className="mystic-background__nebula mystic-background__nebula--gold"
+        animate={{ opacity: [0.5, 0.85, 0.5], scale: [1, 1.08, 1] }}
+        transition={{ duration: 14, repeat: Infinity, ease: 'easeInOut' }}
       />
-      
-      {/* 水晶球光芒效果 - 外层光晕 */}
+
+      {/* 月光银蓝星云（问卜冷光） */}
       <motion.div
-        className="mystic-background__glow mystic-background__glow--outer"
-        animate={{
-          scale: [1, 1.3, 1],
-          opacity: [0.3, 0.6, 0.3],
-        }}
-        transition={{
-          duration: 3,
-          repeat: Infinity,
-          ease: 'easeInOut',
-        }}
-      />
-      
-      {/* 水晶球光芒效果 - 中层光晕 */}
-      <motion.div
-        className="mystic-background__glow mystic-background__glow--middle"
-        animate={{
-          scale: [1, 1.2, 1],
-          opacity: [0.4, 0.7, 0.4],
-        }}
-        transition={{
-          duration: 2.5,
-          repeat: Infinity,
-          ease: 'easeInOut',
-          delay: 0.3,
-        }}
-      />
-      
-      {/* 水晶球闪烁效果 - 内层 */}
-      <motion.div
-        className="mystic-background__sparkle"
-        animate={{
-          opacity: [0.5, 1, 0.5],
-          scale: [0.9, 1.1, 0.9],
-        }}
-        transition={{
-          duration: 2,
-          repeat: Infinity,
-          ease: 'easeInOut',
-        }}
-      />
-      
-      {/* 随机闪烁的星星效果 */}
-      {[...Array(8)].map((_, i) => (
-        <motion.div
-          key={i}
-          className="mystic-background__star"
-          style={{
-            left: `${20 + i * 10}%`,
-            top: `${15 + (i % 3) * 20}%`,
-          }}
-          animate={{
-            opacity: [0, 1, 0],
-            scale: [0.5, 1, 0.5],
-          }}
-          transition={{
-            duration: 2 + i * 0.3,
-            repeat: Infinity,
-            ease: 'easeInOut',
-            delay: i * 0.5,
-          }}
-        />
-      ))}
-      
-      {/* 径向光效 - 从水晶球向外扩散 */}
-      <motion.div
-        className="mystic-background__radial"
-        animate={{
-          scale: [0.8, 1.5, 0.8],
-          opacity: [0, 0.4, 0],
-        }}
-        transition={{
-          duration: 4,
-          repeat: Infinity,
-          ease: 'easeOut',
-        }}
+        className="mystic-background__nebula mystic-background__nebula--moon"
+        animate={{ opacity: [0.45, 0.75, 0.45], scale: [1, 1.1, 1] }}
+        transition={{ duration: 18, repeat: Infinity, ease: 'easeInOut', delay: 1.5 }}
       />
     </div>
   );
 };
 
 export default MysticBackground;
-

@@ -158,8 +158,8 @@ const ConvertToRegisteredModal: React.FC<ConvertToRegisteredModalProps> = ({
 
               {/* 个人信息提示 */}
               {currentProfile && (
-                <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-                  <p className="text-sm text-blue-400 mb-2">您的个人信息将会保留：</p>
+                <div className="p-3 bg-secondary/10 border border-secondary/30 rounded-lg">
+                  <p className="text-sm text-secondary mb-2">您的个人信息将会保留：</p>
                   <div className="text-xs text-gray-400 space-y-1">
                     {currentProfile.nickname && <div>• 昵称: {currentProfile.nickname}</div>}
                     {currentProfile.birth_year && (

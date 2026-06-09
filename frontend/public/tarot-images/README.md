@@ -14,14 +14,31 @@ tarot-images/
         └── …
 ```
 
-The `/showcase` page auto-discovers everything under `decks/` at build time
-(via Vite `import.meta.glob`). There is **no hardcoded file list** — adding or
-removing files just works after a rebuild.
+The `/showcase` page discovers everything under `decks/` from two sources:
+
+1. **Build-time fallback** — Vite globs these files at build time, so the gallery
+   always renders the decks that existed at build, **even if the backend is down**.
+2. **Runtime manifest** — on load it also fetches `GET /api/decks/manifest`, which
+   rescans this folder on every request. When reachable it replaces the fallback
+   and picks up decks added *after* the build (no rebuild needed — use the
+   **Refresh** button to rescan without reloading).
+
+Only **deck rename** requires the backend; if it's offline the gallery still works
+and rename is simply disabled. There is **no hardcoded file list** in either path.
+
+> Serving note: in dev, Vite serves these files directly from `public/`, so new
+> decks are truly live. In a production build, Vite copies `public/` into
+> `dist/` at build time — for new decks to appear without a rebuild, the host
+> must serve `/tarot-images/...` from this live `public/` dir (not the built
+> `dist/` copy).
 
 ## Adding a deck
 
-Drop a new folder under `decks/` containing a `deck.json` and the suit
-subfolders. No code changes required.
+Drop a new folder under `decks/` containing the suit subfolders. A `deck.json`
+is **optional**: without one, the deck shows up with a name auto-derived from the
+folder (`classic-rws` → "Classic Rws"). You can then rename it right on the
+`/showcase` page (✎ Rename) — the new name is written back to `deck.json`.
+No code changes required.
 
 ```jsonc
 // decks/<deck-id>/deck.json
@@ -58,7 +75,9 @@ pentacles/nine-of-pentacles__backup.png
 ```
 
 The file **without** a `__` suffix is the primary shown in the grid. All
-versions (within a deck and across decks) appear in the preview's version strip.
+versions (within a deck and across decks) appear in the preview's version strip,
+where each is labelled **by its deck only** — the `__alt` / `__backup` suffix is
+just a way to keep two files apart on disk and is never shown in the UI.
 
 > Note: the chat app (`src/config/tarotCards.ts`) uses its own separate image
 > scheme and is unrelated to the `decks/` structure above.
