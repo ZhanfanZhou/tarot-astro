@@ -11,6 +11,34 @@ DATA_DIR.mkdir(exist_ok=True)
 # 数据文件路径
 USERS_FILE = DATA_DIR / "users.json"
 CONVERSATIONS_FILE = DATA_DIR / "conversations.json"
+# 牌组商城：钱包（星尘余额/已拥有牌组/当前应用牌组）与支付订单
+WALLETS_FILE = DATA_DIR / "wallets.json"
+PAYMENT_ORDERS_FILE = DATA_DIR / "payment_orders.json"
+
+# ── 支付配置 ────────────────────────────────────────────────────────────────
+# 当真实支付凭证缺失时，是否允许回退到「模拟支付」provider（开发期默认开启）。
+# 上线接入真实支付后，把 PAYMENTS_ALLOW_MOCK 设为 false 关闭模拟通道。
+PAYMENTS_ALLOW_MOCK = os.getenv("PAYMENTS_ALLOW_MOCK", "true").lower() == "true"
+# 后端对外可达地址（支付异步回调 notify_url / 同步跳转拼接用）
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000")
+# 前端地址（支付完成后同步跳转回前端用）
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173")
+
+# 支付宝（开放平台 https://open.alipay.com/）
+ALIPAY_APP_ID = os.getenv("ALIPAY_APP_ID", "")
+ALIPAY_APP_PRIVATE_KEY = os.getenv("ALIPAY_APP_PRIVATE_KEY", "")  # 应用私钥 PEM
+ALIPAY_PUBLIC_KEY = os.getenv("ALIPAY_PUBLIC_KEY", "")            # 支付宝公钥 PEM
+ALIPAY_GATEWAY = os.getenv("ALIPAY_GATEWAY", "https://openapi.alipay.com/gateway.do")
+ALIPAY_NOTIFY_URL = os.getenv("ALIPAY_NOTIFY_URL", f"{PUBLIC_BASE_URL}/api/payments/notify/alipay")
+ALIPAY_RETURN_URL = os.getenv("ALIPAY_RETURN_URL", f"{FRONTEND_BASE_URL}/pay/return")
+
+# 微信支付 V3（商户平台 https://pay.weixin.qq.com/）
+WECHAT_APP_ID = os.getenv("WECHAT_APP_ID", "")                     # 公众号/开放平台 appid
+WECHAT_MCH_ID = os.getenv("WECHAT_MCH_ID", "")                     # 商户号
+WECHAT_API_V3_KEY = os.getenv("WECHAT_API_V3_KEY", "")            # APIv3 密钥
+WECHAT_CERT_SERIAL = os.getenv("WECHAT_CERT_SERIAL", "")          # 商户证书序列号
+WECHAT_MERCHANT_PRIVATE_KEY = os.getenv("WECHAT_MERCHANT_PRIVATE_KEY", "")  # 商户私钥 PEM
+WECHAT_NOTIFY_URL = os.getenv("WECHAT_NOTIFY_URL", f"{PUBLIC_BASE_URL}/api/payments/notify/wechat")
 
 # Gemini API配置
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
