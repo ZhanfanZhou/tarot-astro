@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { StoreDeck } from '../../data/storeDecks';
 import { useDeckWallet } from '../../stores/useDeckWallet';
 import { toast } from '../../stores/useToastStore';
+import TopUpModal from '../wallet/TopUpModal';
 
 interface CheckoutPanelProps {
   deck: StoreDeck;
@@ -11,29 +12,41 @@ interface CheckoutPanelProps {
 }
 
 type Phase = 'form' | 'processing' | 'success';
-type Method = 'stardust' | 'coin';
+
+const REASON_MESSAGE: Record<string, string> = {
+  insufficient_balance: '星尘余额不足，请先充值',
+  not_purchasable: '该牌组暂不可购买',
+  no_user: '请先登录后再购买',
+};
 
 export default function CheckoutPanel({ deck, onCancel, onEnterDeck }: CheckoutPanelProps) {
   const balance = useDeckWallet((s) => s.balance);
   const purchase = useDeckWallet((s) => s.purchase);
-  const topUp = useDeckWallet((s) => s.topUp);
   const [phase, setPhase] = useState<Phase>('form');
-  const [method, setMethod] = useState<Method>('stardust');
+  const [topUpOpen, setTopUpOpen] = useState(false);
   const insufficient = balance < deck.price;
 
-  // 取消未完成的结算计时器：若处理中途面板被卸载（如按 Esc 退出），
-  // 防止在已卸载组件上 setState，并避免无确认界面地静默扣款。
-  const timerRef = useRef<number>();
-  useEffect(() => () => { if (timerRef.current) window.clearTimeout(timerRef.current); }, []);
+  // 处理中途若面板被卸载（如 Esc 退出），避免在已卸载组件上 setState
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
-  const confirm = () => {
-    if (insufficient) { toast.error('星尘余额不足'); return; }
+  const confirm = async () => {
+    if (insufficient) { setTopUpOpen(true); return; }
     setPhase('processing');
-    timerRef.current = window.setTimeout(() => {
-      const ok = purchase(deck.id, deck.price);
-      if (!ok) { setPhase('form'); toast.error('结算失败，请重试'); return; }
+    try {
+      const { success, reason } = await purchase(deck.id);
+      if (!mountedRef.current) return;
+      if (!success) {
+        setPhase('form');
+        toast.error((reason && REASON_MESSAGE[reason]) || '解锁失败，请重试');
+        return;
+      }
       setPhase('success');
-    }, 1200);
+    } catch {
+      if (!mountedRef.current) return;
+      setPhase('form');
+      toast.error('网络异常，请重试');
+    }
   };
 
   return (
@@ -90,9 +103,7 @@ export default function CheckoutPanel({ deck, onCancel, onEnterDeck }: CheckoutP
 
             <div className="ds-pay-label">支付方式</div>
             <div className="ds-pay-methods">
-              <button className={`ds-pay-method ${method === 'stardust' ? 'active' : ''}`} onClick={() => setMethod('stardust')}>
-                ✦ 星尘余额
-              </button>
+              <button className="ds-pay-method active">✦ 星尘余额</button>
               <button className="ds-pay-method" disabled title="敬请期待">
                 🪙 金币 · 敬请期待
               </button>
@@ -104,8 +115,8 @@ export default function CheckoutPanel({ deck, onCancel, onEnterDeck }: CheckoutP
             </div>
 
             {insufficient && (
-              <button className="ds-topup" onClick={() => { topUp(5000); toast.success('已充值 5000 ✦'); }}>
-                余额不足 · 充值 5000 ✦
+              <button className="ds-topup" onClick={() => setTopUpOpen(true)}>
+                余额不足 · 去充值
               </button>
             )}
 
@@ -120,6 +131,8 @@ export default function CheckoutPanel({ deck, onCancel, onEnterDeck }: CheckoutP
           </>
         )}
       </motion.div>
+
+      <TopUpModal open={topUpOpen} onClose={() => setTopUpOpen(false)} />
     </motion.div>
   );
 }

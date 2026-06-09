@@ -2,38 +2,109 @@ import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { STARDUST_PACKAGES } from '../../data/stardustPackages';
 import { useDeckWallet } from '../../stores/useDeckWallet';
+import { useAuthStore } from '../../stores/useAuthStore';
+import { toast } from '../../stores/useToastStore';
+import { storeApi, paymentsApi, type StorePackageDTO, type TopUpResponseDTO } from '../../services/api';
 
 interface TopUpModalProps {
   open: boolean;
   onClose: () => void;
 }
 
-type Phase = 'pick' | 'processing' | 'success';
+type Phase = 'pick' | 'paying' | 'success';
+type Provider = 'alipay' | 'wechat';
+
+// 后端套餐含人民币价格；后端不可达时退回前端静态套餐（无价格）。
+interface PkgView { id: string; stardust: number; bonus: number; tag?: string | null; price_cents?: number; }
+
+const FALLBACK: PkgView[] = STARDUST_PACKAGES.map((p) => ({ ...p }));
+
+const PROVIDERS: { id: Provider; label: string }[] = [
+  { id: 'alipay', label: '支付宝' },
+  { id: 'wechat', label: '微信支付' },
+];
 
 export default function TopUpModal({ open, onClose }: TopUpModalProps) {
+  const userId = useAuthStore((s) => s.user?.user_id);
   const balance = useDeckWallet((s) => s.balance);
-  const topUp = useDeckWallet((s) => s.topUp);
+
+  const [pkgs, setPkgs] = useState<PkgView[]>(FALLBACK);
   const [phase, setPhase] = useState<Phase>('pick');
-  const [picked, setPicked] = useState(STARDUST_PACKAGES[2].id); // default 热门
+  const [picked, setPicked] = useState('popular');
+  const [provider, setProvider] = useState<Provider>('alipay');
+  const [order, setOrder] = useState<TopUpResponseDTO | null>(null);
   const [credited, setCredited] = useState(0);
-  const timerRef = useRef<number>();
 
-  // 取消未完成的充值计时器（卸载/关闭时）
-  useEffect(() => () => { if (timerRef.current) window.clearTimeout(timerRef.current); }, []);
-  // 每次打开回到选择态
-  useEffect(() => { if (open) setPhase('pick'); }, [open]);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
-  const pkg = STARDUST_PACKAGES.find((p) => p.id === picked) ?? STARDUST_PACKAGES[0];
-  const total = pkg.stardust + pkg.bonus;
+  // 打开时回到选择态、拉取后端套餐（权威人民币价格）
+  useEffect(() => {
+    if (!open) return;
+    setPhase('pick');
+    setOrder(null);
+    storeApi.packages()
+      .then((list: StorePackageDTO[]) => { if (mountedRef.current && list.length) setPkgs(list); })
+      .catch(() => { /* 退回 FALLBACK */ });
+  }, [open]);
 
-  const confirm = () => {
-    setPhase('processing');
-    timerRef.current = window.setTimeout(() => {
-      topUp(total);
-      setCredited(total);
-      setPhase('success');
-    }, 1000);
+  const pkg = pkgs.find((p) => p.id === picked) ?? pkgs[0];
+  const total = pkg ? pkg.stardust + pkg.bonus : 0;
+  const yuan = (cents?: number) => (typeof cents === 'number' ? `¥${(cents / 100).toFixed(2)}` : '');
+
+  const finishPaid = async () => {
+    await useDeckWallet.getState().refresh();
+    if (!mountedRef.current) return;
+    setCredited(total);
+    setPhase('success');
   };
+
+  // 轮询订单状态，直到 paid
+  useEffect(() => {
+    if (phase !== 'paying' || !order) return;
+    let active = true;
+    const tick = async () => {
+      try {
+        const o = await paymentsApi.getOrder(order.order_id);
+        if (!active) return;
+        if (o.status === 'paid') { active = false; finishPaid(); }
+        else if (o.status === 'failed' || o.status === 'expired') {
+          active = false; setPhase('pick'); toast.error('支付未完成，请重试');
+        }
+      } catch { /* 瞬时失败，下一轮再试 */ }
+    };
+    const id = window.setInterval(tick, 1500);
+    return () => { active = false; window.clearInterval(id); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, order]);
+
+  const startTopup = async () => {
+    if (!userId) { toast.error('请先登录后再充值'); return; }
+    if (!pkg) return;
+    setPhase('paying');
+    try {
+      const res = await paymentsApi.topup({ user_id: userId, package_id: pkg.id, provider, method: 'qr' });
+      if (!mountedRef.current) return;
+      setOrder(res);
+      if (res.pay.redirect_url) window.open(res.pay.redirect_url, '_blank', 'noopener');
+    } catch {
+      if (!mountedRef.current) return;
+      setPhase('pick');
+      toast.error('下单失败，请重试');
+    }
+  };
+
+  const doMockPay = async () => {
+    if (!order) return;
+    try {
+      const o = await paymentsApi.mockPay(order.order_id);
+      if (o.status === 'paid') finishPaid();
+    } catch {
+      toast.error('模拟支付失败');
+    }
+  };
+
+  const closeGuard = phase === 'paying' ? undefined : onClose;
 
   return (
     <AnimatePresence>
@@ -43,7 +114,7 @@ export default function TopUpModal({ open, onClose }: TopUpModalProps) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          onClick={phase === 'processing' ? undefined : onClose}
+          onClick={(e) => { e.stopPropagation(); closeGuard?.(); }}
         >
           <motion.div
             className="topup-modal"
@@ -68,6 +139,27 @@ export default function TopUpModal({ open, onClose }: TopUpModalProps) {
                 <p className="topup-balance-line">当前余额 ✦ {balance.toLocaleString()}</p>
                 <button className="topup-confirm" onClick={onClose}>完成</button>
               </div>
+            ) : phase === 'paying' ? (
+              <div className="topup-paying">
+                <div className="topup-head">
+                  <span className="topup-eyebrow">待支付</span>
+                  <span className="topup-balance">{order ? yuan(order.amount) : ''}</span>
+                </div>
+                <p className="topup-paying-note">
+                  已创建订单 · {PROVIDERS.find((p) => p.id === provider)?.label}（{order?.provider === 'mock' ? '模拟通道' : '扫码支付'}）
+                </p>
+                <div className="topup-paying-amount">✦ {total.toLocaleString()} 星尘</div>
+                <p className="topup-poll"><span className="topup-spinner" /><span style={{ marginLeft: 8 }}>等待支付结果…</span></p>
+                {order?.pay.mock_pay_url && (
+                  <button className="topup-confirm" onClick={doMockPay}>模拟支付完成（开发）</button>
+                )}
+                {order?.pay.redirect_url && (
+                  <button className="topup-confirm" onClick={() => window.open(order.pay.redirect_url!, '_blank', 'noopener')}>
+                    重新前往支付
+                  </button>
+                )}
+                <button className="topup-cancel" onClick={() => setPhase('pick')}>取消</button>
+              </div>
             ) : (
               <>
                 <div className="topup-head">
@@ -75,27 +167,37 @@ export default function TopUpModal({ open, onClose }: TopUpModalProps) {
                   <span className="topup-balance">当前 ✦ {balance.toLocaleString()}</span>
                 </div>
                 <div className="topup-grid">
-                  {STARDUST_PACKAGES.map((p) => (
+                  {pkgs.map((p) => (
                     <button
                       key={p.id}
                       className={`topup-pkg ${picked === p.id ? 'active' : ''}`}
                       onClick={() => setPicked(p.id)}
-                      disabled={phase === 'processing'}
                     >
                       {p.tag && <span className="topup-tag">{p.tag}</span>}
                       <span className="topup-amount">✦ {p.stardust.toLocaleString()}</span>
                       {p.bonus > 0 && <span className="topup-bonus">+{p.bonus.toLocaleString()} 赠</span>}
+                      {typeof p.price_cents === 'number' && <span className="topup-price">{yuan(p.price_cents)}</span>}
                     </button>
                   ))}
                 </div>
-                <button className="topup-confirm" disabled={phase === 'processing'} onClick={confirm}>
-                  {phase === 'processing' ? (
-                    <><span className="topup-spinner" /><span style={{ marginLeft: 8 }}>充值中…</span></>
-                  ) : (
-                    `确认充值 · ✦ ${total.toLocaleString()}`
-                  )}
+
+                <div className="topup-pay-label">支付方式</div>
+                <div className="topup-providers">
+                  {PROVIDERS.map((pv) => (
+                    <button
+                      key={pv.id}
+                      className={`topup-provider ${provider === pv.id ? 'active' : ''}`}
+                      onClick={() => setProvider(pv.id)}
+                    >
+                      {pv.label}
+                    </button>
+                  ))}
+                </div>
+
+                <button className="topup-confirm" onClick={startTopup}>
+                  {pkg && typeof pkg.price_cents === 'number' ? `支付 ${yuan(pkg.price_cents)} · 得 ✦ ${total.toLocaleString()}` : `充值 ✦ ${total.toLocaleString()}`}
                 </button>
-                <button className="topup-cancel" onClick={onClose} disabled={phase === 'processing'}>取消</button>
+                <button className="topup-cancel" onClick={onClose}>取消</button>
               </>
             )}
           </motion.div>
@@ -120,17 +222,13 @@ export default function TopUpModal({ open, onClose }: TopUpModalProps) {
             .topup-balance { font-size: 12px; color: rgba(237,230,214,.55); }
             .topup-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
             .topup-pkg {
-              position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px;
-              padding: 18px 12px; border-radius: 12px; cursor: pointer;
+              position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px;
+              padding: 16px 12px; border-radius: 12px; cursor: pointer;
               border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.03);
               transition: all .2s; font-family: inherit;
             }
-            .topup-pkg:hover:not(:disabled) { border-color: rgba(201,169,110,.45); }
-            .topup-pkg.active {
-              border-color: #C9A96E; background: rgba(201,169,110,.1);
-              box-shadow: 0 0 20px rgba(201,169,110,.18);
-            }
-            .topup-pkg:disabled { cursor: default; }
+            .topup-pkg:hover { border-color: rgba(201,169,110,.45); }
+            .topup-pkg.active { border-color: #C9A96E; background: rgba(201,169,110,.1); box-shadow: 0 0 20px rgba(201,169,110,.18); }
             .topup-tag {
               position: absolute; top: -9px; right: 10px;
               font-size: 10px; letter-spacing: .08em; padding: 1px 8px; border-radius: 999px;
@@ -138,24 +236,36 @@ export default function TopUpModal({ open, onClose }: TopUpModalProps) {
             }
             .topup-amount { font-family: 'Cinzel', serif; font-size: 18px; color: var(--ivory, #ede6d6); }
             .topup-bonus { font-size: 11px; color: #90BE6D; }
+            .topup-price { font-size: 12px; color: rgba(237,230,214,.5); margin-top: 2px; }
+            .topup-pay-label { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: rgba(237,230,214,.4); }
+            .topup-providers { display: flex; gap: 10px; }
+            .topup-provider {
+              flex: 1; padding: 11px; border-radius: 10px; cursor: pointer; font-size: 13px;
+              color: rgba(237,230,214,.7); border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.03);
+              transition: all .2s; font-family: inherit;
+            }
+            .topup-provider.active { color: #C9A96E; border-color: #C9A96E; background: rgba(201,169,110,.1); }
             .topup-confirm {
               margin-top: 2px; padding: 14px; border-radius: 12px; cursor: pointer;
-              font-family: 'Cinzel', serif; font-size: 14px; letter-spacing: .08em;
+              font-family: 'Cinzel', serif; font-size: 14px; letter-spacing: .06em;
               color: #0e0e1a; border: none; min-height: 50px;
               display: flex; align-items: center; justify-content: center;
               background: linear-gradient(120deg, #C9A96E 0%, #fff6e0 140%);
               box-shadow: 0 8px 24px rgba(201,169,110,.3); transition: transform .2s;
             }
-            .topup-confirm:hover:not(:disabled) { transform: translateY(-2px); }
-            .topup-confirm:disabled { cursor: default; opacity: .9; }
+            .topup-confirm:hover { transform: translateY(-2px); }
             .topup-cancel { padding: 4px; cursor: pointer; font-size: 12px; color: rgba(237,230,214,.45); background: none; border: none; font-family: inherit; }
-            .topup-cancel:hover:not(:disabled) { color: rgba(237,230,214,.7); }
+            .topup-cancel:hover { color: rgba(237,230,214,.7); }
             .topup-spinner {
               width: 16px; height: 16px; border-radius: 50%;
-              border: 2px solid rgba(14,14,26,.3); border-top-color: #0e0e1a;
+              border: 2px solid rgba(201,169,110,.25); border-top-color: #C9A96E;
               display: inline-block; animation: topup-spin .7s linear infinite;
             }
             @keyframes topup-spin { to { transform: rotate(360deg); } }
+            .topup-paying { display: flex; flex-direction: column; gap: 14px; align-items: stretch; }
+            .topup-paying-note { font-size: 12px; color: rgba(237,230,214,.55); }
+            .topup-paying-amount { font-family: 'Cinzel', serif; font-size: 22px; color: var(--ivory, #ede6d6); text-align: center; }
+            .topup-poll { display: flex; align-items: center; justify-content: center; font-size: 13px; color: rgba(237,230,214,.6); }
             .topup-success { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 14px 0 6px; }
             .topup-mark {
               width: 64px; height: 64px; border-radius: 50%;

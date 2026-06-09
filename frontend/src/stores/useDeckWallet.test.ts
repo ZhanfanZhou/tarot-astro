@@ -1,78 +1,86 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const LS_KEY = 'tarot.deckWallet';
+// 钱包现在以后端为源。mock walletApi，验证 store 的拉取/缓存/回填行为。
+const { getMock, purchaseMock, setActiveMock } = vi.hoisted(() => ({
+  getMock: vi.fn(),
+  purchaseMock: vi.fn(),
+  setActiveMock: vi.fn(),
+}));
 
-// useDeckWallet is a module singleton that reads localStorage at import time, so
-// each test resets the registry + storage and re-imports for a fresh store.
-async function freshWallet() {
-  const mod = await import('./useDeckWallet');
-  return mod.useDeckWallet;
-}
+vi.mock('../services/api', () => ({
+  walletApi: { get: getMock, purchase: purchaseMock, setActiveDeck: setActiveMock },
+}));
 
-beforeEach(async () => {
-  localStorage.clear();
-  const { vi } = await import('vitest');
-  vi.resetModules();
+import { useDeckWallet } from './useDeckWallet';
+
+const WALLET = {
+  user_id: 'u1',
+  balance: 8888,
+  owned_deck_ids: ['classic-rws'],
+  active_deck_id: 'classic-rws',
+  updated_at: '',
+};
+
+beforeEach(() => {
+  getMock.mockReset();
+  purchaseMock.mockReset();
+  setActiveMock.mockReset();
+  useDeckWallet.setState({
+    userId: null, balance: 0, ownedDeckIds: [], activeDeckId: 'classic-rws', loaded: false, loading: false,
+  });
 });
 
-describe('useDeckWallet', () => {
-  it('seeds classic-rws as owned and balance 8888', async () => {
-    const wallet = await freshWallet();
-    const s = wallet.getState();
-    expect(s.ownedDeckIds).toContain('classic-rws');
+describe('useDeckWallet (backend-backed)', () => {
+  it('load fetches the wallet and caches it', async () => {
+    getMock.mockResolvedValue(WALLET);
+    await useDeckWallet.getState().load('u1');
+    const s = useDeckWallet.getState();
+    expect(getMock).toHaveBeenCalledWith('u1');
+    expect(s.userId).toBe('u1');
     expect(s.balance).toBe(8888);
+    expect(s.ownedDeckIds).toContain('classic-rws');
+    expect(s.activeDeckId).toBe('classic-rws');
+    expect(s.loaded).toBe(true);
   });
 
-  it('purchase deducts balance and adds the deck id', async () => {
-    const wallet = await freshWallet();
-    const ok = wallet.getState().purchase('lunar-mirage', 1280);
-    expect(ok).toBe(true);
-    const s = wallet.getState();
+  it('purchase applies the returned wallet and reports success', async () => {
+    getMock.mockResolvedValue(WALLET);
+    await useDeckWallet.getState().load('u1');
+    purchaseMock.mockResolvedValue({
+      success: true, reason: null,
+      wallet: { ...WALLET, balance: 8888 - 1280, owned_deck_ids: ['classic-rws', 'lunar-mirage'] },
+    });
+    const res = await useDeckWallet.getState().purchase('lunar-mirage');
+    expect(res.success).toBe(true);
+    const s = useDeckWallet.getState();
     expect(s.balance).toBe(8888 - 1280);
     expect(s.ownedDeckIds).toContain('lunar-mirage');
   });
 
-  it('is idempotent when the deck is already owned (no double charge)', async () => {
-    const wallet = await freshWallet();
-    wallet.getState().purchase('lunar-mirage', 1280);
-    const balanceAfterFirst = wallet.getState().balance;
-    const ok = wallet.getState().purchase('lunar-mirage', 1280);
-    expect(ok).toBe(true);
-    expect(wallet.getState().balance).toBe(balanceAfterFirst);
+  it('purchase surfaces the failure reason', async () => {
+    getMock.mockResolvedValue(WALLET);
+    await useDeckWallet.getState().load('u1');
+    purchaseMock.mockResolvedValue({ success: false, reason: 'insufficient_balance', wallet: WALLET });
+    const res = await useDeckWallet.getState().purchase('pricey');
+    expect(res.success).toBe(false);
+    expect(res.reason).toBe('insufficient_balance');
   });
 
-  it('returns false and does not change state when balance is insufficient', async () => {
-    const wallet = await freshWallet();
-    const ok = wallet.getState().purchase('pricey', 99999);
-    expect(ok).toBe(false);
-    const s = wallet.getState();
-    expect(s.balance).toBe(8888);
-    expect(s.ownedDeckIds).not.toContain('pricey');
+  it('purchase without a user does not hit the API', async () => {
+    const res = await useDeckWallet.getState().purchase('x');
+    expect(res.success).toBe(false);
+    expect(purchaseMock).not.toHaveBeenCalled();
   });
 
-  it('topUp increases the balance', async () => {
-    const wallet = await freshWallet();
-    wallet.getState().topUp(5000);
-    expect(wallet.getState().balance).toBe(8888 + 5000);
-  });
-
-  it('persists owned ids and balance to localStorage and reloads them', async () => {
-    const wallet = await freshWallet();
-    wallet.getState().purchase('lunar-mirage', 1280);
-
-    const raw = localStorage.getItem(LS_KEY);
-    expect(raw).toBeTruthy();
-    const parsed = JSON.parse(raw as string);
-    expect(parsed.balance).toBe(8888 - 1280);
-    expect(parsed.ownedDeckIds).toContain('lunar-mirage');
-
-    // re-import: a fresh store instance must hydrate from localStorage
-    const { vi } = await import('vitest');
-    vi.resetModules();
-    const reloaded = await freshWallet();
-    const s = reloaded.getState();
-    expect(s.balance).toBe(8888 - 1280);
-    expect(s.ownedDeckIds).toContain('lunar-mirage');
-    expect(s.ownedDeckIds).toContain('classic-rws');
+  it('setActiveDeck updates activeDeckId from the response', async () => {
+    getMock.mockResolvedValue(WALLET);
+    await useDeckWallet.getState().load('u1');
+    setActiveMock.mockResolvedValue({
+      success: true, reason: null,
+      wallet: { ...WALLET, active_deck_id: 'lunar-mirage', owned_deck_ids: ['classic-rws', 'lunar-mirage'] },
+    });
+    const res = await useDeckWallet.getState().setActiveDeck('lunar-mirage');
+    expect(res.success).toBe(true);
+    expect(useDeckWallet.getState().activeDeckId).toBe('lunar-mirage');
   });
 });

@@ -1,67 +1,77 @@
 import { create } from 'zustand';
+import { walletApi } from '../services/api';
 
-const LS_KEY = 'tarot.deckWallet';
-const SEED_OWNED = ['classic-rws']; // classic-rws 作为已拥有锚点
-const SEED_BALANCE = 8888;          // 星尘初始余额，充足以保证默认结账成功
-
-interface Persisted {
-  ownedDeckIds: string[];
-  balance: number;
-}
-
-function load(): Persisted {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (raw) {
-      const p = JSON.parse(raw) as Partial<Persisted>;
-      return {
-        ownedDeckIds: Array.from(new Set([...SEED_OWNED, ...(p.ownedDeckIds ?? [])])),
-        balance: typeof p.balance === 'number' ? p.balance : SEED_BALANCE,
-      };
-    }
-  } catch {
-    /* 忽略损坏的存储 */
-  }
-  return { ownedDeckIds: [...SEED_OWNED], balance: SEED_BALANCE };
-}
-
-function save(p: Persisted) {
-  try {
-    localStorage.setItem(LS_KEY, JSON.stringify(p));
-  } catch {
-    /* 忽略写入失败（隐私模式等） */
-  }
-}
+// 后端是钱包的唯一可信来源（余额 / 已拥有牌组 / 当前应用牌组）。本 store 只做
+// 「拉取一次 + 缓存 + 变更后回填」。不再用 localStorage 种子，避免双源不一致。
 
 interface WalletState {
-  ownedDeckIds: string[];
+  userId: string | null;
   balance: number;
-  purchase: (id: string, price: number) => boolean; // false = 余额不足
-  topUp: (amount: number) => void;
+  ownedDeckIds: string[];
+  activeDeckId: string;
+  loaded: boolean;
+  loading: boolean;
+  /** 按 user_id 拉取钱包（用户就绪时调用一次；user_id 变化时重新拉取）。*/
+  load: (userId: string) => Promise<void>;
+  /** 重新拉取当前用户钱包（如充值到账后）。*/
+  refresh: () => Promise<void>;
+  /** 用星尘解锁牌组；success=false 时 reason ∈ insufficient_balance / not_purchasable / ...。*/
+  purchase: (deckId: string) => Promise<{ success: boolean; reason?: string }>;
+  /** 应用牌组到实际占卜（须已拥有）。*/
+  setActiveDeck: (deckId: string) => Promise<{ success: boolean; reason?: string }>;
 }
 
-export const useDeckWallet = create<WalletState>((set, get) => {
-  const initial = load();
-  return {
-    ownedDeckIds: initial.ownedDeckIds,
-    balance: initial.balance,
-    purchase: (id, price) => {
-      const s = get();
-      if (s.ownedDeckIds.includes(id)) return true; // 已拥有，幂等
-      if (s.balance < price) return false;
-      const next: Persisted = {
-        ownedDeckIds: [...s.ownedDeckIds, id],
-        balance: s.balance - price,
-      };
-      save(next);
-      set(next);
-      return true;
-    },
-    topUp: (amount) => {
-      const s = get();
-      const next: Persisted = { ownedDeckIds: s.ownedDeckIds, balance: s.balance + amount };
-      save(next);
-      set({ balance: next.balance });
-    },
-  };
-});
+function applyWallet(set: (p: Partial<WalletState>) => void, w: { balance: number; owned_deck_ids: string[]; active_deck_id: string }) {
+  set({ balance: w.balance, ownedDeckIds: w.owned_deck_ids, activeDeckId: w.active_deck_id });
+}
+
+export const useDeckWallet = create<WalletState>((set, get) => ({
+  userId: null,
+  balance: 0,
+  ownedDeckIds: [],
+  activeDeckId: 'classic-rws',
+  loaded: false,
+  loading: false,
+
+  load: async (userId) => {
+    if (get().loading) return;
+    set({ userId, loading: true });
+    try {
+      const w = await walletApi.get(userId);
+      applyWallet(set, w);
+      set({ loaded: true });
+    } catch {
+      // 后端不可达：保持空钱包，loaded 仍置 true 以免无限重试
+      set({ loaded: true });
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  refresh: async () => {
+    const { userId } = get();
+    if (!userId) return;
+    try {
+      const w = await walletApi.get(userId);
+      applyWallet(set, w);
+    } catch {
+      /* 忽略瞬时失败 */
+    }
+  },
+
+  purchase: async (deckId) => {
+    const { userId } = get();
+    if (!userId) return { success: false, reason: 'no_user' };
+    const res = await walletApi.purchase(userId, deckId);
+    if (res.wallet) applyWallet(set, res.wallet);
+    return { success: res.success, reason: res.reason ?? undefined };
+  },
+
+  setActiveDeck: async (deckId) => {
+    const { userId } = get();
+    if (!userId) return { success: false, reason: 'no_user' };
+    const res = await walletApi.setActiveDeck(userId, deckId);
+    if (res.wallet) applyWallet(set, res.wallet);
+    return { success: res.success, reason: res.reason ?? undefined };
+  },
+}));

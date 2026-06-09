@@ -173,6 +173,22 @@ export default function DeckStore({ open, onClose, onEnterDeck }: DeckStoreProps
             }
             .ds-cta:hover { transform: translateY(-2px); box-shadow: 0 12px 30px color-mix(in srgb, var(--accent) 45%, transparent); }
             .ds-cta-lg { padding: 13px 30px; font-size: 14px; margin-top: 6px; }
+            .ds-detail-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 6px; }
+            .ds-apply {
+              padding: 12px 22px; border-radius: 999px; cursor: pointer;
+              font-family: 'Cinzel', serif; font-size: 13px; letter-spacing: .06em;
+              color: var(--ivory, #ede6d6); background: transparent;
+              border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+              transition: all .2s;
+            }
+            .ds-apply:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); transform: translateY(-1px); }
+            .ds-active-tag {
+              display: inline-flex; align-items: center; gap: 4px;
+              font-size: 12px; letter-spacing: .04em; color: color-mix(in srgb, var(--accent) 85%, white);
+              padding: 8px 14px; border-radius: 999px;
+              border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+              background: color-mix(in srgb, var(--accent) 10%, transparent);
+            }
 
             /* storefront */
             .ds-store { display: flex; flex-direction: column; gap: 40px; }

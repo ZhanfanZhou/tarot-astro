@@ -15,9 +15,18 @@ interface DeckDetailViewProps {
 
 export default function DeckDetailView({ deck, onBuy, onEnterDeck }: DeckDetailViewProps) {
   const ownedIds = useDeckWallet((s) => s.ownedDeckIds);
+  const activeDeckId = useDeckWallet((s) => s.activeDeckId);
+  const setActiveDeck = useDeckWallet((s) => s.setActiveDeck);
   const owned = ownedIds.includes(deck.id);
+  const isActive = activeDeckId === deck.id;
   const badge = badgeFor(deck, owned);
   const cta = ctaFor(deck, owned);
+
+  const applyDeck = async () => {
+    const { success, reason } = await setActiveDeck(deck.id);
+    if (success) toast.success(`已将「${deck.name}」应用到占卜`);
+    else toast.error(reason === 'not_owned' ? '尚未拥有该牌组' : '应用失败，请重试');
+  };
   const hasArt = deck.previewCards.length > 0;
   const [zoomIndex, setZoomIndex] = useState<number | null>(null);
 
@@ -65,7 +74,14 @@ export default function DeckDetailView({ deck, onBuy, onEnterDeck }: DeckDetailV
               <span className="ds-progress-label">{deck.completed}/78 已绘制</span>
             </div>
           )}
-          <button className="ds-cta ds-cta-lg" onClick={handleCta}>{cta.label}</button>
+          <div className="ds-detail-actions">
+            <button className="ds-cta ds-cta-lg" onClick={handleCta}>{cta.label}</button>
+            {owned && (
+              isActive
+                ? <span className="ds-active-tag">✓ 当前占卜牌组</span>
+                : <button className="ds-apply" onClick={applyDeck}>应用到占卜</button>
+            )}
+          </div>
         </div>
       </div>
 

@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useDeckWallet } from '../../stores/useDeckWallet';
+import { useAuthStore } from '../../stores/useAuthStore';
 import TopUpModal from './TopUpModal';
 
 interface WalletChipProps {
@@ -7,10 +8,17 @@ interface WalletChipProps {
 }
 
 /** Compact stardust-balance pill with a 充值 button. Self-contained — opens its
- *  own top-up modal. Used on the hub (top-right) and in the store topbar. */
+ *  own top-up modal, and bootstraps the wallet from the backend on mount so it
+ *  works on any route (hub or /showcase). Used on the hub and in the store topbar. */
 export default function WalletChip({ className = '' }: WalletChipProps) {
   const balance = useDeckWallet((s) => s.balance);
+  const userId = useAuthStore((s) => s.user?.user_id);
   const [open, setOpen] = useState(false);
+
+  // 钱包以后端为源；任意路由首次出现余额胸章时确保已拉取（幂等）。
+  useEffect(() => {
+    if (userId && !useDeckWallet.getState().loaded) useDeckWallet.getState().load(userId);
+  }, [userId]);
 
   return (
     <>

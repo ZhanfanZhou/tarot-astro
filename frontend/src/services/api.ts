@@ -308,6 +308,107 @@ export const astrologyApi = {
   },
 };
 
+// ── 牌组商城 / 钱包 / 支付 ──────────────────────────────────────────────────────
+export interface WalletDTO {
+  user_id: string;
+  balance: number;
+  owned_deck_ids: string[];
+  active_deck_id: string;
+  updated_at: string;
+}
+
+export interface PurchaseResultDTO {
+  success: boolean;
+  reason?: string | null;
+  wallet: WalletDTO;
+}
+
+export interface StoreDeckDTO {
+  id: string;
+  name: string;
+  price: number;
+  state: string;
+  completed?: number | null;
+  accent?: string | null;
+  live_deck_id?: string | null;
+}
+
+export interface StorePackageDTO {
+  id: string;
+  stardust: number;
+  bonus: number;
+  price_cents: number;
+  tag?: string | null;
+}
+
+export interface PayInstructionDTO {
+  type: string;                       // qr | redirect | jsapi | mock
+  qr_code?: string | null;
+  redirect_url?: string | null;
+  params?: Record<string, unknown> | null;
+  mock_pay_url?: string | null;
+}
+
+export interface TopUpResponseDTO {
+  order_id: string;
+  out_trade_no: string;
+  status: string;
+  amount: number;                     // 人民币（分）
+  provider: string;
+  method: string;
+  pay: PayInstructionDTO;
+}
+
+export interface PaymentOrderDTO {
+  order_id: string;
+  status: string;                     // pending | paid | failed | expired
+  amount: number;
+  credited: boolean;
+  stardust: number;
+  bonus: number;
+}
+
+export const walletApi = {
+  get: async (userId: string): Promise<WalletDTO> => {
+    const r = await api.get(`/api/wallet/${userId}`);
+    return r.data;
+  },
+  purchase: async (userId: string, deckId: string): Promise<PurchaseResultDTO> => {
+    const r = await api.post(`/api/wallet/${userId}/purchase`, { deck_id: deckId });
+    return r.data;
+  },
+  setActiveDeck: async (userId: string, deckId: string): Promise<PurchaseResultDTO> => {
+    const r = await api.post(`/api/wallet/${userId}/active-deck`, { deck_id: deckId });
+    return r.data;
+  },
+};
+
+export const storeApi = {
+  catalog: async (): Promise<StoreDeckDTO[]> => {
+    const r = await api.get('/api/store/catalog');
+    return r.data.decks;
+  },
+  packages: async (): Promise<StorePackageDTO[]> => {
+    const r = await api.get('/api/store/packages');
+    return r.data.packages;
+  },
+};
+
+export const paymentsApi = {
+  topup: async (body: { user_id: string; package_id: string; provider?: string; method?: string }): Promise<TopUpResponseDTO> => {
+    const r = await api.post('/api/payments/topup', body);
+    return r.data;
+  },
+  getOrder: async (orderId: string): Promise<PaymentOrderDTO> => {
+    const r = await api.get(`/api/payments/order/${orderId}`);
+    return r.data;
+  },
+  mockPay: async (orderId: string): Promise<PaymentOrderDTO> => {
+    const r = await api.post(`/api/payments/mock/pay/${orderId}`);
+    return r.data;
+  },
+};
+
 export default api;
 
 

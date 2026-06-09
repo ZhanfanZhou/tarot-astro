@@ -10,6 +10,7 @@ import SessionButtons from './components/SessionButtons';
 import GalleryBanner from './components/GalleryBanner';
 import RecentReadings from './components/RecentReadings';
 import WalletChip from './components/wallet/WalletChip';
+import { useDeckWallet } from './stores/useDeckWallet';
 import TarotCardDrawer from './components/TarotCardDrawer';
 import AuthModal from './components/AuthModal';
 import AstrologyProfileModal from './components/AstrologyProfileModal';
@@ -66,6 +67,13 @@ const App: React.FC = () => {
       loadUserConversations();
     }
   }, [user]);
+
+  // 用户就绪后拉取钱包（星尘余额 / 已拥有牌组 / 当前应用牌组）
+  useEffect(() => {
+    if (user?.user_id) {
+      useDeckWallet.getState().load(user.user_id);
+    }
+  }, [user?.user_id]);
 
   // 自动滚动到底部
   useEffect(() => {
