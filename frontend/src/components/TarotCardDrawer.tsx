@@ -9,6 +9,12 @@ interface TarotCardDrawerProps {
   drawRequest: DrawCardsRequest;
   onClose: () => void;
   onCardsDrawn: (cards: TarotCard[]) => void;
+  /** 弹层标题,默认「抽取塔罗牌」(日运场景定制) */
+  title?: string;
+  /** 洗牌前副标题,默认「静心凝神，准备开启命运之门」 */
+  subtitle?: string;
+  /** false 时确认后不在抽牌器内翻面展示——真实牌面由调用方揭示(daily 用),默认 true */
+  revealOnConfirm?: boolean;
 }
 
 type ShufflePatternType = 'orbital' | 'cascade' | 'burst';
@@ -29,6 +35,9 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
   drawRequest,
   onClose,
   onCardsDrawn,
+  title = '抽取塔罗牌',
+  subtitle = '静心凝神，准备开启命运之门',
+  revealOnConfirm = true,
 }) => {
   const [isShuffling, setIsShuffling] = useState(false);
   const [isSpread, setIsSpread] = useState(false);
@@ -230,14 +239,18 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
       const newSelected = [...selectedIndices, index];
       setSelectedIndices(newSelected);
       if (newSelected.length === drawRequest.card_count) {
-        setShowConfirm(true);
+        if (drawRequest.card_count === 1) {
+          finishSelection(newSelected); // 单张:选中即确认,省去二次确认面板
+        } else {
+          setShowConfirm(true);
+        }
       }
     }
   };
 
-  const handleConfirm = () => {
-    // 模拟抽牌结果
-    const drawnCards: TarotCard[] = selectedIndices.map((idx) => {
+  const finishSelection = (indices: number[]) => {
+    // 模拟抽牌结果(仪式用;daily 等场景的真实牌面由服务端决定)
+    const drawnCards: TarotCard[] = indices.map((idx) => {
       const cardInfo = getCardInfo(idx);
       return {
         card_id: idx,
@@ -245,6 +258,12 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
         reversed: Math.random() < 0.3,
       };
     });
+
+    if (!revealOnConfirm) {
+      onCardsDrawn(drawnCards);
+      onClose();
+      return;
+    }
 
     setConfirmedCards(drawnCards);
 
@@ -254,6 +273,8 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
       onClose();
     }, 2000);
   };
+
+  const handleConfirm = () => finishSelection(selectedIndices);
 
   return (
     <AnimatePresence>
@@ -320,12 +341,12 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
                   </motion.div>
                   <div>
                     <h2 className="text-2xl font-display font-semibold mystic-text">
-                      抽取塔罗牌
+                      {title}
                     </h2>
                     <p className="text-gray-400 font-display mt-1">
                       {isSpread
                         ? `请选择 ${drawRequest.card_count} 张牌 (已选${selectedIndices.length}/${drawRequest.card_count})`
-                        : '静心凝神，准备开启命运之门'}
+                        : subtitle}
                     </p>
                   </div>
                 </div>
