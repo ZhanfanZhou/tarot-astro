@@ -34,7 +34,7 @@ const ASTROLOGY_QUICK_REPLIES = [
 ];
 
 const QuickReplies: React.FC<QuickRepliesProps> = ({ conversationType, onReplyClick }) => {
-  const replies = conversationType === SessionType.TAROT ? TAROT_QUICK_REPLIES : ASTROLOGY_QUICK_REPLIES;
+  const replies = conversationType === SessionType.TAROT || conversationType === SessionType.DAILY ? TAROT_QUICK_REPLIES : ASTROLOGY_QUICK_REPLIES;
   const [open, setOpen] = useState(true);
 
   const chipBase: React.CSSProperties = {

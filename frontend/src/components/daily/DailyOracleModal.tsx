@@ -121,7 +121,7 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
     setShowDrawer(false);
     setDrawing(true);
     try {
-      const eff = getEffectiveDate();
+      const eff = todayDate;
       const res = await dailyApi.draw(userId, eff);
       await onRefreshOverview();
       setSelectedDate(eff);
