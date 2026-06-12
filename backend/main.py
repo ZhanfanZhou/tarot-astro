@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from config import CORS_ORIGINS
-from routers import users, conversations, tarot, astrology, decks, wallet, payments
+from routers import users, conversations, tarot, astrology, decks, wallet, payments, daily
 
 
 @asynccontextmanager
@@ -65,6 +65,7 @@ app.include_router(astrology.router)
 app.include_router(decks.router)
 app.include_router(wallet.router)
 app.include_router(payments.router)
+app.include_router(daily.router)
 
 
 @app.get("/")
