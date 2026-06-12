@@ -48,6 +48,7 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
   const [shuffleConfig, setShuffleConfig] = useState<ShuffleCardConfig[]>([]);
   const [shuffleRunId, setShuffleRunId] = useState(0);
   const shuffleTimeoutRef = useRef<number | null>(null);
+  const finishedRef = useRef(false);
 
   // 生成78张牌的数组
   const cards = Array.from({ length: 78 }, (_, i) => i);
@@ -97,6 +98,7 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
       setRotationOffset(0);
       setShuffleConfig([]);
       setShuffleRunId(0);
+      finishedRef.current = false;
       if (shuffleTimeoutRef.current) {
         window.clearTimeout(shuffleTimeoutRef.current);
         shuffleTimeoutRef.current = null;
@@ -249,6 +251,8 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
   };
 
   const finishSelection = (indices: number[]) => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
     // 模拟抽牌结果(仪式用;daily 等场景的真实牌面由服务端决定)
     const drawnCards: TarotCard[] = indices.map((idx) => {
       const cardInfo = getCardInfo(idx);
