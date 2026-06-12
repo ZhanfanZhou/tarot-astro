@@ -29,7 +29,8 @@ class ConversationService:
         title_map = {
             SessionType.TAROT: "塔罗占卜",
             SessionType.ASTROLOGY: "星盘解读",
-            SessionType.CHAT: "聊愈对话"
+            SessionType.CHAT: "聊愈对话",
+            SessionType.DAILY: "每日一签",
         }
         return title_map.get(session_type, "新对话")
     
@@ -66,8 +67,12 @@ class ConversationService:
         conversation.messages.append(message)
         conversation.updated_at = datetime.utcnow().isoformat()
         
-        # 如果是用户的第一条消息，根据内容更新标题
-        if role == MessageRole.USER and len([m for m in conversation.messages if m.role == MessageRole.USER]) == 1:
+        # 如果是用户的第一条消息，根据内容更新标题（daily 对话标题固定为日期，不覆盖）
+        if (
+            role == MessageRole.USER
+            and conversation.session_type != SessionType.DAILY
+            and len([m for m in conversation.messages if m.role == MessageRole.USER]) == 1
+        ):
             conversation.title = ConversationService._generate_title_from_message(content)
         
         await StorageService.save_conversation(conversation)

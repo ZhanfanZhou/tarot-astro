@@ -14,6 +14,10 @@ CONVERSATIONS_FILE = DATA_DIR / "conversations.json"
 # 牌组商城：钱包（星尘余额/已拥有牌组/当前应用牌组）与支付订单
 WALLETS_FILE = DATA_DIR / "wallets.json"
 PAYMENT_ORDERS_FILE = DATA_DIR / "payment_orders.json"
+# 每日一签:日运记录(牌面/反馈/旅程缓存)
+DAILY_DRAWS_FILE = DATA_DIR / "daily_draws.json"
+# 提示词模板目录(每次请求实时读取,编辑后无需重启)
+PROMPTS_DIR = BASE_DIR / "backend" / "prompts"
 
 # ── 支付配置 ────────────────────────────────────────────────────────────────
 # 当真实支付凭证缺失时，是否允许回退到「模拟支付」provider（开发期默认开启）。
