@@ -8,7 +8,6 @@ import Composer from './components/Composer';
 import QuickReplies from './components/QuickReplies';
 import SessionButtons from './components/SessionButtons';
 import GalleryBanner from './components/GalleryBanner';
-import RecentReadings from './components/RecentReadings';
 import WalletChip from './components/wallet/WalletChip';
 import { useDeckWallet } from './stores/useDeckWallet';
 import TarotCardDrawer from './components/TarotCardDrawer';
@@ -838,7 +837,17 @@ const App: React.FC = () => {
             >
               <Menu size={20} />
             </button>
-            <div className="absolute top-4 right-4 z-10">
+            <div className="absolute top-4 right-4 z-10 flex items-center gap-3">
+              {user && (
+                <span
+                  className="hidden sm:inline-flex items-center gap-1.5 font-display text-sm tracking-[0.08em]"
+                  style={{ color: 'var(--ivory-dim)' }}
+                  title="当前用户"
+                >
+                  <span style={{ color: 'var(--gold)', fontSize: '11px' }}>❖</span>
+                  {user.profile?.nickname || user.username || '访客'}
+                </span>
+              )}
               <WalletChip />
             </div>
             <div className="min-h-full flex flex-col items-center justify-center px-6 py-14">
@@ -887,7 +896,6 @@ const App: React.FC = () => {
 
             <div className="w-full max-w-2xl mt-12 space-y-6">
               <GalleryBanner />
-              <RecentReadings conversations={conversations} onSelect={handleSelectConversation} />
             </div>
             </div>
           </motion.div>
