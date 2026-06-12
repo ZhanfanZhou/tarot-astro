@@ -13,7 +13,7 @@ interface TopBarProps {
 
 const TopBar: React.FC<TopBarProps> = ({ conversation, onToggleSidebar, onCopyAll, onScrollToLatest, onDelete }) => {
   const [menuOpen, setMenuOpen] = useState(false);
-  const isTarot = conversation.session_type === 'tarot';
+  const isTarot = conversation.session_type === 'tarot' || conversation.session_type === 'daily';
   const accent = isTarot ? 'var(--gold)' : 'var(--moon)';
   const avatar = isTarot ? '/assets/avatar_tarot.png' : '/assets/avatar.png';
 
@@ -44,7 +44,11 @@ const TopBar: React.FC<TopBarProps> = ({ conversation, onToggleSidebar, onCopyAl
             {conversation.title}
           </h2>
           <p className="eyebrow" style={{ letterSpacing: '0.24em', fontSize: '9px' }}>
-            {isTarot ? 'TAROT · 塔罗占卜' : 'ASTROLOGY · 占星'}
+            {conversation.session_type === 'daily'
+              ? 'DAILY ORACLE · 每日一签'
+              : isTarot
+                ? 'TAROT · 塔罗占卜'
+                : 'ASTROLOGY · 占星'}
           </p>
         </div>
 
