@@ -164,6 +164,7 @@ class DailyService:
         user_id: str, effective_date: str,
         verdict: Optional[str], note: Optional[str],
     ) -> Optional[DailyDrawRecord]:
+        """更新指定日期的印证反馈。整体覆盖 feedback:verdict/note 需一并传入,传 None 会清空既有值。"""
         from datetime import datetime
         data = await DailyService._read_all()
         raw = data.get(user_id, {}).get("records", {}).get(effective_date)
