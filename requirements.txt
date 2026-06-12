@@ -14,4 +14,4 @@ httpx==0.28.1
 # alipay-sdk-python==3.7.603   # 支付宝官方 SDK
 # wechatpayv3==1.3.6           # 微信支付 V3 SDK
 
-
+pytest
