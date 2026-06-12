@@ -94,7 +94,7 @@ async def draw_daily(user_id: str, body: DailyDrawRequest):
 
 @router.post("/{user_id}/feedback", response_model=DailyDrawRecord)
 async def save_feedback(user_id: str, body: DailyFeedbackRequest):
-    """印证反馈:近 14 天内任意有记录的日期均可写入/修改"""
+    """印证反馈:任意有记录的日期均可写入/修改(整体覆盖)"""
     record = await DailyService.update_feedback(
         user_id, body.effective_date, body.verdict, body.note
     )
@@ -120,6 +120,8 @@ async def generate_journey(
         return StreamingResponse(replay(), media_type="text/event-stream")
 
     user = await UserService.get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
     entries = notebook_service.get_notebook(user_id)
     prompt = await DailyService.build_journey_prompt(user_id, date_param, user, entries)
     if prompt is None:
