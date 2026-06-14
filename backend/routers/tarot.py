@@ -3,9 +3,10 @@ from fastapi.responses import StreamingResponse
 from typing import List
 from models import (
     SendMessageRequest, DrawCardsRequest, DrawCardsResponse,
-    TarotCard, MessageRole
+    TarotCard, MessageRole, SessionType
 )
 from services.conversation_service import ConversationService
+from services.daily_service import DailyService
 from services.gemini_service import GeminiService
 from services.tarot_service import TarotService
 from services.user_service import UserService
@@ -251,12 +252,18 @@ async def send_message(request: SendMessageRequest):
                         "error": f"未知的函数: {func_name}"
                     }
             
+            # daily 对话:每次请求实时渲染日运系统提示词(模板热加载 + history 始终最新)
+            system_prompt_override = None
+            if conversation.session_type == SessionType.DAILY:
+                system_prompt_override = await DailyService.render_daily_system_prompt(conversation, user)
+
             # 使用Agent Loop处理（函数执行在loop内部）
             async for event in gemini_service.stream_response(
-                conversation.messages, 
+                conversation.messages,
                 user,
                 session_type=conversation.session_type,
-                function_executor=execute_function
+                function_executor=execute_function,
+                system_prompt_override=system_prompt_override
             ):
                 if "content" in event:
                     # 流式输出文本内容

@@ -501,12 +501,13 @@ export default function TarotShowcase() {
                 );
               })}
               <button
-                className="deck-discover"
+                className="deck-discover-cta"
                 onClick={() => setStoreOpen(true)}
                 title="发现并获取更多牌组"
               >
-                <span className="deck-discover-spark">✦</span>
-                发现新牌组
+                <span className="deck-discover-cta-spark">✦</span>
+                <span className="deck-discover-cta-title">发现新牌组</span>
+                <span className="deck-discover-cta-arrow">›</span>
               </button>
               <button
                 className="deck-refresh-icon"
@@ -870,21 +871,39 @@ export default function TarotShowcase() {
           font-size: 11px; color: rgba(255,180,140,.5);
           letter-spacing: .5px; font-style: italic;
         }
-        .deck-discover {
-          display: inline-flex; align-items: center; gap: 7px;
+        /* Prominent store CTA — sits inline among the deck chips.
+           Filled gold so it reads as the primary action in the row; a soft
+           halo pulse draws the eye without shifting layout. */
+        .deck-discover-cta {
+          display: inline-flex; align-items: center; gap: 8px;
           padding: 7px 16px; border-radius: 8px; cursor: pointer;
-          font-family: 'Cinzel', serif; font-size: 13px; letter-spacing: .5px;
-          color: #C9A96E;
-          border: 1px solid rgba(201,169,110,.45);
-          background: linear-gradient(120deg, rgba(201,169,110,.16), rgba(201,169,110,.04));
-          box-shadow: 0 0 18px rgba(201,169,110,.12);
-          transition: all .2s; margin-left: 4px;
+          margin-left: 4px;
+          font-family: 'Cinzel', serif; font-size: 13px;
+          letter-spacing: .5px; font-weight: 600; color: #100b04;
+          border: 1px solid rgba(240,208,144,.65);
+          background: linear-gradient(120deg, #C9A96E 0%, #F0D090 130%);
+          box-shadow: 0 4px 16px rgba(201,169,110,.28);
+          transition: transform .22s, box-shadow .22s;
+          animation: deck-discover-pulse 3s ease-in-out infinite;
         }
-        .deck-discover:hover {
-          color: #F0D090; border-color: #C9A96E;
-          box-shadow: 0 0 26px rgba(201,169,110,.28); transform: translateY(-1px);
+        .deck-discover-cta:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 8px 24px rgba(201,169,110,.45);
+          animation-play-state: paused;
         }
-        .deck-discover-spark { font-size: 12px; }
+        @keyframes deck-discover-pulse {
+          0%, 100% { box-shadow: 0 4px 16px rgba(201,169,110,.28), 0 0 0 0 rgba(201,169,110,.38); }
+          50%       { box-shadow: 0 4px 18px rgba(201,169,110,.34), 0 0 0 6px rgba(201,169,110,0); }
+        }
+        .deck-discover-cta-spark { font-size: 13px; line-height: 1; }
+        .deck-discover-cta-title { white-space: nowrap; }
+        .deck-discover-cta-arrow {
+          font-size: 17px; line-height: 1; transition: transform .22s;
+        }
+        .deck-discover-cta:hover .deck-discover-cta-arrow { transform: translateX(3px); }
+        @media (prefers-reduced-motion: reduce) {
+          .deck-discover-cta { animation: none; }
+        }
 
         .showcase-nav {
           display: flex; flex-wrap: wrap; justify-content: center;

@@ -45,8 +45,8 @@ const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [query, setQuery] = useState('');
 
-  const accentFor = (s: SessionType) => (s === 'tarot' ? 'var(--gold)' : 'var(--moon)');
-  const iconFor = (s: SessionType) => (s === 'tarot' ? '/assets/avatar_tarot.png' : '/assets/avatar.png');
+  const accentFor = (s: SessionType) => (s === 'tarot' || s === 'daily' ? 'var(--gold)' : 'var(--moon)');
+  const iconFor = (s: SessionType) => (s === 'tarot' || s === 'daily' ? '/assets/avatar_tarot.png' : '/assets/avatar.png');
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();

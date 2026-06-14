@@ -66,7 +66,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   // 神谕的口吻随会话类型变换强调色：塔罗=古铜金，占星=月光银蓝
   const oracleAccent = sessionType === 'astrology' ? 'var(--moon)' : 'var(--gold)';
   const getAIAvatarPath = () =>
-    sessionType === 'tarot' ? '/assets/avatar_tarot.png' : '/assets/avatar.png';
+    sessionType === 'tarot' || sessionType === 'daily' ? '/assets/avatar_tarot.png' : '/assets/avatar.png';
 
   // 系统消息不显示
   if (isSystem) return null;

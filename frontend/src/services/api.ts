@@ -6,6 +6,8 @@ import type {
   SessionType,
   TarotCard,
   DrawCardsRequest,
+  DailyOverview,
+  DailyDrawRecord,
 } from '@/types';
 
 // 默认使用同源路径，开发环境下由 Vite 代理转发到后端，避免跨域与预检请求
@@ -409,8 +411,75 @@ export const paymentsApi = {
   },
 };
 
+// ── 每日一签 ──────────────────────────────────────────────────────
+export const dailyApi = {
+  overview: async (userId: string, date: string): Promise<DailyOverview> => {
+    const r = await api.get(`/api/daily/${userId}/overview`, { params: { date } });
+    return r.data;
+  },
+
+  draw: async (
+    userId: string,
+    effectiveDate: string
+  ): Promise<{ record: DailyDrawRecord; conversation_id: string }> => {
+    const r = await api.post(`/api/daily/${userId}/draw`, { effective_date: effectiveDate });
+    return r.data;
+  },
+
+  feedback: async (
+    userId: string,
+    effectiveDate: string,
+    verdict: 'hit' | 'miss',
+    note?: string
+  ): Promise<DailyDrawRecord> => {
+    const r = await api.post(`/api/daily/${userId}/feedback`, {
+      effective_date: effectiveDate,
+      verdict,
+      note: note || null,
+    });
+    return r.data;
+  },
+
+  /** 心灵奇旅(SSE 流式;解析方式与 tarotApi.sendMessage 一致) */
+  journey: async (
+    userId: string,
+    date: string,
+    force: boolean,
+    onChunk: (chunk: string) => void
+  ): Promise<void> => {
+    const response = await fetch(
+      `${API_BASE_URL}/api/daily/${userId}/journey?date=${date}&force=${force}`,
+      { method: 'POST' }
+    );
+    if (!response.ok) {
+      const err = new Error('旅程生成失败') as Error & { status?: number };
+      err.status = response.status;
+      throw err;
+    }
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('无法读取响应流');
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') return;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.content) onChunk(parsed.content);
+          } catch {
+            /* ignore malformed chunk */
+          }
+        }
+      }
+    }
+  },
+};
+
 export default api;
-
-
-
-

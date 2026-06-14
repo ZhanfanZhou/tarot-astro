@@ -327,23 +327,28 @@ class GeminiService:
             return "\n# <用户资料>\n尚未完善（如需星盘分析，请使用 request_user_profile 工具请求用户补充信息）"
     
     def _format_messages_for_gemini(
-        self, 
-        messages: List[Message], 
+        self,
+        messages: List[Message],
         user: Optional[User] = None,
-        session_type: SessionType = SessionType.TAROT
+        session_type: SessionType = SessionType.TAROT,
+        system_prompt_override: Optional[str] = None
     ) -> List[Dict]:
         """将消息格式化为Gemini API格式"""
         gemini_messages = []
-        
-        # 根据会话类型选择系统提示
-        if session_type == SessionType.ASTROLOGY:
-            system_prompt = self.ASTROLOGY_SYSTEM_PROMPT
+
+        # 根据会话类型选择系统提示;override(daily/journey)由调用方完整渲染,
+        # 已含用户资料,不再追加 user_context
+        if system_prompt_override is not None:
+            system_prompt = system_prompt_override
         else:
-            system_prompt = self.TAROT_SYSTEM_PROMPT
-        
-        user_context = self._build_user_context(user)
-        if user_context:
-            system_prompt += f"\n\n{user_context}"
+            if session_type == SessionType.ASTROLOGY:
+                system_prompt = self.ASTROLOGY_SYSTEM_PROMPT
+            else:
+                system_prompt = self.TAROT_SYSTEM_PROMPT
+
+            user_context = self._build_user_context(user)
+            if user_context:
+                system_prompt += f"\n\n{user_context}"
         
         gemini_messages.append({
             "role": "user",
@@ -399,11 +404,12 @@ class GeminiService:
         return gemini_messages
     
     async def stream_response(
-        self, 
+        self,
         messages: List[Message],
         user: Optional[User] = None,
         session_type: SessionType = SessionType.TAROT,
-        function_executor: Optional[callable] = None
+        function_executor: Optional[callable] = None,
+        system_prompt_override: Optional[str] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         流式生成回复（支持Function Calling的Agent Loop）
@@ -420,19 +426,19 @@ class GeminiService:
             - function_call: Dict - 函数调用请求（仅当 function_executor 为 None 时）
             - done: bool - 是否完成
         """
-        # 选择工具集
-        tools = self.tarot_tools if session_type == SessionType.TAROT else self.astrology_tools
-        
+        # 选择工具集(daily 与 tarot 同集:含 read_divination_notebook;模板已禁止再抽牌)
+        tools = self.tarot_tools if session_type in (SessionType.TAROT, SessionType.DAILY) else self.astrology_tools
+
         # 创建模型实例
         model = genai.GenerativeModel(
             model_name=GEMINI_MODEL,
             generation_config=self.generation_config,
             tools=tools
         )
-        
+
         # 格式化消息
-        gemini_messages = self._format_messages_for_gemini(messages, user, session_type)
-        
+        gemini_messages = self._format_messages_for_gemini(messages, user, session_type, system_prompt_override)
+
         # 打印调试信息
         print(f"\n[Gemini Agent] 会话类型: {session_type.value}")
         print(f"[Gemini Agent] 消息总数: {len(gemini_messages)}")
@@ -538,7 +544,8 @@ class GeminiService:
         user: Optional[User] = None,
         session_type: SessionType = SessionType.TAROT,
         function_name: str = "",
-        function_result: Dict[str, Any] = None
+        function_result: Dict[str, Any] = None,
+        system_prompt_override: Optional[str] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         在收到函数执行结果后继续Agent Loop（支持嵌套函数调用）
@@ -550,18 +557,18 @@ class GeminiService:
             function_name: 函数名称
             function_result: 函数执行结果
         """
-        # 选择工具集
-        tools = self.tarot_tools if session_type == SessionType.TAROT else self.astrology_tools
-        
+        # 选择工具集(daily 与 tarot 同集:含 read_divination_notebook;模板已禁止再抽牌)
+        tools = self.tarot_tools if session_type in (SessionType.TAROT, SessionType.DAILY) else self.astrology_tools
+
         # 创建模型实例
         model = genai.GenerativeModel(
             model_name=GEMINI_MODEL,
             generation_config=self.generation_config,
             tools=tools
         )
-        
+
         # 格式化消息（包含函数结果）
-        gemini_messages = self._format_messages_for_gemini(messages, user, session_type)
+        gemini_messages = self._format_messages_for_gemini(messages, user, session_type, system_prompt_override)
         
         print(f"\n[Gemini Agent] 继续Agent Loop，函数: {function_name}, 结果: {function_result.get('success', 'N/A')}")
         

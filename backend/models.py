@@ -84,6 +84,7 @@ class SessionType(str, Enum):
     TAROT = "tarot"
     ASTROLOGY = "astrology"
     CHAT = "chat"
+    DAILY = "daily"  # 每日一签
 
 
 class Conversation(BaseModel):
@@ -123,4 +124,47 @@ class ConvertGuestToRegisteredRequest(BaseModel):
     password: str
 
 
+# ── 每日一签 ──────────────────────────────────────────────────────
+
+class DailyFeedback(BaseModel):
+    verdict: Optional[Literal["hit", "miss"]] = None  # 应验了 / 没感觉
+    note: Optional[str] = None                         # 一句话附言,存全文不截断
+    fed_back_at: Optional[str] = None
+
+
+class DailyDrawRecord(BaseModel):
+    effective_date: str            # "YYYY-MM-DD",用户本地生效日
+    card: TarotCard
+    conversation_id: str
+    drawn_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    feedback: DailyFeedback = Field(default_factory=DailyFeedback)
+
+
+class DailyDrawRequest(BaseModel):
+    effective_date: str
+
+
+class DailyFeedbackRequest(BaseModel):
+    effective_date: str
+    verdict: Optional[Literal["hit", "miss"]] = None
+    note: Optional[str] = None
+
+
+class DailyDayView(BaseModel):
+    effective_date: str
+    record: Optional[DailyDrawRecord] = None
+    tagline: Optional[str] = None          # 解读首句(懒取自对话,不落库)
+    conversation_exists: bool = False
+
+
+class DailyOverviewResponse(BaseModel):
+    today_effective_date: str
+    today_record: Optional[DailyDrawRecord] = None
+    streak: int = 0
+    history: List[DailyDayView] = []       # 升序 14 天,最后一项为今日
+
+
+class DailyDrawResponse(BaseModel):
+    record: DailyDrawRecord
+    conversation_id: str
 

@@ -8,7 +8,8 @@ import Composer from './components/Composer';
 import QuickReplies from './components/QuickReplies';
 import SessionButtons from './components/SessionButtons';
 import GalleryBanner from './components/GalleryBanner';
-import RecentReadings from './components/RecentReadings';
+import DailyOracleBanner from './components/daily/DailyOracleBanner';
+import DailyOracleModal from './components/daily/DailyOracleModal';
 import WalletChip from './components/wallet/WalletChip';
 import { useDeckWallet } from './stores/useDeckWallet';
 import TarotCardDrawer from './components/TarotCardDrawer';
@@ -22,9 +23,10 @@ import { toast } from './stores/useToastStore';
 import { confirmDialog } from './stores/useConfirmStore';
 import { useAuthStore } from './stores/useAuthStore';
 import { useConversationStore } from './stores/useConversationStore';
-import { userApi, conversationApi, tarotApi, astrologyApi } from './services/api';
+import { userApi, conversationApi, tarotApi, astrologyApi, dailyApi } from './services/api';
+import { getEffectiveDate } from './utils/dailyDate';
 import { MessageRole } from './types';
-import type { SessionType, DrawCardsRequest, Message, UserProfile } from './types';
+import type { SessionType, DrawCardsRequest, Message, UserProfile, DailyOverview } from './types';
 
 const App: React.FC = () => {
   const { user, setUser, logout } = useAuthStore();
@@ -57,6 +59,20 @@ const App: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1024);
   const closeSidebarOnMobile = () => { if (typeof window !== 'undefined' && window.innerWidth < 1024) setSidebarOpen(false); };
 
+  // 每日一签:概览(横幅+弹窗共用)
+  const [dailyOverview, setDailyOverview] = useState<DailyOverview | null>(null);
+  const [showDailyModal, setShowDailyModal] = useState(false);
+
+  const refreshDailyOverview = React.useCallback(async () => {
+    const uid = useAuthStore.getState().user?.user_id;
+    if (!uid) return;
+    try {
+      setDailyOverview(await dailyApi.overview(uid, getEffectiveDate()));
+    } catch (error) {
+      console.error('[Daily] 加载日运概览失败:', error);
+    }
+  }, []);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // 检查用户登录状态
@@ -74,6 +90,17 @@ const App: React.FC = () => {
       useDeckWallet.getState().load(user.user_id);
     }
   }, [user?.user_id]);
+
+  // 日运概览:用户就绪时加载;窗口聚焦时重算生效日(跨天/跨 18:00 边界)并刷新
+  useEffect(() => {
+    if (user?.user_id) refreshDailyOverview();
+  }, [user?.user_id, refreshDailyOverview]);
+
+  useEffect(() => {
+    const onFocus = () => refreshDailyOverview();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [refreshDailyOverview]);
 
   // 自动滚动到底部
   useEffect(() => {
@@ -692,6 +719,19 @@ const App: React.FC = () => {
     }
   };
 
+  // 「继续这段对话」:关弹窗,把 daily 对话设为当前会话(后续消息走 tarot 链路)
+  const handleContinueDailyConversation = async (conversationId: string) => {
+    setShowDailyModal(false);
+    try {
+      const conv = await conversationApi.get(conversationId);
+      await loadUserConversations(); // 让新建的日运对话出现在侧边栏
+      setCurrentConversation(conv);
+    } catch (error) {
+      console.error('[Daily] 打开日运对话失败:', error);
+      toast.error('打开对话失败');
+    }
+  };
+
   const handleLogout = async () => {
     if (!user) return;
 
@@ -838,7 +878,17 @@ const App: React.FC = () => {
             >
               <Menu size={20} />
             </button>
-            <div className="absolute top-4 right-4 z-10">
+            <div className="absolute top-4 right-4 z-10 flex items-center gap-3">
+              {user && (
+                <span
+                  className="hidden sm:inline-flex items-center gap-1.5 font-display text-sm tracking-[0.08em]"
+                  style={{ color: 'var(--ivory-dim)' }}
+                  title="当前用户"
+                >
+                  <span style={{ color: 'var(--gold)', fontSize: '11px' }}>❖</span>
+                  {user.profile?.nickname || user.username || '访客'}
+                </span>
+              )}
               <WalletChip />
             </div>
             <div className="min-h-full flex flex-col items-center justify-center px-6 py-14">
@@ -887,7 +937,7 @@ const App: React.FC = () => {
 
             <div className="w-full max-w-2xl mt-12 space-y-6">
               <GalleryBanner />
-              <RecentReadings conversations={conversations} onSelect={handleSelectConversation} />
+              <DailyOracleBanner overview={dailyOverview} onOpen={() => setShowDailyModal(true)} />
             </div>
             </div>
           </motion.div>
@@ -1043,6 +1093,17 @@ const App: React.FC = () => {
           }}
           onCardsDrawn={handleCardsDrawn}
         />
+
+        {user && (
+          <DailyOracleModal
+            isOpen={showDailyModal}
+            userId={user.user_id}
+            overview={dailyOverview}
+            onClose={() => setShowDailyModal(false)}
+            onRefreshOverview={refreshDailyOverview}
+            onContinueConversation={handleContinueDailyConversation}
+          />
+        )}
 
         <AstrologyProfileModal
           isOpen={showAstrologyProfileModal}
