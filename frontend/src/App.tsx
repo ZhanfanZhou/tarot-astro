@@ -29,7 +29,7 @@ import { MessageRole } from './types';
 import type { SessionType, DrawCardsRequest, Message, UserProfile, DailyOverview } from './types';
 
 const App: React.FC = () => {
-  const { user, setUser, logout } = useAuthStore();
+  const { user, setUser, setAuth, logout } = useAuthStore();
   const {
     conversations,
     currentConversation,
@@ -75,6 +75,16 @@ const App: React.FC = () => {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // 旧会话迁移：localStorage 有 user 但无 token（首次部署 JWT 后），静默换取 token
+  useEffect(() => {
+    const { user: storedUser, token: storedToken } = useAuthStore.getState();
+    if (storedUser && !storedToken) {
+      userApi.migrateToken(storedUser.user_id)
+        .then(({ access_token }) => setAuth(storedUser, access_token))
+        .catch(() => { /* 用户不存在则保持原状，等后续 401 自然踢出 */ });
+    }
+  }, []);
+
   // 检查用户登录状态
   useEffect(() => {
     if (!user) {
@@ -116,10 +126,14 @@ const App: React.FC = () => {
         const url = `${apiUrl}/api/conversations/${currentConversation.conversation_id}/exit`;
         
         // 使用 fetch with keepalive 而不是 sendBeacon，因为我们需要 POST JSON
+        const token = useAuthStore.getState().token;
         try {
           await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
             keepalive: true,
           });
         } catch (error) {
@@ -146,8 +160,8 @@ const App: React.FC = () => {
 
   const handleGuestLogin = async (profile?: any) => {
     try {
-      const newUser = await userApi.createGuest(profile);
-      setUser(newUser);
+      const { user: newUser, access_token } = await userApi.createGuest(profile);
+      setAuth(newUser, access_token);
     } catch (error) {
       console.error('创建游客失败:', error);
       toast.error('登录失败，请重试');
@@ -156,8 +170,8 @@ const App: React.FC = () => {
 
   const handleRegister = async (username: string, password: string, profile?: any) => {
     try {
-      const newUser = await userApi.register(username, password, profile);
-      setUser(newUser);
+      const { user: newUser, access_token } = await userApi.register(username, password, profile);
+      setAuth(newUser, access_token);
       setPendingAstrologyConversation(null);
       setShowAstrologyProfileModal(true); // Prompt new users to complete their profile
     } catch (error: any) {
@@ -170,8 +184,8 @@ const App: React.FC = () => {
 
   const handleLogin = async (username: string, password: string) => {
     try {
-      const loggedInUser = await userApi.login(username, password);
-      setUser(loggedInUser);
+      const { user: loggedInUser, access_token } = await userApi.login(username, password);
+      setAuth(loggedInUser, access_token);
     } catch (error: any) {
       console.error('登录失败:', error);
       // 提取错误信息
@@ -796,8 +810,8 @@ const App: React.FC = () => {
     if (!user) return;
 
     try {
-      const updatedUser = await userApi.convertGuestToRegistered(user.user_id, username, password);
-      setUser(updatedUser);
+      const { user: updatedUser, access_token } = await userApi.convertGuestToRegistered(user.user_id, username, password);
+      setAuth(updatedUser, access_token);
       setShowConvertModal(false);
       toast.success('转换成功！现在您可以随时登录查看历史记录了');
     } catch (error: any) {

@@ -9,6 +9,7 @@ import type {
   DailyOverview,
   DailyDrawRecord,
 } from '@/types';
+import { useAuthStore } from '@/stores/useAuthStore';
 
 // 默认使用同源路径，开发环境下由 Vite 代理转发到后端，避免跨域与预检请求
 // 如需直连后端，请在 .env 中设置 VITE_API_URL
@@ -21,14 +22,63 @@ const api = axios.create({
   },
 });
 
+// 每个请求自动带上 Bearer token（身份由后端从 token 解析，前端不再可冒充）
+api.interceptors.request.use((config) => {
+  const token = useAuthStore.getState().token;
+  if (token) {
+    config.headers = config.headers ?? {};
+    (config.headers as Record<string, string>).Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// token 失效（401）统一登出 —— 触发重新登录弹窗；也用于平滑迁移旧的无 token 会话
+api.interceptors.response.use(
+  (resp) => resp,
+  (error) => {
+    if (error?.response?.status === 401) {
+      useAuthStore.getState().logout();
+    }
+    return Promise.reject(error);
+  }
+);
+
+// 登录/注册/游客创建的统一返回
+export interface AuthResponse {
+  user: User;
+  access_token: string;
+  token_type: string;
+}
+
+/** 流式接口用原生 fetch，不走 axios 拦截器，这里手动拼 Authorization */
+const authHeaders = (): Record<string, string> => {
+  const token = useAuthStore.getState().token;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
+/** 统一处理流式接口的非 2xx：取出后端 detail；401 顺带登出 */
+const streamError = async (response: Response): Promise<Error & { status?: number }> => {
+  let detail = '请求失败';
+  try {
+    const j = await response.json();
+    if (j?.detail) detail = j.detail;
+  } catch {
+    /* 非 JSON 响应，沿用默认文案 */
+  }
+  if (response.status === 401) useAuthStore.getState().logout();
+  const err = new Error(detail) as Error & { status?: number };
+  err.status = response.status;
+  return err;
+};
+
 // 用户相关API
 export const userApi = {
-  createGuest: async (profile?: UserProfile): Promise<User> => {
+  createGuest: async (profile?: UserProfile): Promise<AuthResponse> => {
     const response = await api.post('/api/users/guest', profile || {});
     return response.data;
   },
 
-  register: async (username: string, password: string, profile?: UserProfile): Promise<User> => {
+  register: async (username: string, password: string, profile?: UserProfile): Promise<AuthResponse> => {
     const response = await api.post('/api/users/register', {
       username,
       password,
@@ -37,7 +87,7 @@ export const userApi = {
     return response.data;
   },
 
-  login: async (username: string, password: string): Promise<User> => {
+  login: async (username: string, password: string): Promise<AuthResponse> => {
     const response = await api.post('/api/users/login', {
       username,
       password,
@@ -55,7 +105,7 @@ export const userApi = {
     return response.data;
   },
 
-  convertGuestToRegistered: async (userId: string, username: string, password: string): Promise<User> => {
+  convertGuestToRegistered: async (userId: string, username: string, password: string): Promise<AuthResponse> => {
     const response = await api.post('/api/users/convert-guest', {
       user_id: userId,
       username,
@@ -66,6 +116,12 @@ export const userApi = {
 
   deleteUser: async (userId: string): Promise<void> => {
     await api.delete(`/api/users/${userId}`);
+  },
+
+  /** 迁移旧会话：localStorage 有 user 但无 token 时，用 user_id 静默换取 token */
+  migrateToken: async (userId: string): Promise<AuthResponse> => {
+    const response = await api.post(`/api/users/${userId}/token`);
+    return response.data;
   },
 };
 
@@ -121,6 +177,7 @@ export const tarotApi = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders(),
       },
       body: JSON.stringify({
         conversation_id: conversationId,
@@ -129,7 +186,7 @@ export const tarotApi = {
     });
 
     if (!response.ok) {
-      throw new Error('发送消息失败');
+      throw await streamError(response);
     }
 
     const reader = response.body?.getReader();
@@ -215,6 +272,7 @@ export const astrologyApi = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders(),
       },
       body: JSON.stringify({
         conversation_id: conversationId,
@@ -223,7 +281,7 @@ export const astrologyApi = {
     });
 
     if (!response.ok) {
-      throw new Error('发送消息失败');
+      throw await streamError(response);
     }
 
     const reader = response.body?.getReader();
@@ -449,12 +507,10 @@ export const dailyApi = {
   ): Promise<void> => {
     const response = await fetch(
       `${API_BASE_URL}/api/daily/${userId}/journey?date=${date}&force=${force}`,
-      { method: 'POST' }
+      { method: 'POST', headers: { ...authHeaders() } }
     );
     if (!response.ok) {
-      const err = new Error('旅程生成失败') as Error & { status?: number };
-      err.status = response.status;
-      throw err;
+      throw await streamError(response);
     }
     const reader = response.body?.getReader();
     if (!reader) throw new Error('无法读取响应流');

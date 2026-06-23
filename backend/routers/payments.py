@@ -3,21 +3,24 @@
 货币模型：人民币 —充值→ 星尘。下单成功后前端拉起支付（二维码/跳转），
 真实渠道支付完成由渠道回调 notify 入账；模拟渠道由 /mock/pay 直接入账。
 """
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import PlainTextResponse
 
 import config
+from models import User
 from store_models import (
     TopUpRequest, TopUpResponse, PayInstructionModel, PaymentOrder,
 )
 from services.payment_service import PaymentService
+from dependencies import get_current_user, ensure_owner
 
 router = APIRouter(prefix="/api/payments", tags=["payments"])
 
 
 @router.post("/topup", response_model=TopUpResponse)
-async def create_topup(body: TopUpRequest):
-    """创建星尘充值订单，返回拉起支付所需指令。"""
+async def create_topup(body: TopUpRequest, current_user: User = Depends(get_current_user)):
+    """创建星尘充值订单（仅本人），返回拉起支付所需指令。"""
+    ensure_owner(current_user, body.user_id)
     try:
         order, instruction = await PaymentService.create_topup_order(
             user_id=body.user_id,

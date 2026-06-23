@@ -1,22 +1,26 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List
 from models import (
-    Conversation, CreateConversationRequest, 
-    UpdateConversationTitleRequest
+    Conversation, CreateConversationRequest,
+    UpdateConversationTitleRequest, User,
 )
 from services.conversation_service import ConversationService
 from services.notebook_service import notebook_service
 from services.storage_service import StorageService
+from dependencies import get_current_user, ensure_owner
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
 
 @router.post("", response_model=Conversation)
-async def create_conversation(request: CreateConversationRequest, user_id: str):
-    """创建新对话"""
+async def create_conversation(
+    request: CreateConversationRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """创建新对话（归属当前登录身份）"""
     try:
         conversation = await ConversationService.create_conversation(
-            user_id=user_id,
+            user_id=current_user.user_id,
             session_type=request.session_type
         )
         return conversation
@@ -25,17 +29,25 @@ async def create_conversation(request: CreateConversationRequest, user_id: str):
 
 
 @router.get("/{conversation_id}", response_model=Conversation)
-async def get_conversation(conversation_id: str):
-    """获取对话详情"""
+async def get_conversation(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """获取对话详情（仅本人）"""
     conversation = await ConversationService.get_conversation(conversation_id)
     if not conversation:
         raise HTTPException(status_code=404, detail="对话不存在")
+    ensure_owner(current_user, conversation.user_id)
     return conversation
 
 
 @router.get("/user/{user_id}", response_model=List[Conversation])
-async def get_user_conversations(user_id: str):
-    """获取用户的所有对话"""
+async def get_user_conversations(
+    user_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """获取用户的所有对话（仅本人）"""
+    ensure_owner(current_user, user_id)
     try:
         conversations = await ConversationService.get_user_conversations(user_id)
         return conversations
@@ -44,8 +56,15 @@ async def get_user_conversations(user_id: str):
 
 
 @router.put("/title", response_model=Conversation)
-async def update_title(request: UpdateConversationTitleRequest):
-    """更新对话标题"""
+async def update_title(
+    request: UpdateConversationTitleRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """更新对话标题（仅本人）"""
+    conversation = await ConversationService.get_conversation(request.conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    ensure_owner(current_user, conversation.user_id)
     try:
         conversation = await ConversationService.update_conversation_title(
             request.conversation_id,
@@ -59,8 +78,15 @@ async def update_title(request: UpdateConversationTitleRequest):
 
 
 @router.delete("/{conversation_id}")
-async def delete_conversation(conversation_id: str):
-    """删除对话"""
+async def delete_conversation(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """删除对话（仅本人）"""
+    conversation = await ConversationService.get_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    ensure_owner(current_user, conversation.user_id)
     try:
         await ConversationService.delete_conversation(conversation_id)
         return {"message": "对话已删除"}
@@ -69,7 +95,10 @@ async def delete_conversation(conversation_id: str):
 
 
 @router.post("/{conversation_id}/exit")
-async def exit_conversation(conversation_id: str):
+async def exit_conversation(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+):
     """
     对话退出时的处理
     检查是否需要创建定时任务生成占卜笔记
@@ -86,7 +115,8 @@ async def exit_conversation(conversation_id: str):
         conversation = await ConversationService.get_conversation(conversation_id)
         if not conversation:
             raise HTTPException(status_code=404, detail="对话不存在")
-        
+        ensure_owner(current_user, conversation.user_id)
+
         # 检查是否满足生成笔记的基本条件
         # 条件1: 消息数 > 1（至少有用户消息和助手回复）
         has_content = len(conversation.messages) > 1

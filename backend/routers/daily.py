@@ -1,13 +1,13 @@
 from datetime import date, timedelta
 import json
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
 
 from models import (
     DailyDayView, DailyDrawRecord, DailyDrawRequest, DailyDrawResponse,
     DailyFeedbackRequest, DailyOverviewResponse, DrawCardsRequest,
-    Message, MessageRole, SessionType,
+    Message, MessageRole, SessionType, User,
 )
 from services.conversation_service import ConversationService
 from services.daily_service import CALENDAR_DAYS, DailyService, compute_streak, extract_tagline
@@ -15,6 +15,8 @@ from services.gemini_service import GeminiService
 from services.notebook_service import notebook_service
 from services.tarot_service import TarotService
 from services.user_service import UserService
+from services.rate_limit_service import RateLimitService
+from dependencies import get_current_user, ensure_owner
 
 router = APIRouter(prefix="/api/daily", tags=["daily"])
 
@@ -29,9 +31,14 @@ def _parse_date(value: str) -> date:
 
 
 @router.get("/{user_id}/overview", response_model=DailyOverviewResponse)
-async def get_overview(user_id: str, date_param: str = Query(..., alias="date")):
+async def get_overview(
+    user_id: str,
+    date_param: str = Query(..., alias="date"),
+    current_user: User = Depends(get_current_user),
+):
     """近 14 天日运概览:逐日记录 + 签语(懒取) + streak。
     date 为前端按本地时间(18:00 切日)算出的今日生效日。"""
+    ensure_owner(current_user, user_id)
     today = _parse_date(date_param)
     records = await DailyService.get_user_records(user_id)
     streak = compute_streak(set(records.keys()), today)
@@ -56,9 +63,14 @@ async def get_overview(user_id: str, date_param: str = Query(..., alias="date"))
 
 
 @router.post("/{user_id}/draw", response_model=DailyDrawResponse)
-async def draw_daily(user_id: str, body: DailyDrawRequest):
+async def draw_daily(
+    user_id: str,
+    body: DailyDrawRequest,
+    current_user: User = Depends(get_current_user),
+):
     """每日抽牌:一日一次。创建 daily 对话 + 服务端随机单张 + 落记录。
     解读不在此生成——前端随后走 /api/tarot/message 流式触发。"""
+    ensure_owner(current_user, user_id)
     eff = _parse_date(body.effective_date)
     if abs((eff - date.today()).days) > 1:
         raise HTTPException(status_code=422, detail="生效日期超出允许范围")
@@ -93,8 +105,13 @@ async def draw_daily(user_id: str, body: DailyDrawRequest):
 
 
 @router.post("/{user_id}/feedback", response_model=DailyDrawRecord)
-async def save_feedback(user_id: str, body: DailyFeedbackRequest):
+async def save_feedback(
+    user_id: str,
+    body: DailyFeedbackRequest,
+    current_user: User = Depends(get_current_user),
+):
     """印证反馈:任意有记录的日期均可写入/修改(整体覆盖)"""
+    ensure_owner(current_user, user_id)
     record = await DailyService.update_feedback(
         user_id, body.effective_date, body.verdict, body.note
     )
@@ -108,8 +125,10 @@ async def generate_journey(
     user_id: str,
     date_param: str = Query(..., alias="date"),
     force: bool = False,
+    current_user: User = Depends(get_current_user),
 ):
     """心灵奇旅(用户主动触发,SSE 流式)。同日缓存命中且非 force 时直接回放,不花 token。"""
+    ensure_owner(current_user, user_id)
     _parse_date(date_param)
 
     cache = await DailyService.get_journey_cache(user_id)
@@ -118,6 +137,9 @@ async def generate_journey(
             yield f"data: {json.dumps({'content': cache['text']}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
         return StreamingResponse(replay(), media_type="text/event-stream")
+
+    # 用量控制：缓存未命中、确实要调 LLM 时才扣额度
+    await RateLimitService.check_and_consume(current_user)
 
     user = await UserService.get_user(user_id)
     if not user:

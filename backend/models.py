@@ -36,6 +36,13 @@ class User(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
 
+class AuthResponse(BaseModel):
+    """登录/注册/游客创建的统一返回：用户信息 + 访问令牌。"""
+    user: User
+    access_token: str
+    token_type: str = "bearer"
+
+
 class UserLogin(BaseModel):
     username: str
     password: str

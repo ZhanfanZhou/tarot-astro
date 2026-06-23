@@ -1,16 +1,17 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
 from typing import List
 from models import (
     SendMessageRequest, DrawCardsRequest, DrawCardsResponse,
-    TarotCard, MessageRole, SessionType
+    TarotCard, MessageRole, SessionType, User,
 )
 from services.conversation_service import ConversationService
 from services.daily_service import DailyService
 from services.gemini_service import GeminiService
 from services.tarot_service import TarotService
-from services.user_service import UserService
 from services.notebook_service import notebook_service
+from services.rate_limit_service import RateLimitService
+from dependencies import get_current_user, ensure_owner
 import json
 import random
 
@@ -44,20 +45,20 @@ async def should_attach_tarot_cards(conversation_id: str) -> bool:
 
 
 @router.post("/message")
-async def send_message(request: SendMessageRequest):
+async def send_message(
+    request: SendMessageRequest,
+    current_user: User = Depends(get_current_user),
+):
     """发送消息并获取AI流式回复（支持Function Calling）"""
     try:
         # 获取对话
         conversation = await ConversationService.get_conversation(request.conversation_id)
         if not conversation:
             raise HTTPException(status_code=404, detail="对话不存在")
-        
-        # 获取用户信息（用于个性化回复）
-        user = None
-        try:
-            user = await UserService.get_user(conversation.user_id)
-        except:
-            pass
+        ensure_owner(current_user, conversation.user_id)
+
+        # 用户即当前登录身份（对话归属已校验）
+        user = current_user
         
         # 🎯 检测首次对话（空消息）：直接返回预设开场白
         # 改进的判断逻辑：检查是否已经有 assistant 消息
@@ -99,13 +100,16 @@ async def send_message(request: SendMessageRequest):
                 media_type="text/event-stream"
             )
         
+        # 用量控制：真正触发 LLM 解读前按身份扣减额度（开场白分支已提前返回，不计）
+        await RateLimitService.check_and_consume(current_user)
+
         # 添加用户消息
         conversation = await ConversationService.add_message(
             request.conversation_id,
             MessageRole.USER,
             request.content
         )
-        
+
         # 流式生成AI回复（使用Agent Loop）
         async def generate():
             full_text_response = ""
@@ -342,7 +346,8 @@ async def send_message(request: SendMessageRequest):
 @router.post("/draw", response_model=DrawCardsResponse)
 async def draw_cards(
     draw_request: DrawCardsRequest,
-    conversation_id: str = Query(...)
+    conversation_id: str = Query(...),
+    current_user: User = Depends(get_current_user),
 ):
     """抽取塔罗牌"""
     try:
@@ -356,7 +361,8 @@ async def draw_cards(
         conversation = await ConversationService.get_conversation(conversation_id)
         if not conversation:
             raise HTTPException(status_code=404, detail="对话不存在")
-        
+        ensure_owner(current_user, conversation.user_id)
+
         # 抽牌
         cards = TarotService.draw_cards(draw_request)
         

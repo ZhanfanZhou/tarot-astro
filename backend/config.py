@@ -11,6 +11,8 @@ DATA_DIR.mkdir(exist_ok=True)
 # 数据文件路径
 USERS_FILE = DATA_DIR / "users.json"
 CONVERSATIONS_FILE = DATA_DIR / "conversations.json"
+# 用量计数（按 token 身份 / 天）
+USAGE_FILE = DATA_DIR / "usage.json"
 # 牌组商城：钱包（星尘余额/已拥有牌组/当前应用牌组）与支付订单
 WALLETS_FILE = DATA_DIR / "wallets.json"
 PAYMENT_ORDERS_FILE = DATA_DIR / "payment_orders.json"
@@ -46,9 +48,9 @@ WECHAT_NOTIFY_URL = os.getenv("WECHAT_NOTIFY_URL", f"{PUBLIC_BASE_URL}/api/payme
 
 # Gemini API配置
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-# GEMINI_MODEL = "gemini-2.5-flash"
-GEMINI_MODEL = "gemini-3.1-flash-lite"
-# GEMINI_MODEL = "gemini-3-pro"
+# 换模型只需改环境变量 GEMINI_MODEL，无需改代码
+# 备选：gemini-2.5-flash / gemini-3.1-flash-lite / gemini-3-pro
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
 # 星盘API配置 https://api.xingpan.vip/astrology/Apiinterface.html
 # https://docs.qq.com/doc/DQUxhSUpjdkpqYmhH
@@ -58,7 +60,14 @@ ASTROLOGY_ACCESS_TOKEN = os.getenv("ASTROLOGY_ACCESS_TOKEN", "")  # 需要从环
 # JWT配置
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+# token 有效期；游客无法重新登录，默认给较长有效期（60 天），可用环境变量覆盖
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(60 * 24 * 60)))
+
+# ── 用量控制 ────────────────────────────────────────────────────────────────
+# 按 token 身份每天可发起的 LLM 解读次数（开场白/缓存回放不计）。基于身份计数，
+# 不做 IP 限流；游客可清缓存重置额度，故游客额度宜小、并把主要额度绑定到注册账号。
+GUEST_DAILY_MESSAGE_LIMIT = int(os.getenv("GUEST_DAILY_MESSAGE_LIMIT", "10"))
+USER_DAILY_MESSAGE_LIMIT = int(os.getenv("USER_DAILY_MESSAGE_LIMIT", "50"))
 
 # CORS配置
 CORS_ORIGINS = [

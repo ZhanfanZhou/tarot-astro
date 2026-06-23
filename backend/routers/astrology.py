@@ -1,9 +1,9 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
 from typing import List
 from models import (
     SendMessageRequest, DrawCardsRequest, DrawCardsResponse,
-    TarotCard, MessageRole, SessionType
+    TarotCard, MessageRole, SessionType, User,
 )
 from services.conversation_service import ConversationService
 from services.gemini_service import GeminiService
@@ -11,6 +11,8 @@ from services.astrology_service import AstrologyService
 from services.tarot_service import TarotService
 from services.user_service import UserService
 from services.notebook_service import notebook_service
+from services.rate_limit_service import RateLimitService
+from dependencies import get_current_user, ensure_owner
 import json
 import random
 
@@ -44,20 +46,20 @@ async def should_attach_tarot_cards(conversation_id: str) -> bool:
 
 
 @router.post("/message")
-async def send_message(request: SendMessageRequest):
+async def send_message(
+    request: SendMessageRequest,
+    current_user: User = Depends(get_current_user),
+):
     """发送消息并获取AI流式回复（星座咨询，支持Function Calling）"""
     try:
         # 获取对话
         conversation = await ConversationService.get_conversation(request.conversation_id)
         if not conversation:
             raise HTTPException(status_code=404, detail="对话不存在")
-        
-        # 获取用户信息
-        user = None
-        try:
-            user = await UserService.get_user(conversation.user_id)
-        except:
-            pass
+        ensure_owner(current_user, conversation.user_id)
+
+        # 用户即当前登录身份（对话归属已校验）
+        user = current_user
         
         # 🎯 检测首次对话（空消息）：直接返回预设开场白
         # 改进的判断逻辑：检查是否已经有 assistant 消息
@@ -99,6 +101,9 @@ async def send_message(request: SendMessageRequest):
                 media_type="text/event-stream"
             )
         
+        # 用量控制：真正触发 LLM 解读前按身份扣减额度（开场白分支已提前返回，不计）
+        await RateLimitService.check_and_consume(current_user)
+
         # 只有当用户发送了内容时才添加用户消息
         if request.content:
             conversation = await ConversationService.add_message(
@@ -106,7 +111,7 @@ async def send_message(request: SendMessageRequest):
                 MessageRole.USER,
                 request.content
             )
-        
+
         # 流式生成AI回复（使用Agent Loop）
         async def generate():
             full_text_response = ""
@@ -335,13 +340,16 @@ async def send_message(request: SendMessageRequest):
 
 
 @router.post("/fetch-chart")
-async def fetch_chart(conversation_id: str = Query(..., description="对话ID")):
+async def fetch_chart(
+    conversation_id: str = Query(..., description="对话ID"),
+    current_user: User = Depends(get_current_user),
+):
     """
     获取用户的星盘数据并添加到对话中
-    
+
     Args:
         conversation_id: 对话ID（查询参数）
-        
+
     Returns:
         星盘数据文字描述
     """
@@ -350,7 +358,8 @@ async def fetch_chart(conversation_id: str = Query(..., description="对话ID"))
         conversation = await ConversationService.get_conversation(conversation_id)
         if not conversation:
             raise HTTPException(status_code=404, detail="对话不存在")
-        
+        ensure_owner(current_user, conversation.user_id)
+
         # 获取用户信息
         user = await UserService.get_user(conversation.user_id)
         if not user or not user.profile:
@@ -427,16 +436,20 @@ async def fetch_chart(conversation_id: str = Query(..., description="对话ID"))
 
 
 @router.get("/check-profile/{user_id}")
-async def check_user_profile(user_id: str):
+async def check_user_profile(
+    user_id: str,
+    current_user: User = Depends(get_current_user),
+):
     """
-    检查用户是否有完整的星盘资料
-    
+    检查用户是否有完整的星盘资料（仅本人）
+
     Args:
         user_id: 用户ID
-        
+
     Returns:
         资料完整性信息
     """
+    ensure_owner(current_user, user_id)
     try:
         # 获取用户信息
         user = await UserService.get_user(user_id)
@@ -491,7 +504,8 @@ async def get_current_zodiac():
 @router.post("/draw", response_model=DrawCardsResponse)
 async def draw_cards(
     draw_request: DrawCardsRequest,
-    conversation_id: str = Query(...)
+    conversation_id: str = Query(...),
+    current_user: User = Depends(get_current_user),
 ):
     """抽取塔罗牌（星座AI辅助解读用）"""
     try:
@@ -501,12 +515,13 @@ async def draw_cards(
         print(f"[Astrology Draw] draw_request.spread_type: {draw_request.spread_type}")
         print(f"[Astrology Draw] draw_request.card_count: {draw_request.card_count}")
         print(f"[Astrology Draw] draw_request.positions: {draw_request.positions}")
-        
+
         # 检查对话是否存在
         conversation = await ConversationService.get_conversation(conversation_id)
         if not conversation:
             raise HTTPException(status_code=404, detail="对话不存在")
-        
+        ensure_owner(current_user, conversation.user_id)
+
         # 注意：移除has_drawn_cards的严格检查，允许用户多次抽牌（追问）
         # 系统提示词会引导AI避免不必要的重复抽牌
         # 抽牌
