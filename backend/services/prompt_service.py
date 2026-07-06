@@ -7,9 +7,10 @@
 写入原子替换（tmp + os.replace）并把旧的生效内容留 .bak（一步回退）。
 """
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List
+from uuid import uuid4
 
 from config import PROMPTS_DIR, PROMPT_OVERRIDES_DIR
 
@@ -75,7 +76,7 @@ def get_prompt_info(name: str) -> dict:
         "overridden": overridden,
         "chars": len(get_prompt(name)),
         "updated_at": (
-            datetime.utcfromtimestamp(src.stat().st_mtime).isoformat()
+            datetime.fromtimestamp(src.stat().st_mtime, tz=timezone.utc).isoformat()
             if src.exists() else None
         ),
     }
@@ -96,7 +97,7 @@ def save_override(name: str, content: str) -> dict:
     ov = _override_path(name)
     old = get_prompt(name)
     ov.with_suffix(ov.suffix + ".bak").write_text(old, encoding="utf-8")
-    tmp = ov.with_suffix(ov.suffix + ".tmp")
+    tmp = ov.with_suffix(ov.suffix + f".{os.getpid()}.{uuid4().hex}.tmp")
     tmp.write_text(content, encoding="utf-8")
     os.replace(tmp, ov)
     return get_prompt_info(name)

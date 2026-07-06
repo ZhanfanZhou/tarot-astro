@@ -35,6 +35,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "ADMIN_PASSWORD", ADMIN_PW)
     monkeypatch.setattr(db_mod, "DB_FILE", tmp_path / "test.db")
     monkeypatch.setattr(db_mod, "_initialized", False)
+    import services.prompt_service as ps_mod
+    monkeypatch.setattr(ps_mod, "PROMPT_OVERRIDES_DIR", tmp_path / "prompt_overrides")
 
     async def _init():
         await db_mod.init_db()
@@ -286,3 +288,39 @@ class TestAdminDataSafety:
                        headers=_admin_headers(client)).json()
         assert r["total"] == 0
         assert r["items"] == []
+
+
+class TestAdminPrompts:
+    def test_list_prompts(self, client):
+        r = client.get("/api/admin/prompts", headers=_admin_headers(client)).json()
+        assert len(r["items"]) == 5
+        assert all(not p["overridden"] for p in r["items"])
+
+    def test_get_save_reset_roundtrip(self, client):
+        h = _admin_headers(client)
+        d = client.get("/api/admin/prompts/tarot_system.md", headers=h).json()
+        assert "职业占卜师" in d["content"]
+        assert d["content"] == d["default_content"]
+
+        r = client.put("/api/admin/prompts/tarot_system.md",
+                       json={"content": "新版提示词"}, headers=h)
+        assert r.status_code == 200 and r.json()["overridden"] is True
+        d2 = client.get("/api/admin/prompts/tarot_system.md", headers=h).json()
+        assert d2["content"] == "新版提示词"
+        assert "职业占卜师" in d2["default_content"]  # 默认版不受影响
+
+        r2 = client.delete("/api/admin/prompts/tarot_system.md", headers=h)
+        assert r2.status_code == 200 and r2.json()["overridden"] is False
+
+    def test_unknown_name_404(self, client):
+        h = _admin_headers(client)
+        assert client.get("/api/admin/prompts/evil.md", headers=h).status_code == 404
+        assert client.put("/api/admin/prompts/evil.md", json={"content": "x"}, headers=h).status_code == 404
+
+    def test_empty_content_400(self, client):
+        h = _admin_headers(client)
+        r = client.put("/api/admin/prompts/tarot_system.md", json={"content": "  "}, headers=h)
+        assert r.status_code == 400
+
+    def test_requires_admin(self, client):
+        assert client.get("/api/admin/prompts").status_code == 401

@@ -15,6 +15,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 import config
+from services import prompt_service
 from services.auth_service import create_admin_token, decode_access_token
 from services.rate_limit_service import get_today_usage
 from services.storage_service import StorageService
@@ -135,3 +136,47 @@ async def admin_usage(_: None = Depends(require_admin)):
         "guest_daily_limit": config.GUEST_DAILY_MESSAGE_LIMIT,
         "user_daily_limit": config.USER_DAILY_MESSAGE_LIMIT,
     }
+
+
+class PromptSaveRequest(BaseModel):
+    content: str
+
+
+@router.get("/prompts")
+async def admin_prompts(_: None = Depends(require_admin)):
+    return {"items": prompt_service.list_prompts()}
+
+
+@router.get("/prompts/{name}")
+async def admin_prompt_detail(name: str, _: None = Depends(require_admin)):
+    try:
+        info = prompt_service.get_prompt_info(name)
+        return {
+            **info,
+            "content": prompt_service.get_prompt(name),
+            "default_content": prompt_service.get_default(name),
+        }
+    except KeyError:
+        raise HTTPException(status_code=404, detail="提示词不存在")
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/prompts/{name}")
+async def admin_prompt_save(
+    name: str, request: PromptSaveRequest, _: None = Depends(require_admin)
+):
+    try:
+        return prompt_service.save_override(name, request.content)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="提示词不存在")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/prompts/{name}")
+async def admin_prompt_reset(name: str, _: None = Depends(require_admin)):
+    try:
+        return prompt_service.reset_override(name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="提示词不存在")
