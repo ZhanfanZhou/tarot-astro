@@ -11,6 +11,7 @@ import google.generativeai as genai
 
 from config import DATA_DIR, GEMINI_API_KEY
 from models import Conversation, User, Message, MessageRole
+from services import prompt_service
 
 # 配置 Gemini API
 genai.configure(api_key=GEMINI_API_KEY)
@@ -73,27 +74,7 @@ class NotebookService:
         "top_k": 40,
         "max_output_tokens": 2000,  # 限制在300字左右
     }
-    
-    # 笔记生成提示词（生成结构化输出：摘要 + 抽到的牌列表）
-    NOTEBOOK_PROMPT = """你是一位专业的占卜记录员，需要根据对话记录为用户生成简洁的占卜记录。
 
-**要求**
-1. 占卜记录写到`summary`字段，不超过300字
-2. 重点记录：问卜者的问题是什么？问卜者经历了什么？抽到了什么牌？塔罗牌如何回答问卜者的问题？塔罗牌反映问卜者怎样的状态？问卜者是反馈是怎样的？
-3. 如果用户没有明确反馈，可以根据对话内容推测用户的态度，
-4. 要从对话内容中提取所有抽到的牌（可能有多次抽牌），输出到`cards_drawn`字段。`summary`字段中出现的牌用"[]"括起来，如[星币王后（正位）]
-
-现在根据<conversation>标签内对话内容，生成占卜记录：
-<conversation>
-{conversation_content}
-<conversation>
-按 JSON 格式输出：
-{{
-    "summary": "占卜记录文本（不超过300字）",
-    "cards_drawn": ["星币侍从（正位）", "星币王后（正位）", "圣杯五（正位）"]
-}}
-"""
-    
     def __init__(self):
         # 确保笔记本目录存在
         self.NOTEBOOK_DIR.mkdir(exist_ok=True)
@@ -171,12 +152,12 @@ class NotebookService:
         # 格式化时间
         start_time = datetime.fromisoformat(conversation.created_at).strftime("%Y年%m月%d日")
         
-        # 构建提示词（不再传递 cards_str，让 AI 从对话中提取）
-        prompt = self.NOTEBOOK_PROMPT.format(
-            start_time=start_time,
-            question=question,
-            conversation_content=conversation_str
-        )
+        # 构建提示词（热加载文件模板；replace 渲染，正文 JSON 花括号安全）
+        prompt = prompt_service.render_prompt("notebook_system.md", {
+            "conversation_content": conversation_str,
+            "start_time": start_time,
+            "question": question,
+        })
         
         # 调用AI生成摘要（结构化输出）
         try:

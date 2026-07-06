@@ -76,3 +76,38 @@ def test_list_prompts_has_all_five(ps):
         "tarot_system.md", "astrology_system.md", "notebook_system.md",
         "daily_oracle_system.md", "daily_journey.md",
     }
+
+
+# ---------------------------------------------------------------------------
+# 接线测试：三个服务确实从 prompt_service 取词（覆盖版生效 = 证明走了文件）
+# ---------------------------------------------------------------------------
+from models import SessionType  # noqa: E402
+
+
+def test_gemini_selects_prompt_file_by_session_type(ps):
+    ps.save_override("tarot_system.md", "TAROT-FILE-PROMPT")
+    ps.save_override("astrology_system.md", "ASTRO-FILE-PROMPT")
+    from services.gemini_service import GeminiService
+    svc = GeminiService()
+    tarot_msgs = svc._format_messages_for_gemini([], user=None, session_type=SessionType.TAROT)
+    astro_msgs = svc._format_messages_for_gemini([], user=None, session_type=SessionType.ASTROLOGY)
+    assert tarot_msgs[0]["parts"][0]["text"].startswith("TAROT-FILE-PROMPT")
+    assert astro_msgs[0]["parts"][0]["text"].startswith("ASTRO-FILE-PROMPT")
+
+
+def test_gemini_hardcoded_prompts_removed(ps):
+    from services.gemini_service import GeminiService
+    assert not hasattr(GeminiService, "TAROT_SYSTEM_PROMPT")
+    assert not hasattr(GeminiService, "ASTROLOGY_SYSTEM_PROMPT")
+
+
+def test_notebook_hardcoded_prompt_removed(ps):
+    from services.notebook_service import NotebookService
+    assert not hasattr(NotebookService, "NOTEBOOK_PROMPT")
+
+
+def test_daily_render_template_is_prompt_service(ps):
+    from services import daily_service
+    ps.save_override("daily_oracle_system.md", "DAILY:{nickname}")
+    out = daily_service.render_template("daily_oracle_system.md", {"nickname": "小明"})
+    assert out == "DAILY:小明"

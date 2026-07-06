@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 
 import aiofiles
 
-from config import DAILY_DRAWS_FILE, PROMPTS_DIR
+from config import DAILY_DRAWS_FILE
 from models import Conversation, DailyDrawRecord, MessageRole, User
 
 # 解读上下文:最近至多 7 次,最远回溯 14 天(spec 决策)
@@ -92,17 +92,8 @@ def extract_tagline(conversation: Optional[Conversation]) -> Optional[str]:
     return sentence[:40]
 
 
-def render_template(name: str, variables: Dict[str, str]) -> str:
-    """读取 backend/prompts/<name> 并替换 {key} 占位符。
-    每次调用实时读盘(热加载);用 str.replace 而非 str.format,
-    模板正文里出现孤立花括号也不会崩。"""
-    path = PROMPTS_DIR / name
-    if not path.exists():
-        raise FileNotFoundError(f"提示词模板缺失: {path}")
-    text = path.read_text(encoding="utf-8")
-    for key, value in variables.items():
-        text = text.replace("{" + key + "}", str(value))
-    return text
+# render_template 已收敛到 prompt_service（默认+覆盖双层热加载），别名保持旧调用点不变
+from services.prompt_service import render_prompt as render_template
 
 
 def _nickname(user: Optional[User]) -> str:

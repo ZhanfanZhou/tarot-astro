@@ -118,18 +118,26 @@ class TestExtractTagline:
 
 
 class TestRenderTemplate:
+    """render_template 现在是 prompt_service.render_prompt 的别名(默认+覆盖双层热加载,
+    且按白名单校验 name)。用已注册的模板名(daily_oracle_system.md)验证透传行为，
+    monkeypatch 真正读盘的 services.prompt_service.PROMPTS_DIR/PROMPT_OVERRIDES_DIR。"""
+
     def test_replaces_placeholders_and_hot_reads(self, tmp_path, monkeypatch):
-        import services.daily_service as ds
-        monkeypatch.setattr(ds, "PROMPTS_DIR", tmp_path)
-        (tmp_path / "t.md").write_text("你好 {nickname},今天是 {today_date}。{孤立花括号不崩}", encoding="utf-8")
-        out = render_template("t.md", {"nickname": "小x", "today_date": "2026-06-11"})
+        import services.prompt_service as ps
+        monkeypatch.setattr(ps, "PROMPTS_DIR", tmp_path)
+        monkeypatch.setattr(ps, "PROMPT_OVERRIDES_DIR", tmp_path / "overrides")
+        (tmp_path / "daily_oracle_system.md").write_text(
+            "你好 {nickname},今天是 {today_date}。{孤立花括号不崩}", encoding="utf-8"
+        )
+        out = render_template("daily_oracle_system.md", {"nickname": "小x", "today_date": "2026-06-11"})
         assert out == "你好 小x,今天是 2026-06-11。{孤立花括号不崩}"
         # 热加载:改文件后再次渲染立即生效
-        (tmp_path / "t.md").write_text("新版 {nickname}", encoding="utf-8")
-        assert render_template("t.md", {"nickname": "小x"}) == "新版 小x"
+        (tmp_path / "daily_oracle_system.md").write_text("新版 {nickname}", encoding="utf-8")
+        assert render_template("daily_oracle_system.md", {"nickname": "小x"}) == "新版 小x"
 
     def test_missing_template_raises(self, tmp_path, monkeypatch):
-        import services.daily_service as ds
-        monkeypatch.setattr(ds, "PROMPTS_DIR", tmp_path)
+        import services.prompt_service as ps
+        monkeypatch.setattr(ps, "PROMPTS_DIR", tmp_path)
+        monkeypatch.setattr(ps, "PROMPT_OVERRIDES_DIR", tmp_path / "overrides")
         with pytest.raises(FileNotFoundError):
-            render_template("nope.md", {})
+            render_template("daily_oracle_system.md", {})
