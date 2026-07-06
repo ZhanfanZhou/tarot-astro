@@ -11,6 +11,9 @@ DATA_DIR.mkdir(exist_ok=True)
 # 数据文件路径
 USERS_FILE = DATA_DIR / "users.json"
 CONVERSATIONS_FILE = DATA_DIR / "conversations.json"
+# SQLite 主库（用户 + 会话；WAL 模式，替代上面两个 JSON 文件）。
+# 测试可用环境变量 TAROT_DB_FILE 覆盖，绝不碰生产库。
+DB_FILE = Path(os.getenv("TAROT_DB_FILE", str(DATA_DIR / "app.db")))
 # 用量计数（按 token 身份 / 天）
 USAGE_FILE = DATA_DIR / "usage.json"
 # 牌组商城：钱包（星尘余额/已拥有牌组/当前应用牌组）与支付订单
