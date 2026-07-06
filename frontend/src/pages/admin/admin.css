@@ -1,0 +1,98 @@
+/* 后台管理:极简功能性暗色,不追随主站视觉投入 */
+.admin-root { min-height: 100vh; background: #14121a; color: #d8d4c8; font-size: 14px; }
+.admin-login {
+  min-height: 100vh; background: #14121a; color: #d8d4c8;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+}
+.admin-login h1 { font-size: 20px; font-weight: 600; }
+.admin-login input {
+  width: 240px; padding: 8px 12px; background: #201d29; color: inherit;
+  border: 1px solid #3a3548; border-radius: 6px; outline: none;
+}
+.admin-login button, .admin-main button {
+  padding: 6px 14px; background: #2a2536; color: #cfc6a8;
+  border: 1px solid #4a4358; border-radius: 6px; cursor: pointer;
+}
+.admin-main button:disabled, .admin-login button:disabled { opacity: 0.45; cursor: default; }
+.admin-header {
+  display: flex; align-items: center; gap: 16px; padding: 10px 16px;
+  border-bottom: 1px solid #2c2838; position: sticky; top: 0; background: #14121a; z-index: 5;
+}
+.admin-brand { font-weight: 600; color: #cfa94a; white-space: nowrap; }
+.admin-header nav { display: flex; gap: 4px; flex: 1; overflow-x: auto; }
+.admin-header nav button { border: none; background: none; color: #9a94a8; padding: 6px 10px; }
+.admin-header nav button.active { color: #cfa94a; border-bottom: 2px solid #cfa94a; border-radius: 0; }
+.admin-logout { white-space: nowrap; }
+.admin-main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+.admin-error { color: #d97b6c; margin: 8px 0; }
+.admin-notice { color: #7fae7a; margin: 8px 0; }
+.admin-dim { color: #7d7788; font-size: 12px; }
+.admin-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.admin-toolbar .title { font-weight: 600; }
+.admin-toolbar select {
+  background: #201d29; color: inherit; border: 1px solid #3a3548; border-radius: 6px; padding: 5px 8px;
+}
+/* 概览 */
+.admin-stats { display: flex; flex-wrap: wrap; gap: 12px; }
+.admin-stat-card {
+  background: #1c1926; border: 1px solid #2c2838; border-radius: 8px;
+  padding: 14px 20px; min-width: 120px; text-align: center;
+}
+.admin-stat-card .num { font-size: 24px; color: #cfa94a; }
+.admin-stat-card .label { margin-top: 4px; color: #9a94a8; font-size: 12px; }
+/* 表格 */
+.admin-table { width: 100%; border-collapse: collapse; }
+.admin-table th, .admin-table td {
+  text-align: left; padding: 8px 10px; border-bottom: 1px solid #2c2838; vertical-align: top;
+}
+.admin-table th { color: #9a94a8; font-weight: 500; font-size: 12px; }
+/* 会话:桌面双栏,窄屏堆叠(详情打开时藏列表) */
+.admin-conv { display: flex; gap: 16px; align-items: flex-start; }
+.admin-conv-list { flex: 1; min-width: 0; }
+.admin-conv-list ul { list-style: none; padding: 0; margin: 0; }
+.admin-conv-list li {
+  padding: 10px 12px; border: 1px solid #2c2838; border-radius: 8px;
+  margin-bottom: 8px; cursor: pointer; background: #1c1926;
+}
+.admin-conv-list li.active { border-color: #cfa94a; }
+.admin-conv-list .row1 { display: flex; justify-content: space-between; gap: 8px; }
+.admin-conv-list .title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-conv-list .row2 { margin-top: 4px; }
+.admin-conv-detail { flex: 1.4; min-width: 0; }
+.admin-conv-detail .messages { display: flex; flex-direction: column; gap: 10px; }
+.admin-conv-detail .msg { background: #1c1926; border: 1px solid #2c2838; border-radius: 8px; padding: 10px 12px; }
+.admin-conv-detail .msg-user { border-left: 3px solid #6f86a8; }
+.admin-conv-detail .msg-assistant { border-left: 3px solid #cfa94a; }
+.admin-conv-detail .msg-system { border-left: 3px solid #7d7788; opacity: 0.8; }
+.admin-conv-detail .content { white-space: pre-wrap; word-break: break-word; margin-top: 6px; line-height: 1.6; }
+.admin-conv-detail .cards { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.card-chip {
+  background: #2a2536; border: 1px solid #4a4358; border-radius: 999px;
+  padding: 2px 10px; font-size: 12px; color: #cfc6a8;
+}
+@media (max-width: 800px) {
+  .admin-conv.has-detail .admin-conv-list { display: none; }
+}
+/* prompt */
+.admin-prompts { display: flex; gap: 16px; align-items: flex-start; }
+.prompt-list { list-style: none; padding: 0; margin: 0; width: 260px; flex-shrink: 0; }
+.prompt-list li {
+  padding: 10px 12px; border: 1px solid #2c2838; border-radius: 8px; margin-bottom: 8px;
+  cursor: pointer; background: #1c1926; display: flex; justify-content: space-between; gap: 8px;
+}
+.prompt-list li.active { border-color: #cfa94a; }
+.prompt-list .badge {
+  font-style: normal; color: #cfa94a; border: 1px solid #cfa94a;
+  border-radius: 4px; padding: 0 4px; margin-right: 4px; font-size: 11px;
+}
+.prompt-editor { flex: 1; min-width: 0; }
+.prompt-editor textarea {
+  width: 100%; min-height: 60vh; background: #201d29; color: #d8d4c8;
+  border: 1px solid #3a3548; border-radius: 8px; padding: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.6;
+  resize: vertical; box-sizing: border-box;
+}
+@media (max-width: 800px) {
+  .admin-prompts { flex-direction: column; }
+  .prompt-list { width: 100%; }
+}
