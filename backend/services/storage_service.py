@@ -176,7 +176,7 @@ class StorageService:
                            json_extract(data,'$.session_type') AS session_type,
                            json_extract(data,'$.title')        AS title,
                            json_extract(data,'$.created_at')   AS created_at,
-                           json_array_length(data,'$.messages') AS message_count
+                           COALESCE(json_array_length(data,'$.messages'),0) AS message_count
                     FROM conversations {w}
                     ORDER BY updated_at DESC LIMIT ? OFFSET ?""",
                 params + [limit, offset],

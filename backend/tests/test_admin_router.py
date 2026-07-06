@@ -212,3 +212,77 @@ class TestAdminData:
         assert r["entries"][0]["user_id"] == "guest_1" and r["entries"][0]["used"] == 3
         assert r["entries"][0]["nickname"] == "小游"
         assert r["guest_daily_limit"] > 0
+
+
+class TestAdminDataSafety:
+    """安全/健壮性回归：敏感字段零泄漏、脏数据不 500。"""
+
+    def test_password_hash_never_leaks(self, client, tmp_path, monkeypatch):
+        """最重要：password_hash 绝不能出现在任何管理接口响应体里。"""
+        import json as _json
+        from datetime import date
+        import services.rate_limit_service as rl
+
+        async def _run():
+            await StorageService.save_user(User(
+                user_id="user_pw", user_type=UserType.REGISTERED,
+                username="bob", password_hash="secret_hash_xyz",
+                profile=UserProfile(nickname="鲍勃")))
+            await StorageService.save_conversation(Conversation(
+                conversation_id="cpw", user_id="user_pw",
+                session_type=SessionType.TAROT, title="有密码用户的会话",
+                updated_at="2026-07-04T10:00:00"))
+        asyncio.run(_run())
+
+        usage_file = tmp_path / "usage.json"
+        usage_file.write_text(
+            _json.dumps({date.today().isoformat(): {"user_pw": 2}}), encoding="utf-8")
+        monkeypatch.setattr(rl, "USAGE_FILE", usage_file)
+
+        h = _admin_headers(client)
+        for path in ("/api/admin/users", "/api/admin/usage", "/api/admin/conversations"):
+            resp = client.get(path, headers=h)
+            assert resp.status_code == 200, path
+            assert "secret_hash_xyz" not in resp.text, path
+            assert "password_hash" not in resp.text, path
+
+    def test_stats_today_metrics(self, client):
+        from datetime import datetime
+        now = datetime.utcnow().isoformat()
+
+        async def _run():
+            await StorageService.save_user(User(
+                user_id="u_today", user_type=UserType.GUEST))
+            await StorageService.save_conversation(Conversation(
+                conversation_id="c_today", user_id="u_today",
+                session_type=SessionType.TAROT, title="今日会话",
+                created_at=now, updated_at=now,
+                messages=[Message(role=MessageRole.USER, content="今天好",
+                                  timestamp=now)]))
+        asyncio.run(_run())
+
+        s = client.get("/api/admin/stats", headers=_admin_headers(client)).json()
+        assert s["today_new_conversations"] >= 1
+        assert s["today_messages"] >= 1
+
+    def test_usage_orphan_user_id(self, client, tmp_path, monkeypatch):
+        """usage.json 里存在 users 表查不到的 user_id：接口 200，username 为空。"""
+        import json as _json
+        from datetime import date
+        import services.rate_limit_service as rl
+        usage_file = tmp_path / "usage.json"
+        usage_file.write_text(
+            _json.dumps({date.today().isoformat(): {"ghost_user": 5}}), encoding="utf-8")
+        monkeypatch.setattr(rl, "USAGE_FILE", usage_file)
+        resp = client.get("/api/admin/usage", headers=_admin_headers(client))
+        assert resp.status_code == 200
+        entry = resp.json()["entries"][0]
+        assert entry["user_id"] == "ghost_user" and entry["used"] == 5
+        assert entry["username"] is None
+
+    def test_invalid_session_type_filter(self, client):
+        _seed(client)
+        r = client.get("/api/admin/conversations?session_type=foo",
+                       headers=_admin_headers(client)).json()
+        assert r["total"] == 0
+        assert r["items"] == []
