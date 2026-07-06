@@ -48,10 +48,14 @@ export default function PromptsPanel() {
     setNotice('');
     try {
       await adminApi.savePrompt(current.name, text);
-      setNotice('已保存，即时生效');
       await open(current.name);
       refresh();
+      setNotice('已保存，即时生效');
     } catch (e) {
+      if (isAuthError(e)) {
+        window.location.reload();
+        return;
+      }
       setError(errMsg(e));
     } finally {
       setBusy(false);
@@ -66,10 +70,14 @@ export default function PromptsPanel() {
     setNotice('');
     try {
       await adminApi.resetPrompt(current.name);
-      setNotice('已重置为默认');
       await open(current.name);
       refresh();
+      setNotice('已重置为默认');
     } catch (e) {
+      if (isAuthError(e)) {
+        window.location.reload();
+        return;
+      }
       setError(errMsg(e));
     } finally {
       setBusy(false);
