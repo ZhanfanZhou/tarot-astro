@@ -144,7 +144,10 @@ class PromptSaveRequest(BaseModel):
 
 @router.get("/prompts")
 async def admin_prompts(_: None = Depends(require_admin)):
-    return {"items": prompt_service.list_prompts()}
+    try:
+        return {"items": prompt_service.list_prompts()}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/prompts/{name}")

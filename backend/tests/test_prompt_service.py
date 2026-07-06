@@ -50,6 +50,13 @@ def test_unknown_name_rejected(ps):
         ps.save_override("evil.md", "x")
 
 
+def test_save_strips_bom(ps):
+    ps.save_override("tarot_system.md", "﻿BOM内容")
+    saved = ps.get_prompt("tarot_system.md")
+    assert "﻿" not in saved
+    assert saved == "BOM内容"
+
+
 def test_empty_or_oversize_content_rejected(ps):
     with pytest.raises(ValueError):
         ps.save_override("tarot_system.md", "   ")

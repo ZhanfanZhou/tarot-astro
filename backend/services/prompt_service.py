@@ -89,6 +89,7 @@ def list_prompts() -> List[dict]:
 def save_override(name: str, content: str) -> dict:
     """保存覆盖版：白名单/非空/限长校验，旧生效内容留 .bak，原子写。"""
     _validate_name(name)
+    content = content.lstrip("﻿")  # 剥离粘贴带入的 BOM
     if not content or not content.strip():
         raise ValueError("提示词内容不能为空")
     if len(content) > MAX_PROMPT_CHARS:
