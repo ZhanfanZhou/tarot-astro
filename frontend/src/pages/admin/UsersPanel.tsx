@@ -7,8 +7,10 @@ export default function UsersPanel() {
   const [items, setItems] = useState<AdminUser[]>([]);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const load = useCallback((offset: number) => {
+    setLoading(true);
     adminApi.users({ limit: PAGE, offset }).then((r) => {
       setItems((prev) => (offset === 0 ? r.items : [...prev, ...r.items]));
       setTotal(r.total);
@@ -18,7 +20,7 @@ export default function UsersPanel() {
         return;
       }
       setError(errMsg(e));
-    });
+    }).finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
@@ -47,7 +49,9 @@ export default function UsersPanel() {
           ))}
         </tbody>
       </table>
-      {items.length < total && <button onClick={() => load(items.length)}>加载更多</button>}
+      {items.length < total && (
+        <button disabled={loading} onClick={() => load(items.length)}>{loading ? '加载中…' : '加载更多'}</button>
+      )}
     </div>
   );
 }

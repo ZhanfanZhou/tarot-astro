@@ -31,7 +31,8 @@ export default function AdminApp() {
       setAuthed(true);
       setPassword('');
     } catch (e) {
-      setError(errMsg(e));
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      setError(status === 404 ? '后台未启用（服务器未配置 ADMIN_PASSWORD）' : errMsg(e));
     } finally {
       setBusy(false);
     }
