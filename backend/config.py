@@ -23,6 +23,9 @@ PAYMENT_ORDERS_FILE = DATA_DIR / "payment_orders.json"
 DAILY_DRAWS_FILE = DATA_DIR / "daily_draws.json"
 # 提示词模板目录(每次请求实时读取,编辑后无需重启)
 PROMPTS_DIR = BASE_DIR / "backend" / "prompts"
+# 提示词覆盖目录：管理页在线编辑写这里（gitignored，git pull 不冲掉线上修改）；
+# 默认版在 backend/prompts/ 随代码部署。读取时覆盖版优先。
+PROMPT_OVERRIDES_DIR = DATA_DIR / "prompts"
 
 # ── 支付配置 ────────────────────────────────────────────────────────────────
 # 当真实支付凭证缺失时，是否允许回退到「模拟支付」provider（开发期默认开启）。
