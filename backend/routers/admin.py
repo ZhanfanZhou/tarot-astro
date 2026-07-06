@@ -8,6 +8,7 @@
 """
 import secrets
 import time
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -15,6 +16,8 @@ from pydantic import BaseModel
 
 import config
 from services.auth_service import create_admin_token, decode_access_token
+from services.rate_limit_service import get_today_usage
+from services.storage_service import StorageService
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 security = HTTPBearer(auto_error=False)
@@ -68,3 +71,67 @@ async def admin_login(request: AdminLoginRequest):
 async def admin_ping(_: None = Depends(require_admin)):
     """探活/鉴权自检（前端进入管理页时校验 token 是否仍有效）。"""
     return {"ok": True}
+
+
+@router.get("/stats")
+async def admin_stats(_: None = Depends(require_admin)):
+    return await StorageService.get_admin_stats()
+
+
+@router.get("/conversations")
+async def admin_conversations(
+    limit: int = 20,
+    offset: int = 0,
+    session_type: Optional[str] = None,
+    user_id: Optional[str] = None,
+    _: None = Depends(require_admin),
+):
+    limit = max(1, min(limit, 100))
+    items, total = await StorageService.list_conversations_admin(
+        limit, offset, session_type, user_id)
+    users = await StorageService.get_users_brief([it["user_id"] for it in items])
+    for it in items:
+        u = users.get(it["user_id"], {})
+        it["username"] = u.get("username")
+        it["nickname"] = u.get("nickname")
+        it["user_type"] = u.get("user_type")
+    return {"items": items, "total": total}
+
+
+@router.get("/conversations/{conversation_id}")
+async def admin_conversation_detail(
+    conversation_id: str, _: None = Depends(require_admin)
+):
+    conversation = await StorageService.get_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    return conversation
+
+
+@router.get("/users")
+async def admin_users(
+    limit: int = 50, offset: int = 0, _: None = Depends(require_admin)
+):
+    limit = max(1, min(limit, 200))
+    items, total = await StorageService.list_users_admin(limit, offset)
+    return {"items": items, "total": total}
+
+
+@router.get("/usage")
+async def admin_usage(_: None = Depends(require_admin)):
+    today, day = get_today_usage()
+    users = await StorageService.get_users_brief(list(day.keys()))
+    entries = []
+    for uid, used in sorted(day.items(), key=lambda kv: -kv[1]):
+        u = users.get(uid, {})
+        entries.append({
+            "user_id": uid, "used": used,
+            "username": u.get("username"), "nickname": u.get("nickname"),
+            "user_type": u.get("user_type"),
+        })
+    return {
+        "date": today,
+        "entries": entries,
+        "guest_daily_limit": config.GUEST_DAILY_MESSAGE_LIMIT,
+        "user_daily_limit": config.USER_DAILY_MESSAGE_LIMIT,
+    }

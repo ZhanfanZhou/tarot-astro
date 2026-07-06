@@ -136,3 +136,79 @@ class TestSecurityProperties:
         headers = _admin_headers(client)
         monkeypatch.setattr(config, "ADMIN_PASSWORD", "")
         assert client.get("/api/admin/ping", headers=headers).status_code == 404
+
+
+from models import (  # noqa: E402
+    Conversation, Message, MessageRole, SessionType, UserProfile,
+)
+from services.storage_service import StorageService  # noqa: E402
+
+
+def _seed(client):
+    """2 用户（1 游客 1 注册）+ 3 会话。"""
+    async def _run():
+        await StorageService.save_user(User(user_id="guest_1", user_type=UserType.GUEST,
+                                            profile=UserProfile(nickname="小游")))
+        await StorageService.save_user(User(user_id="user_1", user_type=UserType.REGISTERED,
+                                            username="alice"))
+        await StorageService.save_conversation(Conversation(
+            conversation_id="c1", user_id="guest_1", session_type=SessionType.TAROT,
+            title="塔罗A", updated_at="2026-07-01T10:00:00",
+            messages=[Message(role=MessageRole.USER, content="你好")]))
+        await StorageService.save_conversation(Conversation(
+            conversation_id="c2", user_id="user_1", session_type=SessionType.CHAT,
+            title="聊愈B", updated_at="2026-07-03T10:00:00"))
+        await StorageService.save_conversation(Conversation(
+            conversation_id="c3", user_id="user_1", session_type=SessionType.TAROT,
+            title="塔罗C", updated_at="2026-07-02T10:00:00"))
+    asyncio.run(_run())
+
+
+class TestAdminData:
+    def test_stats(self, client):
+        _seed(client)
+        s = client.get("/api/admin/stats", headers=_admin_headers(client)).json()
+        assert s["total_users"] == 2 and s["guest_users"] == 1 and s["registered_users"] == 1
+        assert s["total_conversations"] == 3
+
+    def test_conversations_sorted_filtered_enriched(self, client):
+        _seed(client)
+        h = _admin_headers(client)
+        r = client.get("/api/admin/conversations", headers=h).json()
+        assert r["total"] == 3
+        assert [c["conversation_id"] for c in r["items"]] == ["c2", "c3", "c1"]  # updated_at 倒序
+        assert r["items"][2]["nickname"] == "小游"          # 用户信息已联查
+        assert r["items"][2]["message_count"] == 1
+        r2 = client.get("/api/admin/conversations?session_type=tarot", headers=h).json()
+        assert r2["total"] == 2
+        r3 = client.get("/api/admin/conversations?limit=1&offset=1", headers=h).json()
+        assert [c["conversation_id"] for c in r3["items"]] == ["c3"]
+
+    def test_conversation_detail(self, client):
+        _seed(client)
+        h = _admin_headers(client)
+        d = client.get("/api/admin/conversations/c1", headers=h).json()
+        assert d["messages"][0]["content"] == "你好"
+        assert client.get("/api/admin/conversations/nope", headers=h).status_code == 404
+
+    def test_users_with_counts(self, client):
+        _seed(client)
+        r = client.get("/api/admin/users", headers=_admin_headers(client)).json()
+        assert r["total"] == 2
+        by_id = {u["user_id"]: u for u in r["items"]}
+        assert by_id["user_1"]["conversation_count"] == 2
+        assert by_id["user_1"]["last_active"] == "2026-07-03T10:00:00"
+        assert by_id["guest_1"]["user_type"] == "guest"
+
+    def test_usage(self, client, tmp_path, monkeypatch):
+        _seed(client)
+        import json as _json
+        from datetime import date
+        import services.rate_limit_service as rl
+        usage_file = tmp_path / "usage.json"
+        usage_file.write_text(_json.dumps({date.today().isoformat(): {"guest_1": 3}}), encoding="utf-8")
+        monkeypatch.setattr(rl, "USAGE_FILE", usage_file)
+        r = client.get("/api/admin/usage", headers=_admin_headers(client)).json()
+        assert r["entries"][0]["user_id"] == "guest_1" and r["entries"][0]["used"] == 3
+        assert r["entries"][0]["nickname"] == "小游"
+        assert r["guest_daily_limit"] > 0

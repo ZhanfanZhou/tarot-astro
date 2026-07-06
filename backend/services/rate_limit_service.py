@@ -67,3 +67,9 @@ class RateLimitService:
             # 只落当天，顺手丢弃历史日期，保持文件极小
             _write_atomic({today: day})
         return {"used": used + 1, "limit": limit}
+
+
+def get_today_usage() -> tuple:
+    """(今日日期, {user_id: 已用次数})——供后台展示，只读。"""
+    today = _today()
+    return today, _read().get(today, {})

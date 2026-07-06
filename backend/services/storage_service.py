@@ -116,3 +116,111 @@ class StorageService:
                 "DELETE FROM conversations WHERE user_id=?", (user_id,)
             )
             await db.commit()
+
+    # ── 后台管理只读查询 ──────────────────────────────────────────────────
+    @staticmethod
+    async def get_admin_stats() -> dict:
+        """概览指标。今日按 UTC 日界（与 created_at/updated_at 的 utcnow 一致）。"""
+        from datetime import datetime
+        today = datetime.utcnow().date().isoformat()
+        async with get_db() as db:
+            async def _one(sql: str, *params):
+                async with db.execute(sql, params) as cur:
+                    return (await cur.fetchone())[0]
+
+            total_users = await _one("SELECT COUNT(*) FROM users")
+            guest_users = await _one(
+                "SELECT COUNT(*) FROM users WHERE json_extract(data,'$.user_type')='guest'")
+            total_conversations = await _one("SELECT COUNT(*) FROM conversations")
+            today_new = await _one(
+                "SELECT COUNT(*) FROM conversations WHERE json_extract(data,'$.created_at')>=?",
+                today)
+            today_messages = 0
+            async with db.execute(
+                "SELECT data FROM conversations WHERE updated_at>=?", (today,)
+            ) as cur:
+                async for row in cur:
+                    for m in json.loads(row["data"]).get("messages", []):
+                        if m.get("timestamp", "") >= today:
+                            today_messages += 1
+        return {
+            "total_users": total_users,
+            "guest_users": guest_users,
+            "registered_users": total_users - guest_users,
+            "total_conversations": total_conversations,
+            "today_new_conversations": today_new,
+            "today_messages": today_messages,
+        }
+
+    @staticmethod
+    async def list_conversations_admin(
+        limit: int = 20, offset: int = 0,
+        session_type: Optional[str] = None, user_id: Optional[str] = None,
+    ) -> tuple:
+        """全局会话摘要（不含消息全文），updated_at 倒序。返回 (items, total)。"""
+        where, params = [], []
+        if session_type:
+            where.append("json_extract(data,'$.session_type')=?")
+            params.append(session_type)
+        if user_id:
+            where.append("user_id=?")
+            params.append(user_id)
+        w = ("WHERE " + " AND ".join(where)) if where else ""
+        async with get_db() as db:
+            async with db.execute(
+                f"SELECT COUNT(*) FROM conversations {w}", params
+            ) as cur:
+                total = (await cur.fetchone())[0]
+            async with db.execute(
+                f"""SELECT conversation_id, user_id, updated_at,
+                           json_extract(data,'$.session_type') AS session_type,
+                           json_extract(data,'$.title')        AS title,
+                           json_extract(data,'$.created_at')   AS created_at,
+                           json_array_length(data,'$.messages') AS message_count
+                    FROM conversations {w}
+                    ORDER BY updated_at DESC LIMIT ? OFFSET ?""",
+                params + [limit, offset],
+            ) as cur:
+                rows = await cur.fetchall()
+        return [dict(r) for r in rows], total
+
+    @staticmethod
+    async def get_users_brief(user_ids: List[str]) -> dict:
+        """{user_id: {username, nickname, user_type}}，供列表联查显示。"""
+        ids = list(set(user_ids))
+        if not ids:
+            return {}
+        qs = ",".join("?" * len(ids))
+        async with get_db() as db:
+            async with db.execute(
+                f"""SELECT user_id, username,
+                           json_extract(data,'$.user_type')        AS user_type,
+                           json_extract(data,'$.profile.nickname') AS nickname
+                    FROM users WHERE user_id IN ({qs})""",
+                ids,
+            ) as cur:
+                rows = await cur.fetchall()
+        return {r["user_id"]: dict(r) for r in rows}
+
+    @staticmethod
+    async def list_users_admin(limit: int = 50, offset: int = 0) -> tuple:
+        """用户列表 + 会话数 + 最后活跃，活跃倒序。返回 (items, total)。"""
+        async with get_db() as db:
+            async with db.execute("SELECT COUNT(*) FROM users") as cur:
+                total = (await cur.fetchone())[0]
+            async with db.execute(
+                """SELECT u.user_id, u.username,
+                          json_extract(u.data,'$.user_type')        AS user_type,
+                          json_extract(u.data,'$.profile.nickname') AS nickname,
+                          json_extract(u.data,'$.created_at')       AS created_at,
+                          COUNT(c.conversation_id)                  AS conversation_count,
+                          MAX(c.updated_at)                         AS last_active
+                   FROM users u
+                   LEFT JOIN conversations c ON c.user_id = u.user_id
+                   GROUP BY u.user_id
+                   ORDER BY (last_active IS NULL), last_active DESC
+                   LIMIT ? OFFSET ?""",
+                (limit, offset),
+            ) as cur:
+                rows = await cur.fetchall()
+        return [dict(r) for r in rows], total
