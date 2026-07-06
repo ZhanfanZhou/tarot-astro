@@ -21,7 +21,9 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (resp) => resp,
   (error) => {
-    if (error?.response?.status === 401) clearAdminToken();
+    const status = (error as { response?: { status?: number } })?.response?.status;
+    // 401=未登录/过期,403=非admin token:都清掉,使 reload 后落回登录页(防死循环)
+    if (status === 401 || status === 403) clearAdminToken();
     return Promise.reject(error);
   }
 );

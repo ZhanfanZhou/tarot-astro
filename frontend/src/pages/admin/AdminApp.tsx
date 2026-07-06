@@ -18,7 +18,7 @@ const TABS: Array<[Tab, string]> = [
 
 export default function AdminApp() {
   const [authed, setAuthed] = useState(!!getAdminToken());
-  const [tab, setTab] = useState<Tab>('conversations');
+  const [tab, setTab] = useState<Tab>('overview');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
