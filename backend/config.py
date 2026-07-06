@@ -75,6 +75,12 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(6
 GUEST_DAILY_MESSAGE_LIMIT = int(os.getenv("GUEST_DAILY_MESSAGE_LIMIT", "10"))
 USER_DAILY_MESSAGE_LIMIT = int(os.getenv("USER_DAILY_MESSAGE_LIMIT", "50"))
 
+# ── 后台管理 ────────────────────────────────────────────────────────────────
+# 管理员密码：留空 = 后台功能整体关闭（所有 /api/admin 路由 404）。
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+# admin token 有效期（默认 24 小时）
+ADMIN_TOKEN_EXPIRE_MINUTES = int(os.getenv("ADMIN_TOKEN_EXPIRE_MINUTES", str(24 * 60)))
+
 # CORS配置
 CORS_ORIGINS = [
     "http://localhost:5173",
