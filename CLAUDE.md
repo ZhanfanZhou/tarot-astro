@@ -14,15 +14,17 @@
   - `tarot.py` 塔罗对话(SSE) + 抽牌
   - `astrology.py` 星座对话 + 抽牌 + 星盘
   - `daily.py` 每日一签：抽签/概览/印证/心灵奇旅
+  - admin.py 后台管理(/api/admin:登录/概览/全局会话/用户/用量/prompt 在线编辑;env ADMIN_PASSWORD 未配置则整体404)
   - `wallet.py` 钱包+商城 · `payments.py` 支付 · `decks.py` 牌组资源
 - services/ 业务层
   - `gemini_service.py` ★Gemini 封装 / 系统提示词 / 工具 / Agent Loop
   - `conversation_service.py` 会话消息逻辑 · `storage_service.py` 用户+会话存取(SQLite) · `db.py` SQLite 连接/建表(aiosqlite+WAL)
+  - prompt_service.py 提示词统一热加载(默认 prompts/*.md + 覆盖 data/prompts/,白名单5个,原子写+bak)
   - `user_service.py` 用户/密码 · `auth_service.py` JWT · `rate_limit_service.py` 限流
   - `daily_service.py` 每日一签逻辑 · `astrology_service.py` 星盘 API · `tarot_service.py` 抽牌
   - `notebook_service.py` 占卜笔记本 · `notebook_task_scheduler.py` 定时生成笔记
   - `wallet_service.py` / `payment_service.py` / `store_storage.py` 商城支付
-- `prompts/*.md` 每日一签提示词（热加载） · `data/` 运行时数据：`app.db`(用户+会话, SQLite/WAL) + 其余 `*.json`(日运/钱包/支付/笔记)
+- prompts/*.md 全部系统提示词默认版(塔罗/占星/笔记本/每日×2;热加载;管理页可在线覆盖到 data/prompts/) · `data/` 运行时数据：`app.db`(用户+会话, SQLite/WAL) + 其余 `*.json`(日运/钱包/支付/笔记)
 - `scripts/migrate_json_to_sqlite.py` 一次性迁移 users/conversations JSON→app.db（只读源、自动备份、逐条校验零丢失）
 - `tests/` 单元+集成测试（mock StorageService 或指向临时 DB，不碰 `data/`）
 
@@ -32,6 +34,7 @@
 - `stores/` zustand：useAuthStore（用户+token）、useDeckWallet（钱包）
 - `components/` 弹窗与 UI（AuthModal/CardDrawer/daily/wallet…）
 - `pages/TarotShowcase.tsx` /showcase 设计参考 · `types/` 类型
+- pages/admin/ 后台管理页(/admin 懒加载 chunk,独立 tarot_admin_token,services/adminApi.ts)
 
 ## 构建
-后端 `./run_backend.sh`(:8000)、`source venv/bin/activate && cd backend && pytest`；前端 `./run_frontend.sh`(:5173)、验证用 `npm run build`（lint 全仓坏）。配置见根 `.env`。
+后端 `./run_backend.sh`(:8000)、`source venv/bin/activate && cd backend && pytest`；前端 `./run_frontend.sh`(:5173)、验证用 `npm run build`（lint 全仓坏）。配置见根 `.env`。后台管理需 .env 配 ADMIN_PASSWORD（不配=功能关闭）。
