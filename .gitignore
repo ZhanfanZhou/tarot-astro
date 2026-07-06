@@ -30,6 +30,11 @@ wheels/
 
 # Data
 backend/data/*.json
+backend/data/*.json.bak.*
+backend/data/app.db
+backend/data/app.db-wal
+backend/data/app.db-shm
+backend/data/prompts/
 
 # Node
 node_modules/
