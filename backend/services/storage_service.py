@@ -203,13 +203,40 @@ class StorageService:
         return {r["user_id"]: dict(r) for r in rows}
 
     @staticmethod
-    async def list_users_admin(limit: int = 50, offset: int = 0) -> tuple:
-        """用户列表 + 会话数 + 最后活跃，活跃倒序。返回 (items, total)。"""
-        async with get_db() as db:
-            async with db.execute("SELECT COUNT(*) FROM users") as cur:
-                total = (await cur.fetchone())[0]
-            async with db.execute(
-                """SELECT u.user_id, u.username,
+    async def list_users_admin(
+        limit: int = 50, offset: int = 0,
+        q: Optional[str] = None, user_type: Optional[str] = None,
+        active_from: Optional[str] = None, active_to: Optional[str] = None,
+    ) -> tuple:
+        """用户列表 + 会话数 + 最后活跃，活跃倒序。返回 (items, total)。
+
+        筛选：q 模糊搜(用户名/昵称/ID)；user_type='guest'|'registered'；
+        active_from/active_to 按「最后活跃」的日期(YYYY-MM-DD)闭区间过滤
+        （从未活跃即 last_active 为 NULL 的用户在设了时间范围时不计入）。
+        """
+        where, params = [], []
+        if q:
+            like = f"%{q}%"
+            where.append(
+                "(u.username LIKE ? OR json_extract(u.data,'$.profile.nickname') "
+                "LIKE ? OR u.user_id LIKE ?)")
+            params += [like, like, like]
+        if user_type == "guest":
+            where.append("json_extract(u.data,'$.user_type')='guest'")
+        elif user_type == "registered":
+            where.append("json_extract(u.data,'$.user_type')<>'guest'")
+        w = ("WHERE " + " AND ".join(where)) if where else ""
+
+        having, hparams = [], []
+        if active_from:
+            having.append("substr(last_active,1,10) >= ?")
+            hparams.append(active_from)
+        if active_to:
+            having.append("substr(last_active,1,10) <= ?")
+            hparams.append(active_to)
+        h = ("HAVING " + " AND ".join(having)) if having else ""
+
+        base = f"""SELECT u.user_id, u.username,
                           json_extract(u.data,'$.user_type')        AS user_type,
                           json_extract(u.data,'$.profile.nickname') AS nickname,
                           json_extract(u.data,'$.created_at')       AS created_at,
@@ -217,10 +244,19 @@ class StorageService:
                           MAX(c.updated_at)                         AS last_active
                    FROM users u
                    LEFT JOIN conversations c ON c.user_id = u.user_id
+                   {w}
                    GROUP BY u.user_id
-                   ORDER BY (last_active IS NULL), last_active DESC
-                   LIMIT ? OFFSET ?""",
-                (limit, offset),
+                   {h}"""
+        async with get_db() as db:
+            async with db.execute(
+                f"SELECT COUNT(*) FROM ({base})", params + hparams
+            ) as cur:
+                total = (await cur.fetchone())[0]
+            async with db.execute(
+                f"""{base}
+                    ORDER BY (last_active IS NULL), last_active DESC
+                    LIMIT ? OFFSET ?""",
+                params + hparams + [limit, offset],
             ) as cur:
                 rows = await cur.fetchall()
         return [dict(r) for r in rows], total

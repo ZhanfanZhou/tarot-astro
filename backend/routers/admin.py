@@ -17,7 +17,7 @@ from pydantic import BaseModel
 import config
 from services import prompt_service
 from services.auth_service import create_admin_token, decode_access_token
-from services.rate_limit_service import get_today_usage
+from services.rate_limit_service import get_today_usage, reset_user_usage
 from services.storage_service import StorageService
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -111,10 +111,21 @@ async def admin_conversation_detail(
 
 @router.get("/users")
 async def admin_users(
-    limit: int = 50, offset: int = 0, _: None = Depends(require_admin)
+    limit: int = 50,
+    offset: int = 0,
+    q: Optional[str] = None,
+    user_type: Optional[str] = None,
+    active_from: Optional[str] = None,
+    active_to: Optional[str] = None,
+    _: None = Depends(require_admin),
 ):
     limit = max(1, min(limit, 200))
-    items, total = await StorageService.list_users_admin(limit, offset)
+    ut = user_type if user_type in ("guest", "registered") else None
+    items, total = await StorageService.list_users_admin(
+        limit, offset,
+        q=(q or None), user_type=ut,
+        active_from=(active_from or None), active_to=(active_to or None),
+    )
     return {"items": items, "total": total}
 
 
@@ -136,6 +147,13 @@ async def admin_usage(_: None = Depends(require_admin)):
         "guest_daily_limit": config.GUEST_DAILY_MESSAGE_LIMIT,
         "user_daily_limit": config.USER_DAILY_MESSAGE_LIMIT,
     }
+
+
+@router.delete("/usage/{user_id}")
+async def admin_usage_reset(user_id: str, _: None = Depends(require_admin)):
+    """清零某用户今日已用次数（当天恢复满额度）。幂等。"""
+    await reset_user_usage(user_id)
+    return {"ok": True}
 
 
 class PromptSaveRequest(BaseModel):

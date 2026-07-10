@@ -202,6 +202,28 @@ class TestAdminData:
         assert by_id["user_1"]["last_active"] == "2026-07-03T10:00:00"
         assert by_id["guest_1"]["user_type"] == "guest"
 
+    def test_users_filters(self, client):
+        """用户列表筛选：搜索(用户名/昵称/ID)、类型、最后活跃时间范围。"""
+        _seed(client)
+        h = _admin_headers(client)
+
+        def ids(query):
+            r = client.get(f"/api/admin/users{query}", headers=h).json()
+            return r["total"], sorted(u["user_id"] for u in r["items"])
+
+        # 搜索:用户名 / 昵称 / user_id 三处任一命中
+        assert ids("?q=alice") == (1, ["user_1"])
+        assert ids("?q=小游") == (1, ["guest_1"])
+        assert ids("?q=guest_1") == (1, ["guest_1"])
+        assert ids("?q=nobody") == (0, [])
+        # 类型
+        assert ids("?user_type=guest") == (1, ["guest_1"])
+        assert ids("?user_type=registered") == (1, ["user_1"])
+        # 最后活跃时间范围(闭区间,按日期):guest_1=07-01, user_1=07-03
+        assert ids("?active_from=2026-07-02") == (1, ["user_1"])
+        assert ids("?active_to=2026-07-01") == (1, ["guest_1"])
+        assert ids("?active_from=2026-07-01&active_to=2026-07-03") == (2, ["guest_1", "user_1"])
+
     def test_usage(self, client, tmp_path, monkeypatch):
         _seed(client)
         import json as _json
@@ -214,6 +236,28 @@ class TestAdminData:
         assert r["entries"][0]["user_id"] == "guest_1" and r["entries"][0]["used"] == 3
         assert r["entries"][0]["nickname"] == "小游"
         assert r["guest_daily_limit"] > 0
+
+    def test_usage_reset_single_user(self, client, tmp_path, monkeypatch):
+        """清零单个用户今日额度：只影响该用户,其余保留;幂等。"""
+        _seed(client)
+        import json as _json
+        from datetime import date
+        import services.rate_limit_service as rl
+        usage_file = tmp_path / "usage.json"
+        today = date.today().isoformat()
+        usage_file.write_text(
+            _json.dumps({today: {"guest_1": 3, "user_1": 5}}), encoding="utf-8")
+        monkeypatch.setattr(rl, "USAGE_FILE", usage_file)
+        h = _admin_headers(client)
+
+        assert client.delete("/api/admin/usage/guest_1", headers=h).status_code == 200
+        left = _json.loads(usage_file.read_text(encoding="utf-8"))[today]
+        assert "guest_1" not in left and left["user_1"] == 5   # 只清了 guest_1
+        # 幂等:再删一次不报错
+        assert client.delete("/api/admin/usage/guest_1", headers=h).status_code == 200
+        # 用量接口不再列出被清零的用户
+        r = client.get("/api/admin/usage", headers=h).json()
+        assert all(e["user_id"] != "guest_1" for e in r["entries"])
 
 
 class TestAdminDataSafety:

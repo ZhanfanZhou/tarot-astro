@@ -73,3 +73,17 @@ def get_today_usage() -> tuple:
     """(今日日期, {user_id: 已用次数})——供后台展示，只读。"""
     today = _today()
     return today, _read().get(today, {})
+
+
+async def reset_user_usage(user_id: str) -> None:
+    """后台手动清零某用户今日已用次数（当天恢复满额度）。
+
+    仅动今天这一格；文件本就只留当天，历史无需处理。锁内读改写，
+    与 check_and_consume 串行，避免与并发计数丢更新。
+    """
+    today = _today()
+    async with _lock:
+        data = _read()
+        day = data.get(today, {})
+        if day.pop(user_id, None) is not None:
+            _write_atomic({today: day})

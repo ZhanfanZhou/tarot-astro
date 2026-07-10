@@ -1,7 +1,13 @@
 /* 后台管理:极简功能性暗色,不追随主站视觉投入 */
-.admin-root { min-height: 100vh; background: #14121a; color: #d8d4c8; font-size: 14px; }
+/* #root 被全局 index.css 锁死为 height:100vh;overflow:hidden——后台必须自建滚动容器,
+   否则超过一屏的列表被裁掉且无法滚动。color-scheme:dark 让 date 输入/滚动条走暗色原生样式。*/
+.admin-root {
+  height: 100vh; overflow-y: auto; color-scheme: dark;
+  background: #14121a; color: #d8d4c8; font-size: 14px;
+}
 .admin-login {
-  min-height: 100vh; background: #14121a; color: #d8d4c8;
+  height: 100vh; overflow-y: auto; color-scheme: dark;
+  background: #14121a; color: #d8d4c8;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
 }
 .admin-login h1 { font-size: 20px; font-weight: 600; }
@@ -29,9 +35,12 @@
 .admin-dim { color: #7d7788; font-size: 12px; }
 .admin-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .admin-toolbar .title { font-weight: 600; }
-.admin-toolbar select {
+.admin-toolbar select,
+.admin-toolbar input {
   background: #201d29; color: inherit; border: 1px solid #3a3548; border-radius: 6px; padding: 5px 8px;
+  outline: none;
 }
+.admin-toolbar label { white-space: nowrap; }
 /* 概览 */
 .admin-stats { display: flex; flex-wrap: wrap; gap: 12px; }
 .admin-stat-card {
@@ -46,6 +55,7 @@
   text-align: left; padding: 8px 10px; border-bottom: 1px solid #2c2838; vertical-align: top;
 }
 .admin-table th { color: #9a94a8; font-weight: 500; font-size: 12px; }
+.admin-main button.admin-mini { padding: 3px 10px; font-size: 12px; white-space: nowrap; }
 /* 会话:桌面双栏,窄屏堆叠(详情打开时藏列表) */
 .admin-conv { display: flex; gap: 16px; align-items: flex-start; }
 .admin-conv-list { flex: 1; min-width: 0; }

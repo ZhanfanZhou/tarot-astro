@@ -124,9 +124,15 @@ export const adminApi = {
     (await api.get('/api/admin/conversations', { params })).data,
   conversation: async (id: string): Promise<AdminConversation> =>
     (await api.get(`/api/admin/conversations/${id}`)).data,
-  users: async (params: { limit?: number; offset?: number }): Promise<{ items: AdminUser[]; total: number }> =>
+  users: async (params: {
+    limit?: number; offset?: number;
+    q?: string; user_type?: string; active_from?: string; active_to?: string;
+  }): Promise<{ items: AdminUser[]; total: number }> =>
     (await api.get('/api/admin/users', { params })).data,
   usage: async (): Promise<AdminUsage> => (await api.get('/api/admin/usage')).data,
+  resetUsage: async (userId: string): Promise<void> => {
+    await api.delete(`/api/admin/usage/${userId}`);
+  },
   prompts: async (): Promise<{ items: PromptInfo[] }> => (await api.get('/api/admin/prompts')).data,
   prompt: async (name: string): Promise<PromptDetail> => (await api.get(`/api/admin/prompts/${name}`)).data,
   savePrompt: async (name: string, content: string): Promise<PromptInfo> =>
