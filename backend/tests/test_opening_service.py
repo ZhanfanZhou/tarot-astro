@@ -8,6 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import config  # noqa: E402
 from models import (  # noqa: E402
     Conversation, Message, MessageRole, SessionType, User, UserType, UserProfile,
 )
@@ -104,6 +105,51 @@ def test_greeting_uses_llm_output_when_available(db_env):
             )
         )
     assert text == "又来了。这次是什么事？"
+
+
+def test_greeting_llm_call_sets_timeout(db_env):
+    """开场白是全 App 的第一印象：Gemini 卡住必须超时抛错，绝不让用户永久转圈。"""
+    from services import opening_service
+
+    captured = {}
+
+    class _FakeModel:
+        def __init__(self, **kwargs):
+            pass
+
+        async def generate_content_async(self, prompt, **kwargs):
+            captured.update(kwargs)
+
+            class _R:
+                text = "坐吧。"
+            return _R()
+
+    with patch.object(opening_service.genai, "GenerativeModel", _FakeModel):
+        text = asyncio.run(opening_service._generate_greeting_via_llm("PROMPT"))
+
+    assert text == "坐吧。"
+    assert captured["request_options"]["timeout"] == config.OPENING_GREETING_TIMEOUT_SECONDS
+    assert 0 < config.OPENING_GREETING_TIMEOUT_SECONDS <= 15  # 首屏等待，不能设成一分钟
+
+
+def test_greeting_falls_back_to_template_on_timeout(db_env):
+    """超时异常 → 现有 try/except 接住 → 降级模板（用户永远拿得到一句开场白）。"""
+    from google.api_core import exceptions as gexc
+
+    from services import opening_service
+
+    async def timeout(*args, **kwargs):
+        raise gexc.DeadlineExceeded("504 Deadline Exceeded")
+
+    with patch.object(opening_service, "_generate_greeting_via_llm", side_effect=timeout):
+        text = asyncio.run(
+            opening_service.build_greeting(
+                user=_user(), conversation=_conv(), session_type=SessionType.TAROT,
+            )
+        )
+
+    assert "小夏" in text
+    assert text in [t.format(nickname="小夏") for t in opening_service.FALLBACK_GREETINGS]
 
 
 def test_greeting_rejects_empty_llm_output(db_env):
