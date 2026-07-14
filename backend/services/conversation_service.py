@@ -10,7 +10,10 @@ from services.storage_service import StorageService
 
 class ConversationService:
     """对话管理服务"""
-    
+
+    # 只有塔罗/占星走前置占卜师的开场幕；每日一签/闲聊直接进解读相位
+    OPENING_PHASE_SESSIONS = {SessionType.TAROT, SessionType.ASTROLOGY}
+
     @staticmethod
     async def create_conversation(user_id: str, session_type: SessionType) -> Conversation:
         """创建新对话"""
@@ -18,7 +21,12 @@ class ConversationService:
             conversation_id=f"conv_{uuid.uuid4().hex[:16]}",
             user_id=user_id,
             session_type=session_type,
-            title=ConversationService._get_default_title(session_type)
+            title=ConversationService._get_default_title(session_type),
+            phase=(
+                "opening"
+                if session_type in ConversationService.OPENING_PHASE_SESSIONS
+                else "reading"
+            ),
         )
         await StorageService.save_conversation(conversation)
         return conversation

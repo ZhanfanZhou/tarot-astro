@@ -123,4 +123,12 @@ TAROT_CARDS = [
 ]
 
 
+# ============ 前置占卜师 Agent（开场幕）============
+# 澄清预算守卫：opening 相位内用户消息数达到该值仍未交单 →
+# 该轮 Gemini 调用带 tool_config(mode=ANY) 机械强制提交策略单。
+OPENING_FORCE_BRIEF_AFTER_USER_MSGS = int(os.getenv("OPENING_FORCE_BRIEF_AFTER_USER_MSGS", "3"))
+# 兜底：用户消息数达到该值仍无策略单（强制交单也失败）→
+# harness 直接翻 phase=reading，strategy 保持 None，不伪造假策略单。
+OPENING_HARD_EXIT_AFTER_USER_MSGS = int(os.getenv("OPENING_HARD_EXIT_AFTER_USER_MSGS", "5"))
+
 

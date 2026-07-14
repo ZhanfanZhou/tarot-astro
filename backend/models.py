@@ -104,6 +104,12 @@ class Conversation(BaseModel):
     updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
     is_completed: bool = False  # 是否已完成占卜（已抽牌且解读完毕）
     has_drawn_cards: bool = False  # 是否已抽过牌
+    # 相位状态位：opening=前置占卜师读人中，reading=解读 Agent 工作中。
+    # 默认 reading 即存量迁移——老会话 data JSON 无此字段，反序列化自动补 reading，
+    # 确定性路由到解读 Agent，行为与改动前一致。
+    phase: str = "reading"
+    # 策略单（前置 Agent 交付物）。None = 无策略增强，会话照常运转（存量会话即如此）。
+    strategy: Optional[dict] = None
 
 
 class SendMessageRequest(BaseModel):
