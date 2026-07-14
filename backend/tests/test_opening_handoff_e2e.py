@@ -154,20 +154,31 @@ def env(tmp_path, monkeypatch):
     return client
 
 
-def _seed_conversation(phase: str, messages, strategy=None) -> Conversation:
+def _seed_conversation(
+    phase: str, messages, strategy=None, session_type=SessionType.TAROT
+) -> Conversation:
     """直接落库一个会话（含历史消息），绕过开场白分支。"""
     from services.storage_service import StorageService
 
     conv = Conversation(
-        conversation_id=f"conv_{phase}_{len(messages)}",
+        conversation_id=f"conv_{session_type.value}_{phase}_{len(messages)}",
         user_id=USER_ID,
-        session_type=SessionType.TAROT,
+        session_type=session_type,
         phase=phase,
         strategy=strategy,
         messages=messages,
     )
     asyncio.run(StorageService.save_conversation(conv))
     return conv
+
+
+# 塔罗与占星的 router 有约 20 行逐字复制的接线（交单分支、守卫、relationship_block、
+# 抽牌 wire 转换）。复制粘贴出错不会被任何只打塔罗的测试抓到 —— 主链路按入口参数化，
+# 两个 router 跑同一套断言。
+ROUTES = [
+    pytest.param(SessionType.TAROT, "/api/tarot/message", id="tarot"),
+    pytest.param(SessionType.ASTROLOGY, "/api/astrology/message", id="astrology"),
+]
 
 
 def _get_conversation(conversation_id: str) -> Conversation:
@@ -249,9 +260,16 @@ BRIEF_ARGS = {
 # 1. 主链路：开场 → 交单 → 同轮移交 → 抽牌
 # ---------------------------------------------------------------------------
 
-def test_opening_submits_brief_then_hands_off_and_draws(env, monkeypatch):
-    """一次 SSE 回复内：开场 Agent 交单 → 解读 Agent 接手说过渡语 → 抽牌按钮出现。"""
-    conv = _seed_conversation("opening", _greeting_and_user("他上周开始冷淡了"))
+@pytest.mark.parametrize("session_type,endpoint", ROUTES)
+def test_opening_submits_brief_then_hands_off_and_draws(env, monkeypatch, session_type, endpoint):
+    """一次 SSE 回复内：开场 Agent 交单 → 解读 Agent 接手说过渡语 → 抽牌按钮出现。
+
+    塔罗与占星两个 router 跑同一套断言：占星那 20 行是从塔罗复制过去的，
+    只测塔罗等于没测它。
+    """
+    conv = _seed_conversation(
+        "opening", _greeting_and_user("他上周开始冷淡了"), session_type=session_type
+    )
 
     script = [
         # chat1（开场 Agent，只有交单工具）：读完人，直接交单，不说话
@@ -272,7 +290,7 @@ def test_opening_submits_brief_then_hands_off_and_draws(env, monkeypatch):
     ]
     factory = _install_gemini(monkeypatch, script)
 
-    resp = env.post("/api/tarot/message", json={
+    resp = env.post(endpoint, json={
         "conversation_id": conv.conversation_id,
         "content": "上周三他突然不回我消息了，我是不是该主动一点？",
     })
@@ -457,7 +475,10 @@ def test_handoff_history_has_no_two_consecutive_user_turns(env, monkeypatch):
 # 4. 守卫第 3 层（router 侧接线）：开场超预算 → 兜底翻相位，不卡死
 # ---------------------------------------------------------------------------
 
-def test_hard_exit_guard_forces_reading_phase_when_opening_overruns(env, monkeypatch):
+@pytest.mark.parametrize("session_type,endpoint", ROUTES)
+def test_hard_exit_guard_forces_reading_phase_when_opening_overruns(
+    env, monkeypatch, session_type, endpoint
+):
     """澄清轮数超硬上限 → router 兜底翻 phase：本轮直接拿完整解读工具集，绝不再困在开场。
 
     补测理由：守卫的判定函数有单测，但「router 真的调用它并因此改变了本轮工具集/相位」
@@ -469,12 +490,12 @@ def test_hard_exit_guard_forces_reading_phase_when_opening_overruns(env, monkeyp
     history = _greeting_and_user(
         *[f"第{i}句" for i in range(config.OPENING_HARD_EXIT_AFTER_USER_MSGS - 1)]
     )
-    conv = _seed_conversation("opening", history)
+    conv = _seed_conversation("opening", history, session_type=session_type)
 
     script = [[_FakeResponse([_FakePart(text="好，我们直接开始。")])]]
     factory = _install_gemini(monkeypatch, script)
 
-    resp = env.post("/api/tarot/message", json={
+    resp = env.post(endpoint, json={
         "conversation_id": conv.conversation_id,
         "content": "就这样吧",
     })
