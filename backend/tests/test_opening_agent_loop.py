@@ -316,6 +316,76 @@ def test_force_brief_passes_any_mode_config_to_model(monkeypatch):
     assert factory.models[1]["tool_config"] is None
 
 
+def test_done_is_emitted_exactly_once_when_last_iteration_is_plain_text(monkeypatch):
+    """done 只能有一个——router 的 `elif "done" in event` 会 add_message(ASSISTANT)。
+
+    边界：最后一轮（iteration == max_iterations）恰好返回纯文本时，else 分支 yield 一次
+    done 并 break，循环外的 `if iteration >= max_iterations` 又 yield 一次 → 同一段回复
+    入库两次（用户看到自己的对话里出现两条一模一样的占卜师发言）。
+    移交会多吃一次迭代，离这个天花板更近，必须锁死。
+    """
+    from services import gemini_service as gs
+
+    svc = gs.GeminiService()
+    max_iterations = svc.MAX_AGENT_ITERATIONS
+
+    # 前 (max-1) 轮都调工具，把迭代预算烧到只剩最后一轮；最后一轮返回纯文本
+    responses = [
+        _FakeResponse([_FakePart(function_call=_FakeFunctionCall(
+            "read_divination_notebook", {"reason": f"第{i}次"}))])
+        for i in range(max_iterations - 1)
+    ]
+    responses.append(_FakeResponse([_FakePart(text="就这样，牌已经说清楚了。")]))
+
+    factory = _FakeModelFactory([responses])
+    monkeypatch.setattr(gs.genai, "GenerativeModel", factory)
+
+    async def executor(name, args):
+        return {"success": True}
+
+    events = _run(svc.stream_response(
+        messages=[Message(role=MessageRole.USER, content="帮我看看")],
+        user=None,
+        session_type=SessionType.TAROT,
+        function_executor=executor,
+        phase="reading",
+    ))
+
+    dones = [e for e in events if "done" in e]
+    assert len(dones) == 1, f"done 发了 {len(dones)} 次 → assistant 消息会重复落库"
+    assert events[-1] == {"done": True}
+    # 文本本身只吐一遍（重复 done 之外，内容也不能重复）
+    assert "".join(e.get("content", "") for e in events) == "就这样，牌已经说清楚了。"
+
+
+def test_done_is_emitted_once_when_iterations_are_exhausted(monkeypatch):
+    """另一侧边界：迭代烧完仍在调工具（无自然收尾）→ 仍要有且只有一个 done。"""
+    from services import gemini_service as gs
+
+    svc = gs.GeminiService()
+    responses = [
+        _FakeResponse([_FakePart(function_call=_FakeFunctionCall(
+            "read_divination_notebook", {"reason": f"第{i}次"}))])
+        for i in range(svc.MAX_AGENT_ITERATIONS)
+    ]
+    factory = _FakeModelFactory([responses])
+    monkeypatch.setattr(gs.genai, "GenerativeModel", factory)
+
+    async def executor(name, args):
+        return {"success": True}
+
+    events = _run(svc.stream_response(
+        messages=[Message(role=MessageRole.USER, content="帮我看看")],
+        user=None,
+        session_type=SessionType.TAROT,
+        function_executor=executor,
+        phase="reading",
+    ))
+
+    assert len([e for e in events if "done" in e]) == 1
+    assert events[-1] == {"done": True}
+
+
 def test_reading_phase_submit_brief_does_not_trigger_handoff(monkeypatch):
     """中途改判：解读相位再次交单 → 结果照常喂回原 chat，绝不触发移交/换提示词。"""
     from services import gemini_service as gs

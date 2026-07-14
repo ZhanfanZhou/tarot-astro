@@ -180,6 +180,10 @@ class GeminiService:
         },
     )
 
+    # Agent Loop 的迭代上限（含移交后的解读轮）。提出来是因为它是个真实的天花板：
+    # 移交会多吃一次迭代，测试要按它构造「恰好烧到最后一轮」的边界场景。
+    MAX_AGENT_ITERATIONS = 6
+
     def __init__(self):
         # 基础工具集（无交单工具）——每日一签/心灵奇旅没有开场幕，永远不该交单，
         # 给它们看见这把工具只会白白浪费一次 loop 迭代（拿到「未知函数」）
@@ -422,7 +426,7 @@ class GeminiService:
         last_message = gemini_messages[-1]["parts"][0]["text"]
 
         # Agent Loop：处理可能的多轮function calling
-        max_iterations = 6  # 最大迭代次数，防止死循环（含移交后的解读轮）
+        max_iterations = self.MAX_AGENT_ITERATIONS  # 防止死循环（含移交后的解读轮）
         iteration = 0
 
         while iteration < max_iterations:
@@ -537,16 +541,22 @@ class GeminiService:
                             "args": func_args
                         }
                     }
-                    break  # 退出循环，等待外部提供函数结果
+                    # return 而非 break：等外部喂结果，本轮不算完成，绝不能吐 done
+                    # （break 的话，恰好烧到最后一轮时会落进循环外的 done 分支）
+                    return
             else:
-                # 没有函数调用，对话结束
+                # 没有函数调用，对话结束。
+                # return 而非 break —— break 出去后若 iteration 恰好撞上 max_iterations，
+                # 循环外的兜底分支会再吐一个 done，router 的 `elif "done" in event` 就会
+                # 把同一段回复 add_message 两次（用户会看到两条一模一样的占卜师发言）。
+                # done 在本方法里必须是唯一出口事件。
                 print(f"[Gemini Agent] ✅ 对话完成（无函数调用）")
                 yield {"done": True}
-                break
-        
-        if iteration >= max_iterations:
-            print(f"[Gemini Agent] ⚠️ 达到最大迭代次数")
-            yield {"done": True}
+                return
+
+        # 走到这里 = 迭代预算烧完仍在调工具，没能自然收尾 —— 兜底收口
+        print(f"[Gemini Agent] ⚠️ 达到最大迭代次数")
+        yield {"done": True}
     
     async def continue_with_function_result(
         self,
