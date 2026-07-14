@@ -170,7 +170,10 @@ COUNT=0 → 新客变体。排除空会话防止"点开又关"刷高次数——
 | `models.py` | Conversation 加 `phase` / `strategy` 两字段 |
 | `config.py` | 守卫阈值（2 层 / 3 层）配置 |
 | `prompts/tarot_system.md`、`astrology_system.md` | 不动（澄清段落与新流程轻微冗余，联调后视情况删两句） |
-| 前端 | **零改动** |
+| `services/storage_service.py` | `list_conversations_admin` 带出 phase（后台可见卡在开场幕的会话） |
+| `pages/admin/ConversationsPanel.tsx` + `adminApi.ts` + `admin.css` | 会话列表开场幕徽标 + 详情页策略单卡片（"它当时凭什么这么解读"终于可见） |
+| 用户端前端 | **零改动**（SSE 契约、抽牌事件、开场白触发约定全不变） |
+| Prompt 管理面板 | **零改动**——由 `PROMPT_REGISTRY` 驱动，登记后自动多出可编辑条目 |
 
 成本：移交轮 +1 次模型往返（每场一次）；开场白由免费模板变为一次短 LLM 调用；opening 相位提示词远小于塔罗大提示词，token 反而更省。
 

@@ -17,11 +17,14 @@
 
 **任务依赖图（用于并行下发 subagent）：**
 ```
-Task 1 (models+phase初值) ─┐
-Task 2 (config 阈值)      ─┼─► Task 4 (context_service) ─► Task 5 (gemini_service) ─► Task 6 (routers) ─► Task 7 (集成测试)
+Task 1 (models+phase初值) ─┬─► Task 4 (context_service) ─► Task 5 (gemini_service) ─► Task 6 (routers) ─► Task 7 (集成测试)
+Task 2 (config 阈值)      ─┤
 Task 3 (prompt 文案+注册) ─┘
+        └────────────────► Task 7b (admin 会话面板)   ← 只依赖 Task 1，可与 4/5/6 并行
 ```
-Task 1 / 2 / 3 互不依赖，**可并行下发**。Task 4 起串行。
+Task 1 / 2 / 3 互不依赖，**可并行下发**。Task 4 起串行；Task 7b 在 Task 1 完成后即可与主线并行。
+
+**前端改动范围澄清**：主流程（塔罗/占星对话）前端**零改动**——SSE 契约、抽牌事件、空消息触发开场白的约定全部不变。唯一的前端改动是 **Task 7b 的后台管理页**（`pages/admin/`，独立 chunk，不影响用户端）。Prompt 管理面板由 `PROMPT_REGISTRY` 驱动，Task 3 登记后自动生效，无需前端改动。
 
 ---
 
@@ -1647,6 +1650,220 @@ Expected: 全绿。
 ```bash
 git add backend/services/opening_service.py backend/routers/tarot.py backend/routers/astrology.py backend/tests/test_opening_service.py
 git commit -m "feat(router): 开场白改由前置占卜师生成 + 交单落库 + 三层守卫接线"
+```
+
+---
+
+### Task 7b: 后台管理页——会话相位徽标与策略单查看
+
+**依赖：** Task 1（phase/strategy 字段）。**与 Task 5/6 无依赖，可与它们并行下发。**
+
+**背景：** Prompt 面板由 `prompt_service.list_prompts()` 驱动（`routers/admin.py:163`），Task 3 登记白名单后「开场幕·前置占卜师提示词」自动出现在管理页，**无需任何改动**。需要改的是会话面板：策略单落库后后台看不见，而「能看到它当时凭什么这么解读」正是本设计的核心价值之一。
+
+**Files:**
+- Modify: `backend/services/storage_service.py:175-181`（`list_conversations_admin` 的 SELECT）
+- Modify: `frontend/src/services/adminApi.ts:50-79`（`AdminConvSummary` / `AdminConversation` 类型）
+- Modify: `frontend/src/pages/admin/ConversationsPanel.tsx`（列表徽标 + 详情策略单卡片）
+- Modify: `frontend/src/pages/admin/admin.css`（新样式）
+- Test: `backend/tests/test_admin_router.py`（追加一个用例）
+
+- [ ] **Step 1: Write the failing test**
+
+在 `backend/tests/test_admin_router.py` 末尾追加（沿用该文件已有的 fixture 与调用风格；若其 fixture 名不同，按文件内实际写法适配）：
+
+```python
+def test_admin_conversation_list_exposes_phase(admin_client_and_db):
+    """会话列表带出 phase，后台可一眼看出哪些会话卡在开场幕。"""
+    client, StorageService = admin_client_and_db
+
+    async def seed():
+        from models import Conversation, SessionType
+        await StorageService.save_conversation(Conversation(
+            conversation_id="c_opening", user_id="u1",
+            session_type=SessionType.TAROT, phase="opening",
+        ))
+        await StorageService.save_conversation(Conversation(
+            conversation_id="c_reading", user_id="u1",
+            session_type=SessionType.TAROT, phase="reading",
+            strategy={"user_goal": "求认同", "reading_strategy": "验证式"},
+        ))
+
+    asyncio.run(seed())
+
+    resp = client.get("/api/admin/conversations", headers=ADMIN_HEADERS)
+    assert resp.status_code == 200
+    by_id = {i["conversation_id"]: i for i in resp.json()["items"]}
+    assert by_id["c_opening"]["phase"] == "opening"
+    assert by_id["c_reading"]["phase"] == "reading"
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+```bash
+source venv/bin/activate && cd backend && pytest tests/test_admin_router.py -v -k phase
+```
+Expected: FAIL —— `KeyError: 'phase'`。
+
+- [ ] **Step 3: 列表 SQL 带出 phase**
+
+`backend/services/storage_service.py` 的 `list_conversations_admin`，SELECT 子句加一列（存量行无该字段 → `json_extract` 返回 NULL，用 COALESCE 兜成 'reading'，与模型默认值一致）：
+
+```python
+            async with db.execute(
+                f"""SELECT conversation_id, user_id, updated_at,
+                           json_extract(data,'$.session_type') AS session_type,
+                           json_extract(data,'$.title')        AS title,
+                           json_extract(data,'$.created_at')   AS created_at,
+                           COALESCE(json_extract(data,'$.phase'),'reading') AS phase,
+                           COALESCE(json_array_length(data,'$.messages'),0) AS message_count
+                    FROM conversations {w}
+                    ORDER BY updated_at DESC LIMIT ? OFFSET ?""",
+                params + [limit, offset],
+            ) as cur:
+```
+
+会话**详情**接口返回完整 `Conversation` 对象，`strategy` / `phase` 随 Pydantic 自动带出，**后端无需再改**。
+
+- [ ] **Step 4: Run test to verify it passes**
+
+```bash
+source venv/bin/activate && cd backend && pytest tests/test_admin_router.py -v
+```
+Expected: 全部 passed。
+
+- [ ] **Step 5: 前端类型**
+
+`frontend/src/services/adminApi.ts`，`AdminConvSummary` 加 `phase`，`AdminConversation` 加 `phase` 与 `strategy`：
+
+```typescript
+export interface AdminConvSummary {
+  // …现有字段保持不动…
+  phase?: 'opening' | 'reading';
+}
+
+export interface ReadingBrief {
+  question_topic?: string;
+  user_goal?: string;
+  emotional_intensity?: string;
+  context_summary?: string;
+  desired_takeaway?: string;
+  tool_route?: string;
+  suggested_spread?: string;
+  reading_strategy?: string;
+  pacing?: string;
+}
+
+export interface AdminConversation {
+  // …现有字段保持不动…
+  phase?: 'opening' | 'reading';
+  strategy?: ReadingBrief | null;
+}
+```
+
+- [ ] **Step 6: 列表徽标**
+
+`frontend/src/pages/admin/ConversationsPanel.tsx`，在列表项标题行（约 80 行 `<span className="title">{c.title}</span>` 之后）加相位徽标——只给还在开场幕的会话打标（解读相位是常态，不打标避免视觉噪音）：
+
+```tsx
+                <span className="title">{c.title}</span>
+                {c.phase === 'opening' && <span className="phase-badge">开场幕</span>}
+```
+
+- [ ] **Step 7: 详情页策略单卡片**
+
+同文件，在详情区标题（约 100 行 `<span className="title">{detail.title}</span>`）所在块之后、消息列表之前，插入策略单卡片：
+
+```tsx
+      {detail.strategy && (
+        <div className="strategy-card">
+          <div className="strategy-head">本场策略单（开场读人结论 · 不对用户外露）</div>
+          <dl>
+            {([
+              ['议题', detail.strategy.question_topic],
+              ['目标类型', detail.strategy.user_goal],
+              ['情绪浓度', detail.strategy.emotional_intensity],
+              ['节奏', detail.strategy.pacing],
+              ['背景', detail.strategy.context_summary],
+              ['想带走', detail.strategy.desired_takeaway],
+              ['路线', detail.strategy.tool_route],
+              ['牌阵', detail.strategy.suggested_spread],
+              ['解读策略', detail.strategy.reading_strategy],
+            ] as [string, string | undefined][])
+              .filter(([, v]) => v)
+              .map(([k, v]) => (
+                <div key={k} className="strategy-row">
+                  <dt>{k}</dt>
+                  <dd>{v}</dd>
+                </div>
+              ))}
+          </dl>
+        </div>
+      )}
+```
+
+- [ ] **Step 8: 样式**
+
+`frontend/src/pages/admin/admin.css` 末尾追加（跟随现有后台配色变量；若该文件用的是硬编码色值而非 CSS 变量，改用与相邻规则一致的色值）：
+
+```css
+/* 开场幕徽标 + 策略单卡片 */
+.admin-conversations .phase-badge {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #d9b26a;
+  border: 1px solid rgba(217, 178, 106, 0.4);
+  background: rgba(217, 178, 106, 0.08);
+}
+
+.strategy-card {
+  margin: 12px 0 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(217, 178, 106, 0.28);
+  border-radius: 6px;
+  background: rgba(217, 178, 106, 0.05);
+}
+
+.strategy-card .strategy-head {
+  font-size: 12px;
+  color: #d9b26a;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+
+.strategy-card .strategy-row {
+  display: flex;
+  gap: 10px;
+  padding: 3px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.strategy-card dt {
+  flex: 0 0 68px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.strategy-card dd {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.82);
+}
+```
+
+- [ ] **Step 9: 构建验证**
+
+```bash
+cd frontend && npm run build
+```
+Expected: 构建成功（`npm run lint` 全仓坏，不用）。
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add backend/services/storage_service.py backend/tests/test_admin_router.py frontend/src/services/adminApi.ts frontend/src/pages/admin/ConversationsPanel.tsx frontend/src/pages/admin/admin.css
+git commit -m "feat(admin): 会话列表开场幕徽标 + 详情页策略单查看"
 ```
 
 ---
