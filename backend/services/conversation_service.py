@@ -5,27 +5,29 @@ from models import (
     Conversation, Message, MessageRole, SessionType,
     TarotCard, DrawCardsRequest
 )
+from services import context_service
 from services.storage_service import StorageService
 
 
 class ConversationService:
     """对话管理服务"""
 
-    # 只有塔罗/占星走前置占卜师的开场幕；每日一签/闲聊直接进解读相位
-    OPENING_PHASE_SESSIONS = {SessionType.TAROT, SessionType.ASTROLOGY}
-
     @staticmethod
     async def create_conversation(user_id: str, session_type: SessionType) -> Conversation:
-        """创建新对话"""
+        """创建新对话。
+
+        相位初值只问 context_service（相位的唯一权威）——不在这里另存一份会话类型集合：
+        两份分叉时故障是静默的（会话以 opening 落库、get_phase 却说 reading → 永不交单）。
+        """
         conversation = Conversation(
             conversation_id=f"conv_{uuid.uuid4().hex[:16]}",
             user_id=user_id,
             session_type=session_type,
             title=ConversationService._get_default_title(session_type),
             phase=(
-                "opening"
-                if session_type in ConversationService.OPENING_PHASE_SESSIONS
-                else "reading"
+                context_service.PHASE_OPENING
+                if session_type in context_service.OPENING_PHASE_SESSIONS
+                else context_service.PHASE_READING
             ),
         )
         await StorageService.save_conversation(conversation)

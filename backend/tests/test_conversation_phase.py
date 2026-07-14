@@ -56,6 +56,31 @@ def test_daily_conversation_starts_in_reading_phase(db_env):
         assert conv.phase == "reading", st
 
 
+def test_opening_phase_sessions_has_single_source_of_truth():
+    """相位的唯一权威是 context_service —— conversation_service 不许再存一份。
+
+    两份常量分叉时故障是静默的：会话以 opening 落库、get_phase 却说 reading，
+    于是永远不交单。这里不许它长回来。
+    """
+    from services import context_service
+    from services.conversation_service import ConversationService
+
+    assert not hasattr(ConversationService, "OPENING_PHASE_SESSIONS")
+    assert context_service.OPENING_PHASE_SESSIONS == {
+        SessionType.TAROT, SessionType.ASTROLOGY,
+    }
+
+
+def test_created_phase_agrees_with_get_phase_for_every_session_type(db_env):
+    """落库时写的 phase 与 get_phase 的判定必须一致——这正是常量分叉会打破的不变量。"""
+    from services import context_service
+    from services.conversation_service import ConversationService
+
+    for st in SessionType:
+        conv = asyncio.run(ConversationService.create_conversation("u1", st))
+        assert context_service.get_phase(conv) == conv.phase, st
+
+
 def test_legacy_conversation_without_phase_defaults_to_reading():
     """存量会话的 data JSON 没有 phase 字段 → 反序列化补默认值 reading。
 
