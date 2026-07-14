@@ -336,8 +336,9 @@ class TestAdminDataSafety:
 
 class TestAdminPrompts:
     def test_list_prompts(self, client):
+        from services import prompt_service
         r = client.get("/api/admin/prompts", headers=_admin_headers(client)).json()
-        assert len(r["items"]) == 5
+        assert len(r["items"]) == len(prompt_service.PROMPT_REGISTRY)
         assert all(not p["overridden"] for p in r["items"])
 
     def test_get_save_reset_roundtrip(self, client):

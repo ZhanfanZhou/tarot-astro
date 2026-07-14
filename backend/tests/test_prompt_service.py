@@ -77,12 +77,9 @@ def test_missing_default_raises(ps, monkeypatch, tmp_path):
         ps.get_prompt("tarot_system.md")
 
 
-def test_list_prompts_has_all_five(ps):
+def test_list_prompts_covers_registry(ps):
     names = {p["name"] for p in ps.list_prompts()}
-    assert names == {
-        "tarot_system.md", "astrology_system.md", "notebook_system.md",
-        "daily_oracle_system.md", "daily_journey.md",
-    }
+    assert names == set(ps.PROMPT_REGISTRY)
 
 
 # ---------------------------------------------------------------------------
@@ -118,3 +115,14 @@ def test_daily_render_template_is_prompt_service(ps):
     ps.save_override("daily_oracle_system.md", "DAILY:{nickname}")
     out = daily_service.render_template("daily_oracle_system.md", {"nickname": "小明"})
     assert out == "DAILY:小明"
+
+
+def test_opening_system_prompt_registered_and_loadable():
+    """前置占卜师提示词已登记白名单且默认文件存在（缺失会静默降级成空 prompt，必须挡住）。"""
+    from services import prompt_service
+
+    assert "opening_system.md" in prompt_service.PROMPT_REGISTRY
+    content = prompt_service.get_default("opening_system.md")
+    assert len(content) > 200
+    # 交单工具名必须出现在提示词里，否则模型不知道要调什么
+    assert "submit_reading_brief" in content
