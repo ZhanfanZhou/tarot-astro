@@ -12,20 +12,13 @@ from services.tarot_service import TarotService
 from services.user_service import UserService
 from services.notebook_service import notebook_service
 from services.rate_limit_service import RateLimitService
+from services import context_service, opening_service
 from dependencies import get_current_user, ensure_owner
 import json
-import random
 
 router = APIRouter(prefix="/api/astrology", tags=["astrology"])
 
 gemini_service = GeminiService()
-
-# 预设的开场白模板
-GREETING_TEMPLATES = [
-    "{nickname}！今天有什么想问的？我可以帮你看星座、运势、星盘等任何问题～",
-    "{nickname}，你好呀！✨ 想聊聊你的星座、运势，还是想深入了解你的本命盘？",
-    "嗨，{nickname}！很高兴见到你～ 今天想探索什么呢？星座、塔罗还是星盘分析都可以哦！"
-]
 
 
 async def should_attach_tarot_cards(conversation_id: str) -> bool:
@@ -66,18 +59,15 @@ async def send_message(
         has_assistant_message = any(msg.role == MessageRole.ASSISTANT for msg in conversation.messages)
         
         if not request.content and not has_assistant_message:
-            print("[Astrology Router] 🌟 首次对话，使用预设开场白")
+            print("[Astrology Router] 🌟 首次对话，前置占卜师生成开场白")
             print(f"[Astrology Router] 当前消息数: {len(conversation.messages)}")
-            
-            # 获取用户昵称
-            nickname = "朋友"  # 默认称呼
-            if user and user.profile and user.profile.nickname:
-                nickname = user.profile.nickname
-            
-            # 随机选择一个开场白模板
-            greeting_template = random.choice(GREETING_TEMPLATES)
-            greeting_message = greeting_template.format(nickname=nickname)
-            
+
+            greeting_message = await opening_service.build_greeting(
+                user=user,
+                conversation=conversation,
+                session_type=SessionType.ASTROLOGY,
+            )
+
             print(f"[Astrology Router] 开场白: {greeting_message}")
             
             # 生成流式响应
@@ -112,6 +102,22 @@ async def send_message(
                 request.content
             )
 
+        # 守卫第 3 层：强制交单也失败 → 兜底翻 phase，保证不卡死在开场幕
+        if opening_service.should_hard_exit(conversation):
+            conversation = await opening_service.hard_exit_to_reading(conversation)
+
+        phase = context_service.get_phase(conversation)
+        force_brief = opening_service.should_force_brief(conversation)  # 守卫第 2 层
+        relationship_block = ""
+        if phase == context_service.PHASE_OPENING:
+            meta = await context_service.build_relationship_meta(
+                conversation.user_id, conversation.conversation_id
+            )
+            meta["nickname"] = (
+                user.profile.nickname if user and user.profile and user.profile.nickname else "朋友"
+            )
+            relationship_block = context_service.render_relationship_block(meta)
+
         # 流式生成AI回复（使用Agent Loop）
         async def generate():
             full_text_response = ""
@@ -121,7 +127,12 @@ async def send_message(
                 """执行函数调用并返回结果"""
                 print(f"\n[Function Executor] 执行函数: {func_name}")
                 print(f"[Function Executor] 参数: {func_args}")
-                
+
+                if func_name == "submit_reading_brief":
+                    # 纯后台工具：落库策略单 + 翻相位，不产生任何前端事件
+                    await opening_service.save_strategy(conversation, dict(func_args))
+                    return {"success": True}
+
                 if func_name == "get_astrology_chart":
                     # 获取星盘数据
                     # 检查用户资料是否完整
@@ -260,10 +271,14 @@ async def send_message(
             
             # 使用Agent Loop处理（函数执行在loop内部）
             async for event in gemini_service.stream_response(
-                conversation.messages, 
+                conversation.messages,
                 user,
                 session_type=SessionType.ASTROLOGY,
-                function_executor=execute_function
+                function_executor=execute_function,
+                phase=phase,
+                strategy=conversation.strategy,
+                relationship_block=relationship_block,
+                force_brief=force_brief,
             ):
                 if "content" in event:
                     # 流式输出文本内容

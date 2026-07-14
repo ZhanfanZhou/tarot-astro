@@ -11,20 +11,13 @@ from services.gemini_service import GeminiService
 from services.tarot_service import TarotService
 from services.notebook_service import notebook_service
 from services.rate_limit_service import RateLimitService
+from services import context_service, opening_service
 from dependencies import get_current_user, ensure_owner
 import json
-import random
 
 router = APIRouter(prefix="/api/tarot", tags=["tarot"])
 
 gemini_service = GeminiService()
-
-# 预设的开场白模板
-GREETING_TEMPLATES = [
-    "{nickname}！欢迎来到塔罗的神秘世界～ 今天有什么想问的吗？无论是爱情、事业还是人生困惑，塔罗都会为你指引方向。",
-    "{nickname}，你好呀！✨ 塔罗牌已经准备好了，想探索什么问题呢？感情、工作、还是内心的迷茫？",
-    "嗨，{nickname}！很高兴见到你～ 让塔罗牌为你揭示答案吧！你可以问我关于爱情、事业、决策等任何问题哦！"
-]
 
 
 async def should_attach_tarot_cards(conversation_id: str) -> bool:
@@ -65,18 +58,15 @@ async def send_message(
         has_assistant_message = any(msg.role == MessageRole.ASSISTANT for msg in conversation.messages)
         
         if not request.content and not has_assistant_message:
-            print("[Tarot Router] 🌟 首次对话，使用预设开场白")
+            print("[Tarot Router] 🌟 首次对话，前置占卜师生成开场白")
             print(f"[Tarot Router] 当前消息数: {len(conversation.messages)}")
-            
-            # 获取用户昵称
-            nickname = "朋友"  # 默认称呼
-            if user and user.profile and user.profile.nickname:
-                nickname = user.profile.nickname
-            
-            # 随机选择一个开场白模板
-            greeting_template = random.choice(GREETING_TEMPLATES)
-            greeting_message = greeting_template.format(nickname=nickname)
-            
+
+            greeting_message = await opening_service.build_greeting(
+                user=user,
+                conversation=conversation,
+                session_type=SessionType.TAROT,
+            )
+
             print(f"[Tarot Router] 开场白: {greeting_message}")
             
             # 生成流式响应
@@ -110,6 +100,22 @@ async def send_message(
             request.content
         )
 
+        # 守卫第 3 层：强制交单也失败 → 兜底翻 phase，保证不卡死在开场幕
+        if opening_service.should_hard_exit(conversation):
+            conversation = await opening_service.hard_exit_to_reading(conversation)
+
+        phase = context_service.get_phase(conversation)
+        force_brief = opening_service.should_force_brief(conversation)  # 守卫第 2 层
+        relationship_block = ""
+        if phase == context_service.PHASE_OPENING:
+            meta = await context_service.build_relationship_meta(
+                conversation.user_id, conversation.conversation_id
+            )
+            meta["nickname"] = (
+                user.profile.nickname if user and user.profile and user.profile.nickname else "朋友"
+            )
+            relationship_block = context_service.render_relationship_block(meta)
+
         # 流式生成AI回复（使用Agent Loop）
         async def generate():
             full_text_response = ""
@@ -119,7 +125,12 @@ async def send_message(
                 """执行函数调用并返回结果"""
                 print(f"\n[Function Executor] 执行函数: {func_name}")
                 print(f"[Function Executor] 参数: {func_args}")
-                
+
+                if func_name == "submit_reading_brief":
+                    # 纯后台工具：落库策略单 + 翻相位，不产生任何前端事件
+                    await opening_service.save_strategy(conversation, dict(func_args))
+                    return {"success": True}
+
                 if func_name == "draw_tarot_cards":
                     # 抽塔罗牌（这个函数只需要返回成功，实际抽牌由前端处理）
                     return {
@@ -267,7 +278,11 @@ async def send_message(
                 user,
                 session_type=conversation.session_type,
                 function_executor=execute_function,
-                system_prompt_override=system_prompt_override
+                system_prompt_override=system_prompt_override,
+                phase=phase,
+                strategy=conversation.strategy,
+                relationship_block=relationship_block,
+                force_brief=force_brief,
             ):
                 if "content" in event:
                     # 流式输出文本内容
