@@ -67,7 +67,23 @@
 .admin-conv-list li.active { border-color: #cfa94a; }
 .admin-conv-list .row1 { display: flex; justify-content: space-between; gap: 8px; }
 .admin-conv-list .title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-conv-list .row1-tags { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .admin-conv-list .row2 { margin-top: 4px; }
+/* 开场幕徽标:解读相位是常态不打标,仅开场幕提示"策略单尚未/正在形成" */
+.phase-badge {
+  font-size: 11px; color: #cfa94a; border: 1px solid #6b5a2a;
+  border-radius: 4px; padding: 0 5px; line-height: 1.6; white-space: nowrap;
+}
+/* 策略单卡片:开场读人交付物,古董金调,克制,置于消息列表之前 */
+.strategy-brief {
+  background: #1c1926; border: 1px solid #4a4358; border-radius: 8px;
+  padding: 10px 14px; margin-bottom: 12px;
+}
+.strategy-brief-title { color: #cfa94a; font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+.strategy-brief dl { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.strategy-brief-row { display: flex; gap: 10px; font-size: 13px; line-height: 1.6; }
+.strategy-brief-row dt { color: #9a94a8; flex-shrink: 0; width: 60px; }
+.strategy-brief-row dd { margin: 0; color: #d8d4c8; }
 .admin-conv-detail { flex: 1.4; min-width: 0; }
 .admin-conv-detail .messages { display: flex; flex-direction: column; gap: 10px; }
 .admin-conv-detail .msg { background: #1c1926; border: 1px solid #2c2838; border-radius: 8px; padding: 10px 12px; }

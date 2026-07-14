@@ -58,6 +58,7 @@ export interface AdminConvSummary {
   username: string | null;
   nickname: string | null;
   user_type: string | null;
+  phase?: 'opening' | 'reading';
 }
 
 export interface AdminMessage {
@@ -65,6 +66,19 @@ export interface AdminMessage {
   content: string;
   timestamp?: string;
   tarot_cards?: Array<{ card_id: number; card_name: string; reversed: boolean }> | null;
+}
+
+// 前置占卜师读人产出的策略单（九字段，均可选：字段缺失即当场读人未产出该项）。
+export interface ReadingBrief {
+  question_topic?: string;
+  user_goal?: string;
+  emotional_intensity?: string;
+  context_summary?: string;
+  desired_takeaway?: string;
+  tool_route?: string;
+  suggested_spread?: string;
+  reading_strategy?: string;
+  pacing?: string;
 }
 
 export interface AdminConversation {
@@ -75,6 +89,8 @@ export interface AdminConversation {
   created_at: string;
   updated_at: string;
   messages: AdminMessage[];
+  phase?: 'opening' | 'reading';
+  strategy?: ReadingBrief | null;
 }
 
 export interface AdminUser {

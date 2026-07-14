@@ -333,6 +333,27 @@ class TestAdminDataSafety:
         assert r["total"] == 0
         assert r["items"] == []
 
+    def test_conversations_include_phase(self, client):
+        """列表项带 phase：opening 会话回 'opening'，reading+strategy 会话回 'reading'。"""
+        async def _run():
+            await StorageService.save_user(User(
+                user_id="user_phase", user_type=UserType.REGISTERED, username="carol"))
+            await StorageService.save_conversation(Conversation(
+                conversation_id="c_opening", user_id="user_phase",
+                session_type=SessionType.TAROT, title="开场中",
+                updated_at="2026-07-05T10:00:00", phase="opening"))
+            await StorageService.save_conversation(Conversation(
+                conversation_id="c_reading", user_id="user_phase",
+                session_type=SessionType.TAROT, title="已交接",
+                updated_at="2026-07-06T10:00:00", phase="reading",
+                strategy={"question_topic": "感情", "reading_strategy": "稳"}))
+        asyncio.run(_run())
+
+        r = client.get("/api/admin/conversations", headers=_admin_headers(client)).json()
+        by_id = {c["conversation_id"]: c for c in r["items"]}
+        assert by_id["c_opening"]["phase"] == "opening"
+        assert by_id["c_reading"]["phase"] == "reading"
+
 
 class TestAdminPrompts:
     def test_list_prompts(self, client):
