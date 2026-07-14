@@ -181,16 +181,19 @@ class GeminiService:
     )
 
     def __init__(self):
-        # 解读相位工具集：全部工具 + 交单工具（后者用于中途改判）
+        # 基础工具集（无交单工具）——每日一签/心灵奇旅没有开场幕，永远不该交单，
+        # 给它们看见这把工具只会白白浪费一次 loop 迭代（拿到「未知函数」）
         all_tools = [
             self.TOOL_DRAW_TAROT_CARDS,
             self.TOOL_GET_ASTROLOGY_CHART,
             self.TOOL_REQUEST_USER_PROFILE,
             self.TOOL_READ_NOTEBOOK,
-            self.TOOL_SUBMIT_READING_BRIEF,
         ]
-        self.tarot_tools = [Tool(function_declarations=all_tools)]
-        self.astrology_tools = [Tool(function_declarations=all_tools)]
+        self.daily_tools = [Tool(function_declarations=all_tools)]
+        # 解读相位工具集：基础工具 + 交单工具（后者用于中途改判）
+        reading_tools = all_tools + [self.TOOL_SUBMIT_READING_BRIEF]
+        self.tarot_tools = [Tool(function_declarations=reading_tools)]
+        self.astrology_tools = [Tool(function_declarations=reading_tools)]
         # 开场相位：只有交单工具——看不见抽牌/星盘，机械杜绝「没读人先抽牌」
         self.opening_tools = [Tool(function_declarations=[self.TOOL_SUBMIT_READING_BRIEF])]
 
@@ -201,6 +204,17 @@ class GeminiService:
             "top_k": 40,
             "max_output_tokens": 8192,
         }
+
+    def _select_tools(self, session_type: SessionType, for_opening: bool = False) -> List[Tool]:
+        """选工具集：会话类型优先（daily/chat 无开场幕、不交单），再看相位。"""
+        if session_type in (SessionType.DAILY, SessionType.CHAT):
+            # 与改动前一致：含 read_divination_notebook;模板已禁止再抽牌
+            return self.daily_tools
+        if for_opening:
+            return self.opening_tools
+        if session_type == SessionType.ASTROLOGY:
+            return self.astrology_tools
+        return self.tarot_tools
 
     @staticmethod
     def build_force_brief_tool_config() -> Dict[str, Any]:
@@ -367,13 +381,7 @@ class GeminiService:
 
         def _build_model(for_opening: bool, guard: bool):
             """按相位挑工具集建模型。开场相位只给交单工具；守卫开启时叠加 mode=ANY。"""
-            if for_opening:
-                tool_set = self.opening_tools
-            elif session_type in (SessionType.TAROT, SessionType.DAILY):
-                # daily 与 tarot 同集:含 read_divination_notebook;模板已禁止再抽牌
-                tool_set = self.tarot_tools
-            else:
-                tool_set = self.astrology_tools
+            tool_set = self._select_tools(session_type, for_opening)
 
             kwargs = {}
             if for_opening and guard:
@@ -551,8 +559,8 @@ class GeminiService:
             function_result: 函数执行结果
             strategy: 本场策略单（抽牌后的解读续跑仍带策略单；恒为解读相位）
         """
-        # 选择工具集(daily 与 tarot 同集:含 read_divination_notebook;模板已禁止再抽牌)
-        tools = self.tarot_tools if session_type in (SessionType.TAROT, SessionType.DAILY) else self.astrology_tools
+        # 选择工具集：续跑恒为解读相位（daily/chat 不含交单工具）
+        tools = self._select_tools(session_type)
 
         # 创建模型实例
         model = genai.GenerativeModel(

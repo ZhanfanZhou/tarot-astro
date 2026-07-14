@@ -40,6 +40,45 @@ def test_reading_tools_contain_submit_reading_brief_for_midway_revision():
     assert "draw_tarot_cards" in names
 
 
+def test_daily_tools_exclude_submit_reading_brief():
+    """每日一签/心灵奇旅永远不该交单：工具集与改动前一字不差，不新增暴露面。"""
+    from services.gemini_service import GeminiService
+
+    svc = GeminiService()
+    names = {
+        fd.name
+        for tool in svc.daily_tools
+        for fd in tool.function_declarations
+    }
+    assert "submit_reading_brief" not in names
+    assert names == {
+        "draw_tarot_cards",
+        "get_astrology_chart",
+        "request_user_profile",
+        "read_divination_notebook",
+    }
+
+
+def test_daily_session_gets_daily_tools_not_tarot_tools(monkeypatch):
+    """选工具集时 DAILY/CHAT 走 daily_tools——锁住选择逻辑，不只是锁属性。"""
+    from services import gemini_service as gs
+
+    for session_type in (SessionType.DAILY, SessionType.CHAT):
+        factory = _FakeModelFactory([[_FakeResponse([_FakePart(text="今日宜静。")])]])
+        monkeypatch.setattr(gs.genai, "GenerativeModel", factory)
+
+        svc = gs.GeminiService()
+        _run(svc.stream_response(
+            messages=[Message(role=MessageRole.USER, content="今天怎么样")],
+            user=None,
+            session_type=session_type,
+            system_prompt_override="（日运提示词）",
+        ))
+
+        assert "submit_reading_brief" not in factory.models[0]["tools"]
+        assert "draw_tarot_cards" in factory.models[0]["tools"]
+
+
 def test_submit_reading_brief_schema_has_nine_fields():
     from services.gemini_service import GeminiService
 
