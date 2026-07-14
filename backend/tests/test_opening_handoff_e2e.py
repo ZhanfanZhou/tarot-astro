@@ -532,6 +532,60 @@ def test_handoff_history_has_no_two_consecutive_user_turns(env, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# 3b. 守卫第 2 层（router 侧接线）：澄清预算用尽 → 本轮 mode=ANY 强制交单
+# ---------------------------------------------------------------------------
+
+def test_force_brief_guard_reaches_model_as_any_mode_tool_config(env, monkeypatch):
+    """用户连发含糊消息到预算上限 → 传给 Gemini 的 tool_config 必须是 mode=ANY 且只许交单。
+
+    补测理由：should_force_brief 有单测、build_force_brief_tool_config 有单测，但
+    「router 真的把 force_brief 传下去、模型因此在解码层被逼着只能交单」这段**接线**
+    此前只在第 3 层（hard_exit）上做过 e2e。第 2 层是防「开场幕无限澄清」的主闸门。
+    """
+    import config
+
+    # 库里已有 (FORCE_BRIEF - 1) 条含糊的用户消息，加上本轮这条正好把预算用尽
+    history = _greeting_and_user(
+        *[f"不知道欸{i}" for i in range(config.OPENING_FORCE_BRIEF_AFTER_USER_MSGS - 1)]
+    )
+    conv = _seed_conversation("opening", history)
+
+    script = [
+        # 守卫上膛后，模型在解码层已无法输出纯文本 —— 只能交单
+        [_FakeResponse([_FakePart(function_call=_FakeFunctionCall(
+            "submit_reading_brief", BRIEF_ARGS))])],
+        # 交单 → 同轮移交给解读 Agent
+        [_FakeResponse([_FakePart(text=TRANSITION)])],
+    ]
+    factory = _install_gemini(monkeypatch, script)
+
+    resp = env.post("/api/tarot/message", json={
+        "conversation_id": conv.conversation_id,
+        "content": "还是说不上来",
+    })
+    assert resp.status_code == 200
+
+    # —— 核心断言：守卫真的到达了模型（不是只在 service 里算了个 bool） ——
+    from services.gemini_service import GeminiService
+
+    assert factory.models[0]["tool_config"] == GeminiService.build_force_brief_tool_config()
+    fcc = factory.models[0]["tool_config"]["function_calling_config"]
+    assert fcc["mode"] == "ANY"
+    assert fcc["allowed_function_names"] == ["submit_reading_brief"]
+    # 允许的函数必须真在本轮工具集里，否则 mode=ANY 指名一个不存在的函数 = API 报错
+    assert factory.models[0]["tools"] == ["submit_reading_brief"]
+
+    # —— 移交后的解读模型绝不能继续带着守卫（否则解读 Agent 也被逼着只能交单） ——
+    assert factory.models[1]["tool_config"] is None
+    assert "draw_tarot_cards" in factory.models[1]["tools"]
+
+    # —— 守卫达成了它的目的：本轮收到策略单，会话离开开场幕 ——
+    saved = _get_conversation(conv.conversation_id)
+    assert saved.phase == "reading"
+    assert saved.strategy == BRIEF_ARGS
+
+
+# ---------------------------------------------------------------------------
 # 4. 守卫第 3 层（router 侧接线）：开场超预算 → 兜底翻相位，不卡死
 # ---------------------------------------------------------------------------
 
