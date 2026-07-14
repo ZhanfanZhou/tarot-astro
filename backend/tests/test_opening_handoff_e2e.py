@@ -416,6 +416,43 @@ def test_handoff_preserves_full_history_including_last_user_message(env, monkeyp
     assert "本场策略单" in flat[0][1] and "求认同" in flat[0][1]
 
 
+def test_handoff_history_has_no_two_consecutive_user_turns(env, monkeypatch):
+    """移交后角色必须交替：history 以 model 收尾，紧接着的移交指令（user）才不会撞车。
+
+    移交时 history 的最后一条是用户的澄清回答（user），而移交指令又是一个 user turn
+    —— 连续两个 user，Gemini 可能把移交指令当成用户说的话来回应（「好的，我这就开始」），
+    或行为不稳定。本文件的既有惯例就是补一条 model 确认语来保持交替（系统提示词后的
+    「我明白了。」、抽牌结果后的「我看到了…」）。
+    """
+    last_user_line = "上周三他突然不回我消息了"
+    conv = _seed_conversation("opening", _greeting_and_user("我想问感情"))
+
+    script = [
+        [_FakeResponse([_FakePart(function_call=_FakeFunctionCall(
+            "submit_reading_brief", BRIEF_ARGS))])],
+        [_FakeResponse([_FakePart(text=TRANSITION)])],
+    ]
+    factory = _install_gemini(monkeypatch, script)
+
+    resp = env.post("/api/tarot/message", json={
+        "conversation_id": conv.conversation_id, "content": last_user_line,
+    })
+    assert resp.status_code == 200
+
+    history = factory.chats[1].history
+    roles = [m["role"] for m in history]
+
+    # 1) history 内部无连续两个 user
+    assert not any(a == b == "user" for a, b in zip(roles, roles[1:])), roles
+    # 2) history 以 model 收尾 —— 下一条（移交指令，user）接上去仍是交替
+    assert roles[-1] == "model", roles
+    # 3) 移交指令确实是紧随其后的那个 user turn
+    assert isinstance(factory.chats[1].sent[0], str)
+    # 4) 为了交替而补的 model 确认语，不能把用户最后那句澄清挤掉
+    flat = [(m["role"], part.get("text", "")) for m in history for part in m["parts"]]
+    assert ("user", last_user_line) in flat
+
+
 # ---------------------------------------------------------------------------
 # 4. 守卫第 3 层（router 侧接线）：开场超预算 → 兜底翻相位，不卡死
 # ---------------------------------------------------------------------------

@@ -499,6 +499,16 @@ class GeminiService:
                             phase=phase,
                             strategy=strategy,
                         )
+                        # 保持角色交替：history 的最后一条是用户的澄清回答（user），
+                        # 而紧接着要发的移交指令又是一个 user turn —— 连续两个 user 会让
+                        # Gemini 可能把移交指令当成用户说的话来回应（「好的，我这就开始」）。
+                        # 补一条 model 确认语收口（同本文件既有惯例：系统提示词后的「我明白了。」、
+                        # 抽牌结果后的「我看到了…」）。用户最后那句澄清仍原样留在 history 里。
+                        if handoff_messages and handoff_messages[-1]["role"] == "user":
+                            handoff_messages.append({
+                                "role": "model",
+                                "parts": [{"text": "（策略单已提交。）"}],
+                            })
                         model, tools = _build_model(False, False)
                         chat = model.start_chat(history=handoff_messages)
                         last_message = (
