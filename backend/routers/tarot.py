@@ -52,11 +52,16 @@ async def send_message(
 
         # 用户即当前登录身份（对话归属已校验）
         user = current_user
-        
-        # 🎯 检测首次对话（空消息）：直接返回预设开场白
+
+        # 用量控制：任何会触发 LLM 调用的路径都要先扣额度——开场白也是一次真实
+        # LLM 调用（前置占卜师），若放它过去，「建会话 → 发空消息拿开场白」可无限白嫖。
+        # 放在所有分支之前，保证一次请求恰好扣一次。
+        await RateLimitService.check_and_consume(current_user)
+
+        # 🎯 检测首次对话（空消息）：由前置占卜师生成开场白
         # 改进的判断逻辑：检查是否已经有 assistant 消息
         has_assistant_message = any(msg.role == MessageRole.ASSISTANT for msg in conversation.messages)
-        
+
         if not request.content and not has_assistant_message:
             print("[Tarot Router] 🌟 首次对话，前置占卜师生成开场白")
             print(f"[Tarot Router] 当前消息数: {len(conversation.messages)}")
@@ -90,9 +95,6 @@ async def send_message(
                 media_type="text/event-stream"
             )
         
-        # 用量控制：真正触发 LLM 解读前按身份扣减额度（开场白分支已提前返回，不计）
-        await RateLimitService.check_and_consume(current_user)
-
         # 添加用户消息
         conversation = await ConversationService.add_message(
             request.conversation_id,

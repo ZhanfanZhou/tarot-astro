@@ -70,9 +70,11 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(60 * 24 * 60)))
 
 # ── 用量控制 ────────────────────────────────────────────────────────────────
-# 按 token 身份每天可发起的 LLM 解读次数（开场白/缓存回放不计）。基于身份计数，
-# 不做 IP 限流；游客可清缓存重置额度，故游客额度宜小、并把主要额度绑定到注册账号。
-GUEST_DAILY_MESSAGE_LIMIT = int(os.getenv("GUEST_DAILY_MESSAGE_LIMIT", "10"))
+# 按 token 身份每天可发起的 LLM 调用次数（含开场白——它也是一次真实 LLM 调用）。
+# 基于身份计数，不做 IP 限流；游客可清缓存重置额度，故游客额度宜小、并把主要额度
+# 绑定到注册账号。游客 10 → 15：补偿开场幕新增的开销（开场白 1 次 + 澄清轮），
+# 保证游客仍能完整走完一场占卜。注册用户 50 本就宽松，不动。
+GUEST_DAILY_MESSAGE_LIMIT = int(os.getenv("GUEST_DAILY_MESSAGE_LIMIT", "15"))
 USER_DAILY_MESSAGE_LIMIT = int(os.getenv("USER_DAILY_MESSAGE_LIMIT", "50"))
 
 # ── 后台管理 ────────────────────────────────────────────────────────────────
