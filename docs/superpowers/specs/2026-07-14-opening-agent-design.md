@@ -60,7 +60,7 @@ reading 相位:
 - 任意时刻单一声音；每场会话最多一次移交，多付一次模型往返（仅移交轮）。
 - 前端零改动：SSE 契约、抽牌 function_call 事件、"空消息触发开场白"的约定全部不变。
 - 前置 Agent 只活在开场，不回场。中途换新问题时信任已建立、解读 Agent 有全部语境，由它重调 `submit_reading_brief` 覆盖策略单。
-- 实现基础已核实：`chat = model.start_chat(history=…)` 是纯客户端状态（无服务端会话），系统提示词拼在 history 首条消息里——同轮切换 = 用新提示词+新工具集重建 chat 并回放历史，注意 function_call/function_response 的配对完整。
+- 实现基础已核实：`chat = model.start_chat(history=…)` 是纯客户端状态（无服务端会话），系统提示词拼在 history 首条消息里——同轮切换 = 用新提示词+新工具集重建 chat 并回放历史。**且 `_format_messages_for_gemini()`（gemini_service.py:204-243）把历史消息全部转为纯文本，function_call/function_response 从不进入历史 → 重建 chat 不涉及工具调用配对，原「SDK 兼容性」风险已消除。**
 
 ## 5. 相位状态机与存储
 
@@ -74,7 +74,7 @@ class Conversation(BaseModel):
 ```
 
 - **`phase` 默认 `"reading"` 就是存量迁移**：conversations 表是文档型存储（整对象 JSON 在 data 列），存量行没有 phase 字段，Pydantic 读出时自动补默认值 → 全部老会话确定性路由到解读 Agent，行为与现状一致。无回填脚本、无哨兵值、无上线顺序约束。
-- 新会话在 `routers/conversations.py` 创建时显式写入：塔罗/占星类型 `phase="opening"`；每日一签/闲聊 `phase="reading"`（前置 Agent 只服务塔罗与占星入口）。
+- 新会话在 `services/conversation_service.py` 的 `create_conversation()` 中按 session_type 写入初值：塔罗/占星 `phase="opening"`；每日一签/闲聊 `phase="reading"`（前置 Agent 只服务塔罗与占星入口）。router 只透传，不参与判断。
 - 状态机单向一次：`opening → reading`，触发者为 `submit_reading_brief` 执行成功或守卫兜底（§7 第 3 层）。改判只覆盖 `strategy`，不动 `phase`。
 - `strategy` 为 None 时策略单渲染器返回空串，解读 Agent 表现同今天——**策略单是增强项，不是通行证**。
 - 后台按策略字段查询/统计用 `json_extract(data,'$.strategy.user_goal')`（storage_service 已有先例），不加影子列。
@@ -155,7 +155,7 @@ COUNT=0 → 新客变体。排除空会话防止"点开又关"刷高次数——
 | reading_strategy | 验证式 / 决策式 / 探索式 |
 | pacing | 快（少铺垫） / 深（愿意聊） |
 
-字段非法 → 工具返回错误让模型重试一次；再失败截断收录合法字段。
+必填字段（question_topic / user_goal / emotional_intensity / reading_strategy）由 Gemini 的 `required` schema 保证。**不做额外字段校验**：缺失字段由渲染器直接跳过（`render_brief_block`），不会造成故障——加校验层是过度设计。
 
 ## 10. 改动面清单
 
@@ -191,9 +191,9 @@ COUNT=0 → 新客变体。排除空会话防止"点开又关"刷高次数——
 
 | 风险 | 缓解 |
 |---|---|
-| 移交前后口吻断裂 | 同模型 + 人设段复写 + 联调盲测 |
+| 移交前后口吻断裂 | 同模型 + 人设段复写 + 联调盲测（**当前头号风险**） |
 | 模型不交单 / 交单时机差 | 小提示词单一职责 + 三层守卫 |
-| 跨 chat 重建的 SDK 兼容性 | 实现期第一验证点，有退化方案（§11） |
+| ~~跨 chat 重建的 SDK 兼容性~~ | **已消除**：历史全为纯文本，无工具调用配对问题（§4） |
 | 开场白 LLM 延迟/失败 | 短输出 + 模板降级 |
 | 提示词文案不达"无人机感"标准 | 管理页在线编辑热加载，联调快速迭代 |
 
