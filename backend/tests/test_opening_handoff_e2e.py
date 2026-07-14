@@ -340,6 +340,66 @@ def test_opening_submits_brief_then_hands_off_and_draws(env, monkeypatch, sessio
 
 
 # ---------------------------------------------------------------------------
+# 1b. 澄清轮（开场幕的正常路径）：不交单，只回一个叙事性问题
+# ---------------------------------------------------------------------------
+
+def test_opening_clarifying_turn_stays_in_opening_and_persists_reply(env, monkeypatch):
+    """前置 Agent 不交单、只追问一句 → 留在开场相位，回复照常落库，绝不误翻相位。
+
+    这是 0–2 轮澄清预算的**正常路径**（守卫尚未触发），此前一条测试都没有：
+    只测了「交单/移交」和「超预算兜底」两个端点，中间这段最常走的路反而是盲区。
+    """
+    conv = _seed_conversation("opening", [
+        Message(role=MessageRole.ASSISTANT, content="坐吧，阿岚。今天想聊些什么？"),
+    ])
+
+    question = "你说「乱」——是事情本身乱，还是你心里乱？"
+    script = [[_FakeResponse([_FakePart(text=question)])]]
+    factory = _install_gemini(monkeypatch, script)
+
+    resp = env.post("/api/tarot/message", json={
+        "conversation_id": conv.conversation_id,
+        "content": "最近有点乱，不知道从哪说起",
+    })
+    assert resp.status_code == 200
+    events, done = _sse(resp.text)
+
+    # —— 单模型、单 chat：没交单就没有移交 ——
+    assert len(factory.models) == 1
+    assert len(factory.chats) == 1
+    # 仍是开场工具集，且守卫未上膛（预算没用尽，不该强制交单）
+    assert factory.models[0]["tools"] == ["submit_reading_brief"]
+    assert factory.models[0]["tool_config"] is None
+
+    # —— 追问正常流式吐给用户，且没有任何工具事件外泄 ——
+    assert _text(events) == question
+    assert not any("draw_cards" in e or "function_call" in e for e in events)
+    assert done
+
+    # —— 相位/策略单纹丝不动，assistant 追问已落库 ——
+    saved = _get_conversation(conv.conversation_id)
+    assert saved.phase == "opening"
+    assert saved.strategy is None
+    assert saved.messages[-1].role == MessageRole.ASSISTANT
+    assert saved.messages[-1].content == question
+    assert saved.messages[-2].role == MessageRole.USER
+
+    # —— 下一轮仍走开场提示词：用户回答追问后，系统提示词依旧是开场幕那份 ——
+    factory2 = _install_gemini(monkeypatch, [[_FakeResponse([_FakePart(text="嗯，继续说。")])]])
+    resp2 = env.post("/api/tarot/message", json={
+        "conversation_id": conv.conversation_id,
+        "content": "心里乱吧",
+    })
+    assert resp2.status_code == 200
+
+    assert factory2.models[0]["tools"] == ["submit_reading_brief"]
+    system_text = factory2.chats[0].history[0]["parts"][0]["text"]
+    assert "关系上下文" in system_text          # 开场幕提示词（含关系块）
+    assert "本场策略单" not in system_text      # 而不是解读相位那份
+    assert _get_conversation(conv.conversation_id).phase == "opening"
+
+
+# ---------------------------------------------------------------------------
 # 2. 存量会话：解读相位不移交
 # ---------------------------------------------------------------------------
 
