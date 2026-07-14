@@ -266,3 +266,39 @@ def test_build_reading_prompt_without_strategy_is_base_plus_user_context():
     assert prompt.startswith("BASE")
     assert "小夏" in prompt
     assert "本场策略单" not in prompt
+
+
+def test_build_reading_prompt_with_strategy_appends_handoff_constraints():
+    """移交后必须压掉基础提示词里「先欢迎用户」「意图模糊则参数化澄清」两条指示。
+
+    tarot_system.md / astrology_system.md 仍在命令「你先用占卜者的语气欢迎他」和
+    「如用户说'看下运势'→ 澄清要看哪方面？时间跨度多大？」——开场幕已经把这两件事
+    做完了（且后者正是设计要消灭的填表式澄清）。不压掉 = 占卜师二次欢迎、重问旧问题。
+    """
+    from services import context_service
+
+    prompt = context_service.build_reading_prompt(
+        base_prompt="BASE", user_context="",
+        strategy={"user_goal": "求认同", "reading_strategy": "验证式"},
+    )
+    assert "本场策略单" in prompt
+
+    handoff = prompt.split("本场策略单", 1)[1]  # 接场约束必须在策略单之后
+    assert "接场" in handoff
+    assert "不要再欢迎用户" in handoff
+    assert "已失效" in handoff                 # 显式宣告基础提示词的相关指示作废
+    assert "时间跨度" in handoff               # 点名要压掉的那条参数化澄清
+    assert "submit_reading_brief" in handoff   # 只在彻底换议题时才重新交单
+
+
+def test_build_reading_prompt_legacy_conversation_has_no_handoff_constraints():
+    """存量会话（strategy=None）零影响：不追加任何接场约束，行为与改动前完全一致。"""
+    from services import context_service
+
+    prompt = context_service.build_reading_prompt(
+        base_prompt="BASE", user_context="<用户资料>昵称：小夏", strategy=None,
+    )
+    assert "接场" not in prompt
+    assert "不要再欢迎用户" not in prompt
+    assert "submit_reading_brief" not in prompt
+    assert prompt == "BASE\n\n<用户资料>昵称：小夏"

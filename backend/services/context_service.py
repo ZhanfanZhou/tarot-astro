@@ -152,14 +152,40 @@ def build_opening_prompt(
     return "".join(parts)
 
 
+# 接场约束：只在「开场幕真的跑过」（strategy 非空）时追加。
+#
+# tarot_system.md / astrology_system.md 是给「从零开始的占卜师」写的，里面仍命令
+# 「首次对话先用占卜者的语气欢迎他」和「意图模糊时参数化澄清（哪方面？时间跨度？）」。
+# 移交之后这两条都已经由开场幕做完了——而后者恰恰是开场幕要消灭的填表式澄清。
+# 不压掉就会二次欢迎、重问旧问题。约束从这里注入，两份提示词本身不动（管理页可在线
+# 编辑它们，改坏了也波及不到接场逻辑）。
+_HANDOFF_INSTRUCTION = (
+    "\n\n# <接场>（本场已由前置占卜师完成开场读人，你是同一个占卜师，中途接手）\n"
+    "1. 开场、迎接、澄清都已经完成了。不要再欢迎用户，不要重问已经问过的问题，"
+    "直接接着往下走。\n"
+    "2. 上面系统提示词里「首次对话先用占卜者的语气欢迎他」，以及「意图模糊时先参数化"
+    "澄清（问要看哪方面、时间跨度多大）」这两条指示，在本场已失效——忽略它们。"
+    "（解读过程中与用户保持连接、收集反馈仍然照做。）\n"
+    "3. `submit_reading_brief` 只在用户彻底更换了新议题时才重新调用；"
+    "正常解读过程中不要调用它。"
+)
+
+
 def build_reading_prompt(
     base_prompt: str,
     user_context: str,
     strategy: Optional[dict],
 ) -> str:
-    """解读相位系统提示词 = 现有系统提示词 + 用户资料 + 策略单块（可空）。"""
+    """解读相位系统提示词 = 现有系统提示词 + 用户资料 + 策略单块 [+ 接场约束]。
+
+    strategy 为空（存量会话 / 守卫兜底）→ 不追加接场约束，表现与开场幕上线前一致。
+    """
     prompt = base_prompt
     if user_context:
         prompt += f"\n\n{user_context}"
-    prompt += render_brief_block(strategy)
+
+    brief_block = render_brief_block(strategy)
+    prompt += brief_block
+    if brief_block:
+        prompt += _HANDOFF_INSTRUCTION
     return prompt
