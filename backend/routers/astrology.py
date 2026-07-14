@@ -12,7 +12,7 @@ from services.tarot_service import TarotService
 from services.user_service import UserService
 from services.notebook_service import notebook_service
 from services.rate_limit_service import RateLimitService
-from services import context_service, opening_service
+from services import opening_service
 from dependencies import get_current_user, ensure_owner
 import json
 
@@ -104,21 +104,10 @@ async def send_message(
                 request.content
             )
 
-        # 守卫第 3 层：强制交单也失败 → 兜底翻 phase，保证不卡死在开场幕
-        if opening_service.should_hard_exit(conversation):
-            conversation = await opening_service.hard_exit_to_reading(conversation)
-
-        phase = context_service.get_phase(conversation)
-        force_brief = opening_service.should_force_brief(conversation)  # 守卫第 2 层
-        relationship_block = ""
-        if phase == context_service.PHASE_OPENING:
-            meta = await context_service.build_relationship_meta(
-                conversation.user_id, conversation.conversation_id
-            )
-            meta["nickname"] = (
-                user.profile.nickname if user and user.profile and user.profile.nickname else "朋友"
-            )
-            relationship_block = context_service.render_relationship_block(meta)
+        # 开场幕上下文：守卫兜底 + 相位 + 强制交单 + 关系上下文（conversation 可能被就地翻相位）
+        phase, force_brief, relationship_block = await opening_service.prepare_opening_context(
+            conversation, user
+        )
 
         # 流式生成AI回复（使用Agent Loop）
         async def generate():

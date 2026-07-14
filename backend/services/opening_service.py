@@ -3,7 +3,7 @@
 塔罗与占星两个 router 共用，避免复制粘贴。
 """
 import random
-from typing import Optional
+from typing import Optional, Tuple
 
 import google.generativeai as genai
 
@@ -51,6 +51,39 @@ async def hard_exit_to_reading(conversation: Conversation) -> Conversation:
     await StorageService.save_conversation(conversation)
     print(f"[Opening] 🛟 守卫兜底：{conversation.conversation_id} 强制进入解读相位（无策略单）")
     return conversation
+
+
+async def prepare_opening_context(
+    conversation: Conversation, user: Optional[User]
+) -> Tuple[str, bool, str]:
+    """开场幕的 router 侧上下文，一次算清：守卫兜底 → 相位 → 强制交单 → 关系上下文块。
+
+    塔罗与占星此前各自逐字复制了同一段拼装（还各自内联了第三份昵称逻辑），任何一边
+    改漏就是静默分裂 —— 收归此处，两个 router 各一行调用。
+
+    Returns:
+        (phase, force_brief, relationship_block)；解读相位下后两者恒为 (False, "")。
+
+    Note:
+        守卫第 3 层触发时 `conversation` 会被**就地**改写（phase 翻成 reading 并落库），
+        调用方后续从同一个对象取 strategy，无需重新读库。
+    """
+    # 守卫第 3 层：强制交单也失败 → 兜底翻 phase，保证不存在卡死在开场幕的会话
+    if should_hard_exit(conversation):
+        await hard_exit_to_reading(conversation)
+
+    phase = context_service.get_phase(conversation)
+    force_brief = should_force_brief(conversation)  # 守卫第 2 层
+
+    relationship_block = ""
+    if phase == context_service.PHASE_OPENING:
+        meta = await context_service.build_relationship_meta(
+            conversation.user_id, conversation.conversation_id
+        )
+        meta["nickname"] = _nickname(user)
+        relationship_block = context_service.render_relationship_block(meta)
+
+    return phase, force_brief, relationship_block
 
 
 async def save_strategy(conversation: Conversation, strategy: dict) -> Conversation:
