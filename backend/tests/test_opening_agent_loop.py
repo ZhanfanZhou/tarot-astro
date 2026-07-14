@@ -79,6 +79,98 @@ def test_daily_session_gets_daily_tools_not_tarot_tools(monkeypatch):
         assert "draw_tarot_cards" in factory.models[0]["tools"]
 
 
+# ---------------------------------------------------------------------------
+# 提示词与工具集必须同源：override > 相位 > 会话类型（两处优先级一字不差）
+#
+# _format_messages_for_gemini 的优先级是 override > phase，而 _select_tools 此前只认
+# phase —— 一旦给塔罗会话传 override，就会得到「提示词是 override、工具集却只有
+# submit_reading_brief」的分裂状态。目前不可达（override 只在 DAILY 用，DAILY 恒 reading），
+# 但这正是 context_service 声称要杜绝的那类分裂，锁死它。
+# ---------------------------------------------------------------------------
+
+def test_override_wins_over_phase_for_tools_not_just_prompt(monkeypatch):
+    """override + opening 相位：提示词走 override → 工具集也必须跟着走，不能留在开场工具集。"""
+    from services import gemini_service as gs
+
+    factory = _FakeModelFactory([[_FakeResponse([_FakePart(text="今日宜静。")])]])
+    monkeypatch.setattr(gs.genai, "GenerativeModel", factory)
+
+    svc = gs.GeminiService()
+    _run(svc.stream_response(
+        messages=[Message(role=MessageRole.USER, content="今天怎么样")],
+        user=None,
+        session_type=SessionType.TAROT,   # 塔罗 + 开场相位 —— 但调用方自带提示词
+        system_prompt_override="（日运提示词，压根不认识 submit_reading_brief）",
+        phase="opening",
+    ))
+
+    tools = factory.models[0]["tools"]
+    # 提示词是 override → 它不认识交单工具，就绝不能把交单工具递给模型
+    assert "submit_reading_brief" not in tools
+    assert tools != ["submit_reading_brief"]
+    assert "draw_tarot_cards" in tools
+    # 系统提示词确实是 override（证明分裂的另一半成立，测的是同一次调用）
+    assert factory.chats[0].history[0]["parts"][0]["text"].startswith("（日运提示词")
+
+
+def test_override_never_arms_force_brief_guard(monkeypatch):
+    """override 下守卫不许上膛：mode=ANY 指名一个不在工具集里的函数 = 必然的 API 错误。"""
+    from services import gemini_service as gs
+
+    factory = _FakeModelFactory([[_FakeResponse([_FakePart(text="今日宜静。")])]])
+    monkeypatch.setattr(gs.genai, "GenerativeModel", factory)
+
+    svc = gs.GeminiService()
+    _run(svc.stream_response(
+        messages=[Message(role=MessageRole.USER, content="嗯")],
+        user=None,
+        session_type=SessionType.TAROT,
+        system_prompt_override="（日运提示词）",
+        phase="opening",
+        force_brief=True,
+    ))
+
+    assert factory.models[0]["tool_config"] is None
+    assert "submit_reading_brief" not in factory.models[0]["tools"]
+
+
+def test_override_in_reading_phase_also_drops_submit_tool(monkeypatch):
+    """override + reading：同理——自带提示词的会话没有开场幕语义，不该看见交单工具。"""
+    from services import gemini_service as gs
+
+    factory = _FakeModelFactory([[_FakeResponse([_FakePart(text="今日宜静。")])]])
+    monkeypatch.setattr(gs.genai, "GenerativeModel", factory)
+
+    svc = gs.GeminiService()
+    _run(svc.stream_response(
+        messages=[Message(role=MessageRole.USER, content="嗯")],
+        user=None,
+        session_type=SessionType.TAROT,
+        system_prompt_override="（心灵奇旅提示词）",
+        phase="reading",
+    ))
+
+    assert "submit_reading_brief" not in factory.models[0]["tools"]
+
+
+def test_no_override_keeps_phase_authority(monkeypatch):
+    """回归护栏：不传 override 时，相位仍是唯一权威（开场 → 只有交单工具）。"""
+    from services import gemini_service as gs
+
+    factory = _FakeModelFactory([[_FakeResponse([_FakePart(text="坐吧。")])]])
+    monkeypatch.setattr(gs.genai, "GenerativeModel", factory)
+
+    svc = gs.GeminiService()
+    _run(svc.stream_response(
+        messages=[Message(role=MessageRole.USER, content="嗯")],
+        user=None,
+        session_type=SessionType.TAROT,
+        phase="opening",
+    ))
+
+    assert factory.models[0]["tools"] == ["submit_reading_brief"]
+
+
 def test_submit_reading_brief_schema_has_nine_fields():
     from services.gemini_service import GeminiService
 

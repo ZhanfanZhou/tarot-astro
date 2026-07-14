@@ -209,9 +209,23 @@ class GeminiService:
             "max_output_tokens": 8192,
         }
 
-    def _select_tools(self, session_type: SessionType, for_opening: bool = False) -> List[Tool]:
-        """选工具集：会话类型优先（daily/chat 无开场幕、不交单），再看相位。"""
-        if session_type in (SessionType.DAILY, SessionType.CHAT):
+    def _select_tools(
+        self,
+        session_type: SessionType,
+        for_opening: bool = False,
+        has_override: bool = False,
+    ) -> List[Tool]:
+        """选工具集。
+
+        优先级必须与 _format_messages_for_gemini 的提示词优先级**一字不差**：
+        override > 相位 > 会话类型。否则就会出现「提示词是 A、工具集是 B」的分裂
+        —— context_service 存在的全部意义就是杜绝这种分裂。
+
+        has_override = 调用方自带一份完整提示词（日运/心灵奇旅）。那份提示词不认识
+        开场幕、更不认识 submit_reading_brief，所以既不能给它开场工具集，也不能把交单
+        工具递给它 —— 与 daily/chat 同一把工具集。
+        """
+        if has_override or session_type in (SessionType.DAILY, SessionType.CHAT):
             # 与改动前一致：含 read_divination_notebook;模板已禁止再抽牌
             return self.daily_tools
         if for_opening:
@@ -381,11 +395,15 @@ class GeminiService:
             - function_call: Dict - 函数调用请求（仅当 function_executor 为 None 时）
             - done: bool - 是否完成
         """
-        is_opening = phase == context_service.PHASE_OPENING
+        # override（日运/心灵奇旅自带完整提示词）优先级高于相位——_format_messages_for_gemini
+        # 就是这么判的。这里必须同源：override 在场 → 整个开场幕语义（开场工具集、强制交单
+        # 守卫、同轮移交）一律不适用，否则提示词与工具集/守卫会分裂。
+        has_override = system_prompt_override is not None
+        is_opening = (not has_override) and phase == context_service.PHASE_OPENING
 
         def _build_model(for_opening: bool, guard: bool):
             """按相位挑工具集建模型。开场相位只给交单工具；守卫开启时叠加 mode=ANY。"""
-            tool_set = self._select_tools(session_type, for_opening)
+            tool_set = self._select_tools(session_type, for_opening, has_override)
 
             kwargs = {}
             if for_opening and guard:
