@@ -36,16 +36,22 @@ def get_phase(conversation: Conversation) -> str:
 async def build_relationship_meta(user_id: str, current_conversation_id: str) -> dict:
     """关系元数据：来访次数、距上次天数。一条 SQL，不加载会话全文。
 
-    排除本场；排除只有开场白（消息数 <= 1）的会话——「点开又关」不算一次来访，
-    否则第 2 次真正来的人被叫「第 5 次来访」，认人反而露馅。
+    只数「找占卜师的那种来访」——塔罗/占星。每日一签每天自动建一个会话（且有 2+ 条
+    消息），闲聊同理；不筛掉它们的话，连续签到 7 天的新客第一次开塔罗就成了「第 8 次
+    来访」，占卜师对陌生人说「又来啦」——正是设计要防的认人露馅。
+
+    排除本场；排除只有开场白（消息数 <= 1）的会话——「点开又关」不算一次来访。
     """
+    placeholders = ",".join("?" * len(OPENING_PHASE_SESSIONS))
+    types = tuple(st.value for st in OPENING_PHASE_SESSIONS)
     async with get_db() as db:
         cur = await db.execute(
             "SELECT COUNT(*) AS cnt, MAX(updated_at) AS last_at "
             "FROM conversations "
             "WHERE user_id = ? AND conversation_id != ? "
-            "  AND json_array_length(data, '$.messages') > 1",
-            (user_id, current_conversation_id),
+            "  AND json_array_length(data, '$.messages') > 1 "
+            f"  AND json_extract(data, '$.session_type') IN ({placeholders})",
+            (user_id, current_conversation_id, *types),
         )
         row = await cur.fetchone()
 

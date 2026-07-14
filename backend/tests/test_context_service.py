@@ -121,6 +121,62 @@ def test_relationship_meta_excludes_current_and_empty_conversations(db_env):
     assert meta["days_since_last"] is not None and meta["days_since_last"] > 0
 
 
+def test_relationship_meta_ignores_daily_and_chat_sessions(db_env):
+    """每日一签会话不算「来访」——它每天自动建一个（且有 2+ 条消息）。
+
+    不筛 session_type 的话，连续签到 7 天的新用户第一次开塔罗就被渲染成
+    「第 8 次来访」，占卜师对陌生人说「又来啦」——正是设计要防的认人露馅。
+    """
+    from services import context_service
+    from services.storage_service import StorageService
+
+    def _msgs():
+        return [
+            Message(role=MessageRole.ASSISTANT, content="今日签"),
+            Message(role=MessageRole.USER, content="什么意思"),
+        ]
+
+    async def scenario():
+        for i in range(3):
+            await StorageService.save_conversation(Conversation(
+                conversation_id=f"c_daily_{i}", user_id="u1",
+                session_type=SessionType.DAILY, messages=_msgs(),
+            ))
+        await StorageService.save_conversation(Conversation(
+            conversation_id="c_tarot", user_id="u1",
+            session_type=SessionType.TAROT, messages=_msgs(),
+        ))
+        await StorageService.save_conversation(Conversation(
+            conversation_id="c_now", user_id="u1", session_type=SessionType.TAROT,
+        ))
+        return await context_service.build_relationship_meta("u1", "c_now")
+
+    meta = asyncio.run(scenario())
+    assert meta["visit_count"] == 2  # 1 次塔罗历史 + 本次；3 个日签会话不算
+
+
+def test_relationship_meta_counts_astrology_sessions(db_env):
+    """塔罗与占星互相算作「来访」——同一个占卜师，跨入口认人。"""
+    from services import context_service
+    from services.storage_service import StorageService
+
+    async def scenario():
+        await StorageService.save_conversation(Conversation(
+            conversation_id="c_astro", user_id="u2", session_type=SessionType.ASTROLOGY,
+            messages=[
+                Message(role=MessageRole.ASSISTANT, content="坐吧"),
+                Message(role=MessageRole.USER, content="看看我的星盘"),
+            ],
+        ))
+        await StorageService.save_conversation(Conversation(
+            conversation_id="c_now2", user_id="u2", session_type=SessionType.TAROT,
+        ))
+        return await context_service.build_relationship_meta("u2", "c_now2")
+
+    meta = asyncio.run(scenario())
+    assert meta["visit_count"] == 2
+
+
 def test_render_relationship_block_new_vs_returning():
     from services import context_service
 
