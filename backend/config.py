@@ -58,6 +58,22 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # 备选：gemini-2.5-flash / gemini-3.1-flash-lite / gemini-3-pro
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
+# ===== 多 Provider LLM（前置/解读/记忆 三个 Agent 各自独立选 provider+model）=====
+# 不配任何一项 → 三个 Agent 全部沿用 Gemini 现状，行为零变化。
+# DeepSeek / Kimi 均为 OpenAI 兼容 API，key 按 provider 配一次（同一家不重复填）。
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+KIMI_API_KEY = os.getenv("KIMI_API_KEY", "")
+KIMI_BASE_URL = os.getenv("KIMI_BASE_URL", "https://api.moonshot.cn/v1")
+
+# 每个 Agent：provider ∈ {gemini, deepseek, kimi}，model 为该 provider 下的模型名
+OPENING_PROVIDER = os.getenv("OPENING_PROVIDER", "gemini")
+OPENING_MODEL = os.getenv("OPENING_MODEL", GEMINI_MODEL)
+READING_PROVIDER = os.getenv("READING_PROVIDER", "gemini")
+READING_MODEL = os.getenv("READING_MODEL", GEMINI_MODEL)
+MEMORY_PROVIDER = os.getenv("MEMORY_PROVIDER", "gemini")
+MEMORY_MODEL = os.getenv("MEMORY_MODEL", "gemini-2.5-flash")   # notebook 现用值
+
 # 星盘API配置 https://api.xingpan.vip/astrology/Apiinterface.html
 # https://docs.qq.com/doc/DQUxhSUpjdkpqYmhH
 ASTROLOGY_API_URL = "http://www.xingpan.vip/astrology/chart/natal"
