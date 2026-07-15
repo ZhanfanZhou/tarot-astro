@@ -195,22 +195,17 @@ def test_greeting_llm_call_sets_timeout(db_env):
 
     captured = {}
 
-    class _FakeModel:
-        def __init__(self, **kwargs):
-            pass
-
-        async def generate_content_async(self, prompt, **kwargs):
+    class _FakeProvider:
+        async def generate_text(self, prompt, **kwargs):
             captured.update(kwargs)
+            return "坐吧。"
 
-            class _R:
-                text = "坐吧。"
-            return _R()
-
-    with patch.object(opening_service.genai, "GenerativeModel", _FakeModel):
+    with patch("services.llm.get_provider", return_value=_FakeProvider()) as get_provider:
         text = asyncio.run(opening_service._generate_greeting_via_llm("PROMPT"))
 
+    get_provider.assert_called_once_with("opening")
     assert text == "坐吧。"
-    assert captured["request_options"]["timeout"] == config.OPENING_GREETING_TIMEOUT_SECONDS
+    assert captured["timeout"] == config.OPENING_GREETING_TIMEOUT_SECONDS
     assert 0 < config.OPENING_GREETING_TIMEOUT_SECONDS <= 15  # 首屏等待，不能设成一分钟
 
 

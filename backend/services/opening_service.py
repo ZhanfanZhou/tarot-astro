@@ -5,10 +5,7 @@
 import random
 from typing import Optional, Tuple
 
-import google.generativeai as genai
-
 import config
-from config import GEMINI_MODEL
 from models import Conversation, MessageRole, SessionType, User
 from services import context_service
 from services.storage_service import StorageService
@@ -110,22 +107,18 @@ async def save_strategy(conversation: Conversation, strategy: dict) -> Conversat
 async def _generate_greeting_via_llm(prompt: str) -> str:
     """无工具的轻量调用：只要一两句迎接语。
 
-    必须带超时：这是全 App 的第一印象，Gemini 挂起时用户只会看到永久转圈。
+    必须带超时：这是全 App 的第一印象，provider 挂起时用户只会看到永久转圈。
     超时抛异常 → build_greeting 的 try/except 接住 → 降级模板。
     """
-    model = genai.GenerativeModel(
-        model_name=GEMINI_MODEL,
-        generation_config={
-            "temperature": 1.0,      # 开场白要每次都不一样
-            "top_p": 0.95,
-            "max_output_tokens": 200,
-        },
-    )
-    response = await model.generate_content_async(
+    from services import llm
+
+    provider = llm.get_provider("opening")
+    return await provider.generate_text(
         prompt,
-        request_options={"timeout": config.OPENING_GREETING_TIMEOUT_SECONDS},
+        temperature=1.0,      # 开场白要每次都不一样
+        max_tokens=200,
+        timeout=config.OPENING_GREETING_TIMEOUT_SECONDS,
     )
-    return response.text or ""
 
 
 async def build_greeting(
