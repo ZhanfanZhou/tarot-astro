@@ -7,14 +7,10 @@ import os
 from pathlib import Path
 from typing import Optional, List, Dict
 from datetime import datetime
-import google.generativeai as genai
 
-from config import DATA_DIR, GEMINI_API_KEY
+from config import DATA_DIR
 from models import Conversation, User, Message, MessageRole
-from services import prompt_service
-
-# 配置 Gemini API
-genai.configure(api_key=GEMINI_API_KEY)
+from services import llm, prompt_service
 
 
 class NotebookEntry:
@@ -65,15 +61,6 @@ class NotebookService:
     """笔记本管理服务"""
     
     NOTEBOOK_DIR = DATA_DIR / "notebooks"
-    
-    # 笔记生成专用模型配置（使用 Gemini-2.5-flash）
-    NOTEBOOK_MODEL = "gemini-2.5-flash"
-    NOTEBOOK_GENERATION_CONFIG = {
-        "temperature": 0.7,
-        "top_p": 0.9,
-        "top_k": 40,
-        "max_output_tokens": 2000,  # 限制在300字左右
-    }
 
     def __init__(self):
         # 确保笔记本目录存在
@@ -159,21 +146,13 @@ class NotebookService:
             "question": question,
         })
         
-        # 调用AI生成摘要（结构化输出）
+        # 调用AI生成摘要（结构化输出，走记忆 Agent 的 provider）
         try:
-            # 配置JSON响应模式
-            generation_config = self.NOTEBOOK_GENERATION_CONFIG.copy()
-            generation_config["response_mime_type"] = "application/json"
-            
-            model = genai.GenerativeModel(
-                model_name=self.NOTEBOOK_MODEL,
-                generation_config=generation_config
-            )
-            
+            provider = llm.get_provider("memory")
+
             print(f"[Notebook] 正在为对话 {conversation.conversation_id} 生成摘要...")
-            response = await model.generate_content_async(prompt)
-            result_text = response.text.strip()
-            
+            result_text = await provider.generate_json(prompt)
+
             # 解析JSON响应
             result = json.loads(result_text)
             summary = result.get("summary", "")
