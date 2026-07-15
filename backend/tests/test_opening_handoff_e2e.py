@@ -1,17 +1,17 @@
 """端到端：开场 → 交单 → 同轮移交 → 解读 Agent 抽牌。
 
 跨 routers/tarot + gemini_service + opening_service + context_service + SQLite 的整条链路，
-走真实 HTTP（TestClient）、真实 SSE 编码、真实临时库；只把 Gemini 换成剧本替身。
+走真实 HTTP（TestClient）、真实 SSE 编码、真实临时库；只把 LLM 换成剧本替身。
 
-  · 零真实 Gemini 请求、零花费（monkeypatch genai.GenerativeModel）
+  · 零真实 LLM 请求、零花费（patch services.llm.get_provider → FakeProvider）
   · 绝不触碰 backend/data/（DB → tmp_path；用量计数文件 → tmp_path）
 
 锁住的契约：
   1. 开场相位工具集只有 submit_reading_brief；交单后同一次回复内换成解读工具集并抽牌
   2. submit_reading_brief 是纯后台工具——SSE 里一个字节都不能外泄；draw_cards 必须推
-  3. 移交重建的 chat 必须带上用户最后一句澄清回答（读人素材，丢了就白读）
+  3. 移交重建的 session 必须带上用户最后一句澄清回答（读人素材，丢了就白读）
   4. 抽牌参数的 wire 契约：card_count 必须是 int、positions 必须是 list（前端据此渲染）
-  5. 存量会话（phase=reading）行为不变：单模型、完整工具集、绝不移交
+  5. 存量会话（phase=reading）行为不变：单 session、完整工具集、绝不移交
   6. 守卫第 3 层：开场澄清超预算 → 兜底翻相位，不存在卡死在开场幕的会话
 """
 import asyncio
@@ -27,31 +27,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from models import (  # noqa: E402
     Conversation, Message, MessageRole, SessionType, User, UserType, UserProfile,
 )
+from tests._fake_llm import FakeProvider, FakeSession, TurnResult, ToolCall, tool_names  # noqa: E402
 
 USER_ID = "user_e2e"
 TRANSITION = "我大概明白你在担心什么了。别急，让牌来说话。"
 
 
 # ---------------------------------------------------------------------------
-# Gemini 替身（剧本按 chat 创建顺序取用）
+# LLM 替身（provider 层；剧本按 open_session 顺序取用，并记录 trace）
 # ---------------------------------------------------------------------------
-
-class _FakeFunctionCall:
-    def __init__(self, name, args):
-        self.name = name
-        self.args = args
-
-
-class _FakePart:
-    def __init__(self, text="", function_call=None):
-        self.text = text
-        self.function_call = function_call
-
-
-class _FakeResponse:
-    def __init__(self, parts):
-        self.parts = parts
-
 
 class _FakeRepeated:
     """模仿 proto 的 RepeatedComposite：可迭代但不是 list —— 逼出 router 的转换逻辑。
@@ -66,53 +50,46 @@ class _FakeRepeated:
         return iter(self._items)
 
 
-def _function_response_name(message):
-    """从「喂回模型的函数结果」里取函数名；普通文本消息返回 None。"""
-    if isinstance(message, list) and message and hasattr(message[0], "function_response"):
-        return message[0].function_response.name or None
-    return None
+def _text(t):
+    return TurnResult(text=t)
 
 
-class _FakeChat:
-    def __init__(self, index, history, responses, trace):
-        self.index = index
-        self.history = history
-        self.sent = []
-        self._responses = responses
+def _call(name, args):
+    return TurnResult(tool_calls=[ToolCall(name=name, args=args)])
+
+
+def _text_call(t, name, args):
+    return TurnResult(text=t, tool_calls=[ToolCall(name=name, args=args)])
+
+
+class _TracingSession(FakeSession):
+    def __init__(self, script, trace):
+        super().__init__(script)
         self._trace = trace
 
-    async def send_message_async(self, message, stream=False):
-        self.sent.append(message)
-        name = _function_response_name(message)
-        if name:
-            # 函数结果被喂回 = 该函数确实被 executor 执行完了
-            self._trace.append(f"result:{name}")
-        return self._responses.pop(0)
+    async def send_tool_result(self, name, result, call_id=""):
+        # 函数结果被喂回 = 该函数确实被 executor 执行完了
+        self._trace.append(f"result:{name}")
+        return await super().send_tool_result(name, result, call_id)
 
 
-class _FakeModelFactory:
-    """替身 genai.GenerativeModel：记录每次构造的工具集/tool_config、每个 chat 的历史。"""
+class _TracingProvider(FakeProvider):
+    """FakeProvider + trace：记录 open_session（chat:N）与 tool result 喂回（result:name）的真实顺序。"""
 
-    def __init__(self, response_script, trace):
-        self.response_script = response_script
+    def __init__(self, scripts, trace):
+        super().__init__(scripts)
         self.trace = trace
-        self.models = []   # [{"tools": [名字...], "tool_config": ...}]
-        self.chats = []
 
-    def __call__(self, model_name=None, generation_config=None, tools=None, tool_config=None):
-        names = [fd.name for tool in (tools or []) for fd in tool.function_declarations]
-        self.models.append({"tools": names, "tool_config": tool_config})
-        factory = self
-
-        class _Model:
-            def start_chat(self_inner, history):
-                index = len(factory.chats) + 1
-                factory.trace.append(f"chat:{index}")
-                chat = _FakeChat(index, history, factory.response_script.pop(0), factory.trace)
-                factory.chats.append(chat)
-                return chat
-
-        return _Model()
+    def open_session(self, system, history, tools, force_tool=None):
+        index = len(self.sessions) + 1
+        self.trace.append(f"chat:{index}")
+        s = _TracingSession(self._scripts.pop(0), self.trace)
+        s.system = system
+        s.history = history
+        s.tools = tools
+        s.force_tool = force_tool
+        self.sessions.append(s)
+        return s
 
 
 # ---------------------------------------------------------------------------
@@ -187,14 +164,16 @@ def _get_conversation(conversation_id: str) -> Conversation:
     return asyncio.run(StorageService.get_conversation(conversation_id))
 
 
-def _install_gemini(monkeypatch, script):
-    """装上 Gemini 替身，并给交单落库挂钩子——两者共用一条 trace，得到真实的执行顺序。"""
+def _install_gemini(monkeypatch, scripts):
+    """装上 LLM provider 替身，并给交单落库挂钩子——两者共用一条 trace，得到真实的执行顺序。"""
+    from services import llm
     from services import gemini_service as gs
     from services import opening_service as op_mod
 
     trace = []
-    factory = _FakeModelFactory(script, trace)
-    monkeypatch.setattr(gs.genai, "GenerativeModel", factory)
+    prov = _TracingProvider(scripts, trace)
+    # 移交时切 provider 也命中同一个替身（按 open_session 顺序取脚本）
+    monkeypatch.setattr(llm, "get_provider", lambda agent: prov)
 
     original_save = op_mod.save_strategy
 
@@ -217,8 +196,8 @@ def _install_gemini(monkeypatch, script):
             yield event
 
     monkeypatch.setattr(gs.GeminiService, "stream_response", _wrapped_stream)
-    factory.agent_events = agent_events
-    return factory
+    prov.agent_events = agent_events
+    return prov
 
 
 def _sse(body: str):
@@ -235,7 +214,7 @@ def _sse(body: str):
     return events, done
 
 
-def _text(events) -> str:
+def _sse_text(events) -> str:
     return "".join(e["content"] for e in events if "content" in e)
 
 
@@ -271,24 +250,20 @@ def test_opening_submits_brief_then_hands_off_and_draws(env, monkeypatch, sessio
         "opening", _greeting_and_user("他上周开始冷淡了"), session_type=session_type
     )
 
-    script = [
-        # chat1（开场 Agent，只有交单工具）：读完人，直接交单，不说话
-        [_FakeResponse([_FakePart(function_call=_FakeFunctionCall(
-            "submit_reading_brief", BRIEF_ARGS))])],
-        # chat2（移交后重建的解读 Agent）：过渡语 + 抽牌，然后收尾
+    scripts = [
+        # session1（开场 Agent，只有交单工具）：读完人，直接交单，不说话
+        [_call("submit_reading_brief", BRIEF_ARGS)],
+        # session2（移交后重建的解读 Agent）：过渡语 + 抽牌，然后收尾
         [
-            _FakeResponse([
-                _FakePart(text=TRANSITION),
-                _FakePart(function_call=_FakeFunctionCall("draw_tarot_cards", {
-                    "spread_type": "three_card",
-                    "card_count": 3.0,  # proto 数字常以 float 到手
-                    "positions": _FakeRepeated(["过去", "现在", "未来"]),
-                })),
-            ]),
-            _FakeResponse([_FakePart(text="静下心来，抽三张。")]),
+            _text_call(TRANSITION, "draw_tarot_cards", {
+                "spread_type": "three_card",
+                "card_count": 3.0,  # proto 数字常以 float 到手
+                "positions": _FakeRepeated(["过去", "现在", "未来"]),
+            }),
+            _text("静下心来，抽三张。"),
         ],
     ]
-    factory = _install_gemini(monkeypatch, script)
+    prov = _install_gemini(monkeypatch, scripts)
 
     resp = env.post(endpoint, json={
         "conversation_id": conv.conversation_id,
@@ -297,8 +272,8 @@ def test_opening_submits_brief_then_hands_off_and_draws(env, monkeypatch, sessio
     assert resp.status_code == 200
     events, done = _sse(resp.text)
 
-    # —— 移交确实发生了：交单先执行，随后才重建 chat，抽牌在新 chat 里完成 ——
-    assert factory.trace == [
+    # —— 移交确实发生了：交单先执行，随后才重建 session，抽牌在新 session 里完成 ——
+    assert prov.trace == [
         "chat:1",                        # 开场 Agent
         "exec:submit_reading_brief",     # 交单落库（opening_service.save_strategy 被调用）
         "chat:2",                        # 同轮移交：解读 Agent 重建
@@ -306,11 +281,11 @@ def test_opening_submits_brief_then_hands_off_and_draws(env, monkeypatch, sessio
     ]
 
     # —— 工具集按相位隔离 ——
-    assert factory.models[0]["tools"] == ["submit_reading_brief"]
-    assert "draw_tarot_cards" in factory.models[1]["tools"]
+    assert tool_names(prov.sessions[0].tools) == ["submit_reading_brief"]
+    assert "draw_tarot_cards" in tool_names(prov.sessions[1].tools)
 
     # —— 交单是纯后台工具：Agent Loop 根本不 yield 它的 function_call；抽牌才 yield ——
-    pushed = [e["function_call"]["name"] for e in factory.agent_events if "function_call" in e]
+    pushed = [e["function_call"]["name"] for e in prov.agent_events if "function_call" in e]
     assert pushed == ["draw_tarot_cards"]
 
     # —— 一路到 SSE 也一个字节都不外泄（连策略单内容也不能漏给前端） ——
@@ -326,7 +301,7 @@ def test_opening_submits_brief_then_hands_off_and_draws(env, monkeypatch, sessio
     assert draws[0]["positions"] == ["过去", "现在", "未来"]
 
     # —— 解读 Agent 的过渡语正常流式输出，且先于抽牌事件到达 ——
-    assert TRANSITION in _text(events)
+    assert TRANSITION in _sse_text(events)
     assert done
     first_draw = next(i for i, e in enumerate(events) if "draw_cards" in e)
     assert "content" in events[0] and first_draw > 0
@@ -346,16 +321,14 @@ def test_opening_submits_brief_then_hands_off_and_draws(env, monkeypatch, sessio
 def test_opening_clarifying_turn_stays_in_opening_and_persists_reply(env, monkeypatch):
     """前置 Agent 不交单、只追问一句 → 留在开场相位，回复照常落库，绝不误翻相位。
 
-    这是 0–2 轮澄清预算的**正常路径**（守卫尚未触发），此前一条测试都没有：
-    只测了「交单/移交」和「超预算兜底」两个端点，中间这段最常走的路反而是盲区。
+    这是 0–2 轮澄清预算的**正常路径**（守卫尚未触发）。
     """
     conv = _seed_conversation("opening", [
         Message(role=MessageRole.ASSISTANT, content="坐吧，阿岚。今天想聊些什么？"),
     ])
 
     question = "你说「乱」——是事情本身乱，还是你心里乱？"
-    script = [[_FakeResponse([_FakePart(text=question)])]]
-    factory = _install_gemini(monkeypatch, script)
+    prov = _install_gemini(monkeypatch, [[_text(question)]])
 
     resp = env.post("/api/tarot/message", json={
         "conversation_id": conv.conversation_id,
@@ -364,15 +337,14 @@ def test_opening_clarifying_turn_stays_in_opening_and_persists_reply(env, monkey
     assert resp.status_code == 200
     events, done = _sse(resp.text)
 
-    # —— 单模型、单 chat：没交单就没有移交 ——
-    assert len(factory.models) == 1
-    assert len(factory.chats) == 1
+    # —— 单 session：没交单就没有移交 ——
+    assert len(prov.sessions) == 1
     # 仍是开场工具集，且守卫未上膛（预算没用尽，不该强制交单）
-    assert factory.models[0]["tools"] == ["submit_reading_brief"]
-    assert factory.models[0]["tool_config"] is None
+    assert tool_names(prov.sessions[0].tools) == ["submit_reading_brief"]
+    assert prov.sessions[0].force_tool is None
 
     # —— 追问正常流式吐给用户，且没有任何工具事件外泄 ——
-    assert _text(events) == question
+    assert _sse_text(events) == question
     assert not any("draw_cards" in e or "function_call" in e for e in events)
     assert done
 
@@ -385,15 +357,15 @@ def test_opening_clarifying_turn_stays_in_opening_and_persists_reply(env, monkey
     assert saved.messages[-2].role == MessageRole.USER
 
     # —— 下一轮仍走开场提示词：用户回答追问后，系统提示词依旧是开场幕那份 ——
-    factory2 = _install_gemini(monkeypatch, [[_FakeResponse([_FakePart(text="嗯，继续说。")])]])
+    prov2 = _install_gemini(monkeypatch, [[_text("嗯，继续说。")]])
     resp2 = env.post("/api/tarot/message", json={
         "conversation_id": conv.conversation_id,
         "content": "心里乱吧",
     })
     assert resp2.status_code == 200
 
-    assert factory2.models[0]["tools"] == ["submit_reading_brief"]
-    system_text = factory2.chats[0].history[0]["parts"][0]["text"]
+    assert tool_names(prov2.sessions[0].tools) == ["submit_reading_brief"]
+    system_text = prov2.sessions[0].system
     assert "关系上下文" in system_text          # 开场幕提示词（含关系块）
     assert "本场策略单" not in system_text      # 而不是解读相位那份
     assert _get_conversation(conv.conversation_id).phase == "opening"
@@ -404,21 +376,18 @@ def test_opening_clarifying_turn_stays_in_opening_and_persists_reply(env, monkey
 # ---------------------------------------------------------------------------
 
 def test_reading_phase_never_hands_off(env, monkeypatch):
-    """phase=reading（存量会话）→ 单模型、完整解读工具集、不重建 chat。"""
+    """phase=reading（存量会话）→ 单 session、完整解读工具集、不重建。"""
     conv = _seed_conversation(
         "reading",
         [Message(role=MessageRole.ASSISTANT, content="你想问什么？")],
     )
 
-    script = [[
-        _FakeResponse([
-            _FakePart(text="我们来看看。"),
-            _FakePart(function_call=_FakeFunctionCall(
-                "draw_tarot_cards", {"spread_type": "single", "card_count": 1})),
-        ]),
-        _FakeResponse([_FakePart(text="抽一张吧。")]),
+    scripts = [[
+        _text_call("我们来看看。", "draw_tarot_cards",
+                   {"spread_type": "single", "card_count": 1}),
+        _text("抽一张吧。"),
     ]]
-    factory = _install_gemini(monkeypatch, script)
+    prov = _install_gemini(monkeypatch, scripts)
 
     resp = env.post("/api/tarot/message", json={
         "conversation_id": conv.conversation_id,
@@ -427,16 +396,14 @@ def test_reading_phase_never_hands_off(env, monkeypatch):
     assert resp.status_code == 200
     events, done = _sse(resp.text)
 
-    # 只建了一个模型 / 一个 chat = 没有移交
-    assert len(factory.models) == 1
-    assert len(factory.chats) == 1
+    # 只开了一个 session = 没有移交
+    assert len(prov.sessions) == 1
 
     # 工具集是完整解读工具集（含抽牌；交单仍在，供中途改判）
-    from services.gemini_service import GeminiService
-    expected = [fd.name for tool in GeminiService().tarot_tools for fd in tool.function_declarations]
-    assert factory.models[0]["tools"] == expected
-    assert "draw_tarot_cards" in expected
-    assert factory.models[0]["tool_config"] is None  # 解读相位绝不带强制交单守卫
+    from services.llm import tools
+    assert tool_names(prov.sessions[0].tools) == tools.READING_TOOL_NAMES
+    assert "draw_tarot_cards" in tools.READING_TOOL_NAMES
+    assert prov.sessions[0].force_tool is None  # 解读相位绝不带强制交单守卫
 
     assert [e for e in events if "draw_cards" in e]
     assert done
@@ -452,20 +419,19 @@ def test_reading_phase_never_hands_off(env, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_handoff_preserves_full_history_including_last_user_message(env, monkeypatch):
-    """用户最后一句是读人的关键素材：移交重建 chat 时它必须在 history 里，不能被丢。
+    """用户最后一句是读人的关键素材：移交重建 session 时它必须在 history 里，不能被丢。
 
-    非移交路径下 last_message = 最后一条用户消息、history 不含它；移交路径把它整个塞进
-    history、last_message 换成移交指令 —— 一旦写错就是「占卜师听不见用户最后那句话」。
+    非移交路径下 last_user = 最后一条用户消息、history 不含它；移交路径把它整个塞进
+    history、待发消息换成移交指令 —— 一旦写错就是「占卜师听不见用户最后那句话」。
     """
     last_user_line = "上周三他突然不回我消息了，我是不是该主动一点？"
     conv = _seed_conversation("opening", _greeting_and_user("我想问感情"))
 
-    script = [
-        [_FakeResponse([_FakePart(function_call=_FakeFunctionCall(
-            "submit_reading_brief", BRIEF_ARGS))])],
-        [_FakeResponse([_FakePart(text=TRANSITION)])],
+    scripts = [
+        [_call("submit_reading_brief", BRIEF_ARGS)],
+        [_text(TRANSITION)],
     ]
-    factory = _install_gemini(monkeypatch, script)
+    prov = _install_gemini(monkeypatch, scripts)
 
     resp = env.post("/api/tarot/message", json={
         "conversation_id": conv.conversation_id,
@@ -473,13 +439,9 @@ def test_handoff_preserves_full_history_including_last_user_message(env, monkeyp
     })
     assert resp.status_code == 200
 
-    handoff_history = factory.chats[1].history
-    flat = [
-        (m["role"], part.get("text", ""))
-        for m in handoff_history
-        for part in m["parts"]
-    ]
-    history_text = "\n".join(t for _, t in flat)
+    handoff = prov.sessions[1]
+    flat = [(m["role"], m["content"]) for m in handoff.history]
+    history_text = "\n".join(c for _, c in flat)
 
     # 用户最后那句澄清回答在移交后的历史里，且角色是 user
     assert last_user_line in history_text
@@ -488,58 +450,58 @@ def test_handoff_preserves_full_history_including_last_user_message(env, monkeyp
     assert "我想问感情" in history_text
     assert "坐吧，阿岚。今天想聊些什么？" in history_text
     # 移交后发给模型的第一条不是用户消息，而是移交指令（用户消息已在 history）
-    assert isinstance(factory.chats[1].sent[0], str)
-    assert last_user_line not in factory.chats[1].sent[0]
+    kind, sent_text = handoff.sent[0]
+    assert kind == "user"
+    assert last_user_line not in sent_text
     # 策略单已注入解读 Agent 的系统提示词
-    assert "本场策略单" in flat[0][1] and "求认同" in flat[0][1]
+    assert "本场策略单" in handoff.system and "求认同" in handoff.system
 
 
 def test_handoff_history_has_no_two_consecutive_user_turns(env, monkeypatch):
-    """移交后角色必须交替：history 以 model 收尾，紧接着的移交指令（user）才不会撞车。
+    """移交后角色必须交替：history 以 assistant 收尾，紧接着的移交指令（user）才不会撞车。
 
     移交时 history 的最后一条是用户的澄清回答（user），而移交指令又是一个 user turn
-    —— 连续两个 user，Gemini 可能把移交指令当成用户说的话来回应（「好的，我这就开始」），
-    或行为不稳定。本文件的既有惯例就是补一条 model 确认语来保持交替（系统提示词后的
-    「我明白了。」、抽牌结果后的「我看到了…」）。
+    —— 连续两个 user，模型可能把移交指令当成用户说的话来回应。补一条 assistant 确认语
+    保持交替（本文件既有惯例：系统提示词后的「我明白了。」、抽牌结果后的「我看到了…」）。
     """
     last_user_line = "上周三他突然不回我消息了"
     conv = _seed_conversation("opening", _greeting_and_user("我想问感情"))
 
-    script = [
-        [_FakeResponse([_FakePart(function_call=_FakeFunctionCall(
-            "submit_reading_brief", BRIEF_ARGS))])],
-        [_FakeResponse([_FakePart(text=TRANSITION)])],
+    scripts = [
+        [_call("submit_reading_brief", BRIEF_ARGS)],
+        [_text(TRANSITION)],
     ]
-    factory = _install_gemini(monkeypatch, script)
+    prov = _install_gemini(monkeypatch, scripts)
 
     resp = env.post("/api/tarot/message", json={
         "conversation_id": conv.conversation_id, "content": last_user_line,
     })
     assert resp.status_code == 200
 
-    history = factory.chats[1].history
+    history = prov.sessions[1].history
     roles = [m["role"] for m in history]
 
     # 1) history 内部无连续两个 user
     assert not any(a == b == "user" for a, b in zip(roles, roles[1:])), roles
-    # 2) history 以 model 收尾 —— 下一条（移交指令，user）接上去仍是交替
-    assert roles[-1] == "model", roles
+    # 2) history 以 assistant 收尾 —— 下一条（移交指令，user）接上去仍是交替
+    assert roles[-1] == "assistant", roles
     # 3) 移交指令确实是紧随其后的那个 user turn
-    assert isinstance(factory.chats[1].sent[0], str)
-    # 4) 为了交替而补的 model 确认语，不能把用户最后那句澄清挤掉
-    flat = [(m["role"], part.get("text", "")) for m in history for part in m["parts"]]
+    kind, _sent_text = prov.sessions[1].sent[0]
+    assert kind == "user"
+    # 4) 为了交替而补的 assistant 确认语，不能把用户最后那句澄清挤掉
+    flat = [(m["role"], m["content"]) for m in history]
     assert ("user", last_user_line) in flat
 
 
 # ---------------------------------------------------------------------------
-# 3b. 守卫第 2 层（router 侧接线）：澄清预算用尽 → 本轮 mode=ANY 强制交单
+# 3b. 守卫第 2 层（router 侧接线）：澄清预算用尽 → 本轮 force_tool 强制交单
 # ---------------------------------------------------------------------------
 
-def test_force_brief_guard_reaches_model_as_any_mode_tool_config(env, monkeypatch):
-    """用户连发含糊消息到预算上限 → 传给 Gemini 的 tool_config 必须是 mode=ANY 且只许交单。
+def test_force_brief_guard_reaches_model_as_force_tool(env, monkeypatch):
+    """用户连发含糊消息到预算上限 → 传给 provider 的 force_tool 必须是 submit_reading_brief。
 
-    补测理由：should_force_brief 有单测、build_force_brief_tool_config 有单测，但
-    「router 真的把 force_brief 传下去、模型因此在解码层被逼着只能交单」这段**接线**
+    补测理由：should_force_brief 有单测、GeminiProvider 的 mode=ANY 编码有单测，但
+    「router 真的把 force_brief 传下去、opening session 因此拿到 force_tool」这段**接线**
     此前只在第 3 层（hard_exit）上做过 e2e。第 2 层是防「开场幕无限澄清」的主闸门。
     """
     import config
@@ -550,14 +512,13 @@ def test_force_brief_guard_reaches_model_as_any_mode_tool_config(env, monkeypatc
     )
     conv = _seed_conversation("opening", history)
 
-    script = [
+    scripts = [
         # 守卫上膛后，模型在解码层已无法输出纯文本 —— 只能交单
-        [_FakeResponse([_FakePart(function_call=_FakeFunctionCall(
-            "submit_reading_brief", BRIEF_ARGS))])],
+        [_call("submit_reading_brief", BRIEF_ARGS)],
         # 交单 → 同轮移交给解读 Agent
-        [_FakeResponse([_FakePart(text=TRANSITION)])],
+        [_text(TRANSITION)],
     ]
-    factory = _install_gemini(monkeypatch, script)
+    prov = _install_gemini(monkeypatch, scripts)
 
     resp = env.post("/api/tarot/message", json={
         "conversation_id": conv.conversation_id,
@@ -565,19 +526,14 @@ def test_force_brief_guard_reaches_model_as_any_mode_tool_config(env, monkeypatc
     })
     assert resp.status_code == 200
 
-    # —— 核心断言：守卫真的到达了模型（不是只在 service 里算了个 bool） ——
-    from services.gemini_service import GeminiService
-
-    assert factory.models[0]["tool_config"] == GeminiService.build_force_brief_tool_config()
-    fcc = factory.models[0]["tool_config"]["function_calling_config"]
-    assert fcc["mode"] == "ANY"
-    assert fcc["allowed_function_names"] == ["submit_reading_brief"]
+    # —— 核心断言：守卫真的到达了 provider（不是只在 service 里算了个 bool） ——
+    assert prov.sessions[0].force_tool == "submit_reading_brief"
     # 允许的函数必须真在本轮工具集里，否则 mode=ANY 指名一个不存在的函数 = API 报错
-    assert factory.models[0]["tools"] == ["submit_reading_brief"]
+    assert tool_names(prov.sessions[0].tools) == ["submit_reading_brief"]
 
-    # —— 移交后的解读模型绝不能继续带着守卫（否则解读 Agent 也被逼着只能交单） ——
-    assert factory.models[1]["tool_config"] is None
-    assert "draw_tarot_cards" in factory.models[1]["tools"]
+    # —— 移交后的解读 session 绝不能继续带着守卫（否则解读 Agent 也被逼着只能交单） ——
+    assert prov.sessions[1].force_tool is None
+    assert "draw_tarot_cards" in tool_names(prov.sessions[1].tools)
 
     # —— 守卫达成了它的目的：本轮收到策略单，会话离开开场幕 ——
     saved = _get_conversation(conv.conversation_id)
@@ -606,8 +562,7 @@ def test_hard_exit_guard_forces_reading_phase_when_opening_overruns(
     )
     conv = _seed_conversation("opening", history, session_type=session_type)
 
-    script = [[_FakeResponse([_FakePart(text="好，我们直接开始。")])]]
-    factory = _install_gemini(monkeypatch, script)
+    prov = _install_gemini(monkeypatch, [[_text("好，我们直接开始。")]])
 
     resp = env.post(endpoint, json={
         "conversation_id": conv.conversation_id,
@@ -615,9 +570,9 @@ def test_hard_exit_guard_forces_reading_phase_when_opening_overruns(
     })
     assert resp.status_code == 200
 
-    # 本轮已按解读相位建模：拿到抽牌工具，且没有 mode=ANY 强制交单守卫
-    assert "draw_tarot_cards" in factory.models[0]["tools"]
-    assert factory.models[0]["tool_config"] is None
+    # 本轮已按解读相位建 session：拿到抽牌工具，且没有强制交单守卫
+    assert "draw_tarot_cards" in tool_names(prov.sessions[0].tools)
+    assert prov.sessions[0].force_tool is None
 
     saved = _get_conversation(conv.conversation_id)
     assert saved.phase == "reading"
