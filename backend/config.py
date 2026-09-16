@@ -54,9 +54,6 @@ WECHAT_NOTIFY_URL = os.getenv("WECHAT_NOTIFY_URL", f"{PUBLIC_BASE_URL}/api/payme
 
 # Gemini API配置
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-# 换模型只需改环境变量 GEMINI_MODEL，无需改代码
-# 备选：gemini-2.5-flash / gemini-3.1-flash-lite / gemini-3-pro
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
 # ===== 多 Provider LLM（前置/解读/记忆 三个 Agent 各自独立选 provider+model）=====
 # 不配任何一项 → 三个 Agent 全部沿用 Gemini 现状，行为零变化。
@@ -66,13 +63,16 @@ DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 KIMI_API_KEY = os.getenv("KIMI_API_KEY", "")
 KIMI_BASE_URL = os.getenv("KIMI_BASE_URL", "https://api.moonshot.cn/v1")
 
-# 每个 Agent：provider ∈ {gemini, deepseek, kimi}，model 为该 provider 下的模型名
+# 每个 Agent 一组 provider + model，成对出现、各自写死默认值。
+# provider ∈ {gemini, deepseek, kimi}；model 必须是该 provider 下的模型名。
+# 换 provider 就要一起换 model —— 两行是一组，不要只改一行。
+# Gemini 备选：gemini-2.5-flash / gemini-3.1-flash-lite / gemini-3-pro
 OPENING_PROVIDER = os.getenv("OPENING_PROVIDER", "gemini")
-OPENING_MODEL = os.getenv("OPENING_MODEL", GEMINI_MODEL)
+OPENING_MODEL = os.getenv("OPENING_MODEL", "gemini-3.1-flash-lite")
 READING_PROVIDER = os.getenv("READING_PROVIDER", "gemini")
-READING_MODEL = os.getenv("READING_MODEL", GEMINI_MODEL)
+READING_MODEL = os.getenv("READING_MODEL", "gemini-3.1-flash-lite")
 MEMORY_PROVIDER = os.getenv("MEMORY_PROVIDER", "gemini")
-MEMORY_MODEL = os.getenv("MEMORY_MODEL", "gemini-2.5-flash")   # notebook 现用值
+MEMORY_MODEL = os.getenv("MEMORY_MODEL", "gemini-2.5-flash")
 
 # 星盘API配置 https://api.xingpan.vip/astrology/Apiinterface.html
 # https://docs.qq.com/doc/DQUxhSUpjdkpqYmhH
