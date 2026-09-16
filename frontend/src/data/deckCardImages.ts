@@ -1,3 +1,5 @@
+import { pngs as allPngs, thumbs as allThumbs } from 'virtual:deck-assets';
+
 // Single source of truth for the browsable card set shown in the store.
 //
 // classic-rws is the only deck with real art, and its files are uneven (mixed
@@ -23,15 +25,13 @@ const MAJOR_ORDER = [
   'the-devil', 'the-tower', 'the-star', 'the-moon', 'the-sun', 'judgement', 'the-world',
 ];
 
-const thumbGlob = import.meta.glob(
-  '../../public/tarot-images/decks/classic-rws/**/*.thumb.webp',
-  { eager: true, query: '?url', import: 'default' }
-) as Record<string, string>;
+// Indexed from public/tarot-images/decks/ by vite-plugin-deck-assets — see the
+// plugin header for why these can't be `import.meta.glob`s over public/.
+const onlyClassic = (m: Record<string, string>) =>
+  Object.fromEntries(Object.entries(m).filter(([p]) => p.includes('/decks/classic-rws/')));
 
-const fullGlob = import.meta.glob(
-  '../../public/tarot-images/decks/classic-rws/**/*.png',
-  { eager: true, query: '?url', import: 'default' }
-) as Record<string, string>;
+const thumbGlob = onlyClassic(allThumbs);
+const fullGlob = onlyClassic(allPngs);
 
 function prettify(stem: string): string {
   return stem
