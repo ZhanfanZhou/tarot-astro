@@ -45,7 +45,7 @@ def test_phase_reading_when_strategy_submitted():
     conv = Conversation(
         conversation_id="c1", user_id="u1",
         session_type=SessionType.TAROT, phase="reading",
-        strategy={"user_goal": "求认同"},
+        strategy={"question": "他还回来吗"},
     )
     assert context_service.get_phase(conv) == "reading"
 
@@ -177,13 +177,15 @@ def test_relationship_meta_counts_astrology_sessions(db_env):
     assert meta["visit_count"] == 2
 
 
-def test_render_relationship_block_new_vs_returning():
+def test_render_relationship_block_is_facts_only():
+    """关系块只出事实：语气指令已搬进 opening_system.md，代码里不再藏文案。"""
     from services import context_service
 
     new_block = context_service.render_relationship_block(
         {"nickname": "小夏", "visit_count": 1, "days_since_last": None}
     )
-    assert "首次" in new_block
+    assert "第 1 次" in new_block
+    assert "距上次" not in new_block   # 首次来访没有「上次」
 
     ret_block = context_service.render_relationship_block(
         {"nickname": "小夏", "visit_count": 4, "days_since_last": 11}
@@ -191,7 +193,6 @@ def test_render_relationship_block_new_vs_returning():
     assert "小夏" in ret_block
     assert "第 4 次" in ret_block
     assert "11" in ret_block
-    assert "不主动提及任何旧话题" in ret_block
 
 
 # ---------- 策略单渲染 ----------
@@ -207,26 +208,24 @@ def test_render_brief_block_includes_fields_and_secrecy_warning():
     from services import context_service
 
     block = context_service.render_brief_block({
-        "question_topic": "感情",
-        "user_goal": "求认同",
-        "emotional_intensity": "高",
-        "context_summary": "上周男友突然冷淡",
-        "desired_takeaway": "确认还值不值得等",
-        "tool_route": "塔罗优先",
-        "suggested_spread": "三张关系阵（现状/他的态度/流向）",
-        "reading_strategy": "验证式",
-        "pacing": "深",
+        "question": "该不该接这个外地的 offer",
+        "context": "换城市的 offer，家里反对",
+        "route": "tarot",
+        "spread_type": "two_choice",
+        "positions": ["现状", "选 A 的走向", "选 A 的代价", "选 B 的走向", "选 B 的代价"],
     })
-    assert "求认同" in block
-    assert "三张关系阵" in block
+    assert "该不该接这个外地的 offer" in block
+    assert "two_choice" in block
+    assert "选 A 的代价" in block          # 列表字段要摊平，不能渲染成 python repr
+    assert "['" not in block
     assert "绝不向用户外露" in block
 
 
 def test_render_brief_block_skips_missing_fields():
     from services import context_service
 
-    block = context_service.render_brief_block({"user_goal": "看清现状"})
-    assert "看清现状" in block
+    block = context_service.render_brief_block({"question": "他还回来吗"})
+    assert "他还回来吗" in block
     assert "None" not in block
 
 
@@ -242,7 +241,7 @@ def test_build_opening_prompt_contains_prompt_relationship_and_entry():
     )
     assert "submit_reading_brief" in prompt      # 来自 opening_system.md
     assert "首次来访" in prompt                    # 关系上下文
-    assert "塔罗" in prompt                        # 入口偏好（tool_route 默认依据）
+    assert "塔罗" in prompt                        # 入口偏好（route 默认依据）
     assert "预算已用尽" not in prompt              # 未触发守卫
 
 
@@ -265,30 +264,38 @@ def test_build_reading_prompt_without_strategy_is_base_plus_user_context():
     )
     assert prompt.startswith("BASE")
     assert "小夏" in prompt
-    assert "本场策略单" not in prompt
+    assert "本场起手" not in prompt
 
 
 def test_build_reading_prompt_with_strategy_appends_handoff_constraints():
-    """移交后必须压掉基础提示词里「先欢迎用户」「意图模糊则参数化澄清」两条指示。
-
-    tarot_system.md / astrology_system.md 仍在命令「你先用占卜者的语气欢迎他」和
-    「如用户说'看下运势'→ 澄清要看哪方面？时间跨度多大？」——开场幕已经把这两件事
-    做完了（且后者正是设计要消灭的填表式澄清）。不压掉 = 占卜师二次欢迎、重问旧问题。
-    """
+    """移交后追加接场约束：这一场的开场已经有人做过了，别从头再来一遍。"""
     from services import context_service
 
     prompt = context_service.build_reading_prompt(
         base_prompt="BASE", user_context="",
-        strategy={"user_goal": "求认同", "reading_strategy": "验证式"},
+        strategy={"question": "该不该接 offer", "route": "tarot"},
     )
-    assert "本场策略单" in prompt
+    assert "本场起手" in prompt
 
-    handoff = prompt.split("本场策略单", 1)[1]  # 接场约束必须在策略单之后
+    handoff = prompt.split("本场起手", 1)[1]  # 接场约束必须在起手单之后
     assert "接场" in handoff
     assert "不要再欢迎用户" in handoff
-    assert "已失效" in handoff                 # 显式宣告基础提示词的相关指示作废
-    assert "时间跨度" in handoff               # 点名要压掉的那条参数化澄清
-    assert "submit_reading_brief" in handoff   # 只在彻底换议题时才重新交单
+
+
+def test_reading_prompts_carry_no_opening_phase_instructions():
+    """解读提示词只留解读的活：迎接、澄清问题、采集背景与诉求都归开场幕。
+
+    两份提示词各自完整、互不重叠，接场约束才只需要说「接着往下走」，
+    而不是去宣告另一份里的哪几条作废。
+    """
+    from services import prompt_service
+
+    for name in ("tarot_system.md", "astrology_system.md"):
+        text = prompt_service.get_prompt(name)
+        assert "语气欢迎他" not in text, name        # 迎接
+        assert "时间跨度多大" not in text, name      # 填表式澄清
+        assert "优先澄清问题" not in text, name      # 问题澄清
+        assert "期望，诉求" not in text, name        # 背景与诉求采集
 
 
 def test_build_reading_prompt_legacy_conversation_has_no_handoff_constraints():

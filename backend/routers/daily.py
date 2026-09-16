@@ -87,7 +87,7 @@ async def draw_daily(
         conversation.conversation_id, f"{eff.month}月{eff.day}日 · 每日一签"
     )
 
-    draw_request = DrawCardsRequest(spread_type="single", card_count=1, positions=["今日指引"])
+    draw_request = DrawCardsRequest(spread_type="single", positions=["今日指引"])
     cards = TarotService.draw_cards(draw_request)
     await ConversationService.add_message(
         conversation.conversation_id, MessageRole.SYSTEM, "用户已完成抽牌",

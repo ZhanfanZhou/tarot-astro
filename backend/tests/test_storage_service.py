@@ -84,7 +84,7 @@ def test_conversation_roundtrip_with_messages(StorageService):
             Message(
                 role=MessageRole.ASSISTANT, content="抽到了恋人正位。",
                 tarot_cards=[TarotCard(card_id=6, card_name="恋人 (The Lovers)", reversed=False)],
-                draw_request=DrawCardsRequest(spread_type="single", card_count=1),
+                draw_request=DrawCardsRequest(spread_type="single", positions=["今日指引"]),
             ),
         ],
         has_drawn_cards=True,

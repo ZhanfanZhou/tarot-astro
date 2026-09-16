@@ -29,12 +29,34 @@ def _to_history(system_prompt: str, history: list) -> list:
     return out
 
 
+def _to_plain(value):
+    """proto 值 → 纯 python。
+
+    Gemini 的 function_call.args 里，数组是 RepeatedComposite、整数常以 float 到手。
+    这里是 proto 进入本项目的唯一入口，所以转换只在这里做一次——下游（落库、拼提示词、
+    推给前端）拿到的一律是纯 python，不必各自再判一遍类型。
+    """
+    if isinstance(value, (str, bytes)) or value is None:
+        return value
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, dict):
+        return {k: _to_plain(v) for k, v in value.items()}
+    if hasattr(value, "__iter__"):
+        return [_to_plain(v) for v in value]
+    return value
+
+
 def _parse(response) -> TurnResult:
     text, calls = "", []
     for part in response.parts:
         if getattr(part, "function_call", None) and part.function_call:
             fc = part.function_call
-            calls.append(ToolCall(name=fc.name, args=dict(fc.args), id=fc.name))
+            calls.append(ToolCall(name=fc.name, args=_to_plain(dict(fc.args)), id=fc.name))
         elif getattr(part, "text", None):
             text += part.text
     return TurnResult(text=text, tool_calls=calls)
@@ -63,10 +85,15 @@ class _GeminiSession:
 
 
 class GeminiProvider:
-    def __init__(self, model: str):
+    def __init__(self, model: str, supports_forced_tool: bool = True):
         self.model = model
+        self._can_force = supports_forced_tool
 
     def open_session(self, system_prompt, history, tools, force_tool=None):
+        if force_tool and not self._can_force:
+            # 见 catalog.supports_forced_tool：这个模型传了会报错，干脆不传
+            print(f"[LLM] {self.model} 不支持强制调用 {force_tool}，守卫第 2 层本轮降级")
+            force_tool = None
         return _GeminiSession(self.model, system_prompt, history, tools, force_tool)
 
     async def generate_json(self, prompt: str) -> str:
@@ -75,8 +102,10 @@ class GeminiProvider:
         resp = await model.generate_content_async(prompt)
         return (resp.text or "").strip()
 
-    async def generate_text(self, prompt, *, temperature=1.0, max_tokens=200, timeout=8) -> str:
-        model = genai.GenerativeModel(model_name=self.model, generation_config={
-            "temperature": temperature, "top_p": 0.95, "max_output_tokens": max_tokens})
+    async def generate_text(self, prompt, *, temperature=1.0, max_tokens=None, timeout=8) -> str:
+        cfg = {"temperature": temperature, "top_p": 0.95}
+        if max_tokens is not None:
+            cfg["max_output_tokens"] = max_tokens
+        model = genai.GenerativeModel(model_name=self.model, generation_config=cfg)
         resp = await model.generate_content_async(prompt, request_options={"timeout": timeout})
         return resp.text or ""

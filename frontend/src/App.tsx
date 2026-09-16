@@ -549,7 +549,6 @@ const App: React.FC = () => {
             // 星座AI也可以抽塔罗牌（用于辅助解读）
             console.log('星座AI请求抽塔罗牌:', drawRequest);
             console.log('drawRequest.spread_type:', drawRequest.spread_type);
-            console.log('drawRequest.card_count:', drawRequest.card_count);
             console.log('drawRequest.positions:', drawRequest.positions);
             setPendingDrawRequest(drawRequest);
             setShowDrawButton(true); // 显示抽牌按钮而非立即弹出抽牌器
@@ -565,7 +564,6 @@ const App: React.FC = () => {
           (drawRequest) => {
             console.log('塔罗AI请求抽塔罗牌:', drawRequest);
             console.log('drawRequest.spread_type:', drawRequest.spread_type);
-            console.log('drawRequest.card_count:', drawRequest.card_count);
             console.log('drawRequest.positions:', drawRequest.positions);
             setPendingDrawRequest(drawRequest);
             setShowDrawButton(true); // 显示抽牌按钮而非立即弹出抽牌器

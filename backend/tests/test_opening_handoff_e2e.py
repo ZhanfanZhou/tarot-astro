@@ -10,7 +10,7 @@
   1. 开场相位工具集只有 submit_reading_brief；交单后同一次回复内换成解读工具集并抽牌
   2. submit_reading_brief 是纯后台工具——SSE 里一个字节都不能外泄；draw_cards 必须推
   3. 移交重建的 session 必须带上用户最后一句澄清回答（读人素材，丢了就白读）
-  4. 抽牌参数的 wire 契约：card_count 必须是 int、positions 必须是 list（前端据此渲染）
+  4. 抽牌参数的 wire 契约：positions 必须是 list，前端据此渲染槽位（个数=张数）
   5. 存量会话（phase=reading）行为不变：单 session、完整工具集、绝不移交
   6. 守卫第 3 层：开场澄清超预算 → 兜底翻相位，不存在卡死在开场幕的会话
 """
@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from models import (  # noqa: E402
     Conversation, Message, MessageRole, SessionType, User, UserType, UserProfile,
 )
+from services import context_service  # noqa: E402
 from tests._fake_llm import FakeProvider, FakeSession, TurnResult, ToolCall, tool_names  # noqa: E402
 
 USER_ID = "user_e2e"
@@ -36,19 +37,6 @@ TRANSITION = "我大概明白你在担心什么了。别急，让牌来说话。
 # ---------------------------------------------------------------------------
 # LLM 替身（provider 层；剧本按 open_session 顺序取用，并记录 trace）
 # ---------------------------------------------------------------------------
-
-class _FakeRepeated:
-    """模仿 proto 的 RepeatedComposite：可迭代但不是 list —— 逼出 router 的转换逻辑。
-
-    若 router 忘了 list(...)，json.dumps(default=str) 会把它糊成一个字符串，测试即失败。
-    """
-
-    def __init__(self, items):
-        self._items = items
-
-    def __iter__(self):
-        return iter(self._items)
-
 
 def _text(t):
     return TurnResult(text=t)
@@ -227,12 +215,19 @@ def _greeting_and_user(*user_texts):
     return msgs
 
 
+# provider 交出来的就是纯 python（proto 转换在 GeminiProvider 内部，见
+# test_gemini_provider.test_tool_call_args_come_back_as_plain_python）。
+# 抽几张由 positions 的个数决定，没有单独的张数字段。
 BRIEF_ARGS = {
-    "question_topic": "感情",
-    "user_goal": "求认同",
-    "emotional_intensity": "高",
-    "reading_strategy": "先接住情绪，再验证她的直觉",
+    "question": "他还会回头吗",
+    "context": "上周三他突然不回消息",
+    "route": "tarot",
+    "spread_type": "three_card",
+    "positions": ["过去", "现在", "未来"],
 }
+
+# 星盘路线：不需要用户动手，交单后同轮移交给解读 Agent 取盘
+BRIEF_ASTRO = {"question": "我这两年的事业格局", "route": "astrology"}
 
 
 # ---------------------------------------------------------------------------
@@ -240,9 +235,12 @@ BRIEF_ARGS = {
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("session_type,endpoint", ROUTES)
-def test_opening_submits_brief_then_hands_off_and_draws(env, monkeypatch, session_type, endpoint):
-    """一次 SSE 回复内：开场 Agent 交单 → 解读 Agent 接手说过渡语 → 抽牌按钮出现。
+def test_opening_submits_brief_then_draws_straight_from_it(
+    env, monkeypatch, session_type, endpoint
+):
+    """一次 SSE 回复内：开场 Agent 一句过渡语 + 交单 → 抽牌按钮直接出现。
 
+    牌阵参数已经在起手单里，harness 照单推抽牌器，不再叫解读 Agent 出来重念一遍。
     塔罗与占星两个 router 跑同一套断言：占星那 20 行是从塔罗复制过去的，
     只测塔罗等于没测它。
     """
@@ -250,20 +248,10 @@ def test_opening_submits_brief_then_hands_off_and_draws(env, monkeypatch, sessio
         "opening", _greeting_and_user("他上周开始冷淡了"), session_type=session_type
     )
 
-    scripts = [
-        # session1（开场 Agent，只有交单工具）：读完人，直接交单，不说话
-        [_call("submit_reading_brief", BRIEF_ARGS)],
-        # session2（移交后重建的解读 Agent）：过渡语 + 抽牌，然后收尾
-        [
-            _text_call(TRANSITION, "draw_tarot_cards", {
-                "spread_type": "three_card",
-                "card_count": 3.0,  # proto 数字常以 float 到手
-                "positions": _FakeRepeated(["过去", "现在", "未来"]),
-            }),
-            _text("静下心来，抽三张。"),
-        ],
-    ]
-    prov = _install_gemini(monkeypatch, scripts)
+    # 只有开场 session —— 解读 session 根本不该被开出来
+    prov = _install_gemini(
+        monkeypatch, [[_text_call(TRANSITION, "submit_reading_brief", BRIEF_ARGS)]]
+    )
 
     resp = env.post(endpoint, json={
         "conversation_id": conv.conversation_id,
@@ -272,46 +260,102 @@ def test_opening_submits_brief_then_hands_off_and_draws(env, monkeypatch, sessio
     assert resp.status_code == 200
     events, done = _sse(resp.text)
 
-    # —— 移交确实发生了：交单先执行，随后才重建 session，抽牌在新 session 里完成 ——
+    # —— 交单先落库，随后 harness 自己执行抽牌，全程一次 provider 往返 ——
+    # 只有一次 chat —— 交单之后 harness 自己把抽牌做掉了，没有第二次 provider 往返
     assert prov.trace == [
         "chat:1",                        # 开场 Agent
         "exec:submit_reading_brief",     # 交单落库（opening_service.save_strategy 被调用）
-        "chat:2",                        # 同轮移交：解读 Agent 重建
-        "result:draw_tarot_cards",       # 抽牌工具执行完，结果喂回解读 Agent
     ]
-
-    # —— 工具集按相位隔离 ——
-    assert tool_names(prov.sessions[0].tools) == ["submit_reading_brief"]
-    assert "draw_tarot_cards" in tool_names(prov.sessions[1].tools)
+    assert len(prov.sessions) == 1
+    assert tool_names(prov.sessions[0].tools) == [
+        "submit_reading_brief", "request_user_profile"]
 
     # —— 交单是纯后台工具：Agent Loop 根本不 yield 它的 function_call；抽牌才 yield ——
     pushed = [e["function_call"]["name"] for e in prov.agent_events if "function_call" in e]
     assert pushed == ["draw_tarot_cards"]
 
-    # —— 一路到 SSE 也一个字节都不外泄（连策略单内容也不能漏给前端） ——
+    # —— 一路到 SSE 也一个字节都不外泄（连起手单内容也不能漏给前端） ——
     assert "submit_reading_brief" not in resp.text
-    assert "求认同" not in resp.text
+    assert "他还会回头吗" not in resp.text
     assert not any("function_call" in e for e in events)
 
-    # —— 抽牌必须推给前端，且 wire 契约成立（card_count=int / positions=list） ——
+    # —— 抽牌必须推给前端，且 wire 契约成立（positions 是 list，个数即张数）——
     draws = [e["draw_cards"] for e in events if "draw_cards" in e]
     assert len(draws) == 1
     assert draws[0]["spread_type"] == "three_card"
-    assert draws[0]["card_count"] == 3 and isinstance(draws[0]["card_count"], int)
     assert draws[0]["positions"] == ["过去", "现在", "未来"]
+    assert "card_count" not in draws[0]
 
-    # —— 解读 Agent 的过渡语正常流式输出，且先于抽牌事件到达 ——
+    # —— 过渡语正常流式输出，且先于抽牌事件到达 ——
     assert TRANSITION in _sse_text(events)
     assert done
     first_draw = next(i for i, e in enumerate(events) if "draw_cards" in e)
     assert "content" in events[0] and first_draw > 0
 
-    # —— 落库：策略单 + 相位翻转 + 回复入库 ——
+    # —— 落库：起手单 + 相位翻转 + 回复入库 ——
     saved = _get_conversation(conv.conversation_id)
     assert saved.phase == "reading"
-    assert saved.strategy == BRIEF_ARGS
+    assert saved.strategy["question"] == "他还会回头吗"
+    assert saved.strategy["route"] == "tarot"
     assert TRANSITION in saved.messages[-1].content
     assert saved.messages[-1].role == MessageRole.ASSISTANT
+
+
+# ---------------------------------------------------------------------------
+# 1a. 交单那一轮一个字没说：照样正常收场，不替模型编话
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("session_type,endpoint", ROUTES)
+def test_silent_submit_pushes_the_drawer_without_inventing_a_line(
+    env, monkeypatch, session_type, endpoint
+):
+    """模型只调工具、不说正文 —— 那是它的选择，harness 不塞话进去。
+
+    说与不说都必须能正常收场：这里锁的是「没说话」那一半——抽牌器照推、SSE 照常
+    收尾、不落一条空的助手消息。
+    """
+    conv = _seed_conversation(
+        "opening", _greeting_and_user("他上周开始冷淡了"), session_type=session_type
+    )
+    prov = _install_gemini(monkeypatch, [[_call("submit_reading_brief", BRIEF_ARGS)]])
+
+    resp = env.post(endpoint, json={
+        "conversation_id": conv.conversation_id,
+        "content": "上周三他突然不回我消息了，我是不是该主动一点？",
+    })
+    assert resp.status_code == 200
+    events, done = _sse(resp.text)
+    assert done
+    assert prov.trace == ["chat:1", "exec:submit_reading_brief"]
+
+    # 没有凭空冒出来的文案，抽牌器照常推给前端
+    assert _sse_text(events) == ""
+    assert len([e for e in events if "draw_cards" in e]) == 1
+
+    # 没话就不落库，绝不写一条空的助手消息
+    saved = _get_conversation(conv.conversation_id)
+    assert saved.phase == "reading"
+    assert saved.messages[-1].role == MessageRole.USER
+
+
+@pytest.mark.parametrize("session_type,endpoint", ROUTES)
+def test_model_line_streams_through_untouched(env, monkeypatch, session_type, endpoint):
+    """模型说了话 —— 原样流式输出，且先于抽牌事件到达。说话那一半的锁。"""
+    conv = _seed_conversation(
+        "opening", _greeting_and_user("他上周开始冷淡了"), session_type=session_type
+    )
+    _install_gemini(
+        monkeypatch, [[_text_call(TRANSITION, "submit_reading_brief", BRIEF_ARGS)]]
+    )
+
+    resp = env.post(endpoint, json={
+        "conversation_id": conv.conversation_id,
+        "content": "我是不是该主动一点？",
+    })
+    events, _ = _sse(resp.text)
+    assert _sse_text(events) == TRANSITION
+    first_draw = next(i for i, e in enumerate(events) if "draw_cards" in e)
+    assert "content" in events[0] and first_draw > 0
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +365,7 @@ def test_opening_submits_brief_then_hands_off_and_draws(env, monkeypatch, sessio
 def test_opening_clarifying_turn_stays_in_opening_and_persists_reply(env, monkeypatch):
     """前置 Agent 不交单、只追问一句 → 留在开场相位，回复照常落库，绝不误翻相位。
 
-    这是 0–2 轮澄清预算的**正常路径**（守卫尚未触发）。
+    这是追问预算的**正常路径**（守卫尚未触发）。
     """
     conv = _seed_conversation("opening", [
         Message(role=MessageRole.ASSISTANT, content="坐吧，阿岚。今天想聊些什么？"),
@@ -340,7 +384,8 @@ def test_opening_clarifying_turn_stays_in_opening_and_persists_reply(env, monkey
     # —— 单 session：没交单就没有移交 ——
     assert len(prov.sessions) == 1
     # 仍是开场工具集，且守卫未上膛（预算没用尽，不该强制交单）
-    assert tool_names(prov.sessions[0].tools) == ["submit_reading_brief"]
+    assert tool_names(prov.sessions[0].tools) == [
+        "submit_reading_brief", "request_user_profile"]
     assert prov.sessions[0].force_tool is None
 
     # —— 追问正常流式吐给用户，且没有任何工具事件外泄 ——
@@ -364,10 +409,11 @@ def test_opening_clarifying_turn_stays_in_opening_and_persists_reply(env, monkey
     })
     assert resp2.status_code == 200
 
-    assert tool_names(prov2.sessions[0].tools) == ["submit_reading_brief"]
+    assert tool_names(prov2.sessions[0].tools) == [
+        "submit_reading_brief", "request_user_profile"]
     system_text = prov2.sessions[0].system
     assert "关系上下文" in system_text          # 开场幕提示词（含关系块）
-    assert "本场策略单" not in system_text      # 而不是解读相位那份
+    assert "本场起手" not in system_text        # 而不是解读相位那份
     assert _get_conversation(conv.conversation_id).phase == "opening"
 
 
@@ -384,7 +430,7 @@ def test_reading_phase_never_hands_off(env, monkeypatch):
 
     scripts = [[
         _text_call("我们来看看。", "draw_tarot_cards",
-                   {"spread_type": "single", "card_count": 1}),
+                   {"spread_type": "single", "positions": ["今日指引"]}),
         _text("抽一张吧。"),
     ]]
     prov = _install_gemini(monkeypatch, scripts)
@@ -399,7 +445,7 @@ def test_reading_phase_never_hands_off(env, monkeypatch):
     # 只开了一个 session = 没有移交
     assert len(prov.sessions) == 1
 
-    # 工具集是完整解读工具集（含抽牌；交单仍在，供中途改判）
+    # 工具集是完整解读工具集（含抽牌；不含交单——起手单是一次性记录）
     from services.llm import tools
     assert tool_names(prov.sessions[0].tools) == tools.READING_TOOL_NAMES
     assert "draw_tarot_cards" in tools.READING_TOOL_NAMES
@@ -419,21 +465,22 @@ def test_reading_phase_never_hands_off(env, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_handoff_preserves_full_history_including_last_user_message(env, monkeypatch):
-    """用户最后一句是读人的关键素材：移交重建 session 时它必须在 history 里，不能被丢。
+    """用户最后一句必须原样发给解读 Agent —— 开场 Agent 这一轮没回他，那句话还悬着。
 
-    非移交路径下 last_user = 最后一条用户消息、history 不含它；移交路径把它整个塞进
-    history、待发消息换成移交指令 —— 一旦写错就是「占卜师听不见用户最后那句话」。
+    移交后的 session 与普通一轮完全同形：history 是之前的对话，待发消息就是用户
+    最后那句。写错就是「占卜师听不见用户最后那句话」。
     """
     last_user_line = "上周三他突然不回我消息了，我是不是该主动一点？"
-    conv = _seed_conversation("opening", _greeting_and_user("我想问感情"))
+    conv = _seed_conversation("opening", _greeting_and_user("我想问事业"),
+                              session_type=SessionType.ASTROLOGY)
 
     scripts = [
-        [_call("submit_reading_brief", BRIEF_ARGS)],
+        [_call("submit_reading_brief", BRIEF_ASTRO)],
         [_text(TRANSITION)],
     ]
     prov = _install_gemini(monkeypatch, scripts)
 
-    resp = env.post("/api/tarot/message", json={
+    resp = env.post("/api/astrology/message", json={
         "conversation_id": conv.conversation_id,
         "content": last_user_line,
     })
@@ -443,37 +490,32 @@ def test_handoff_preserves_full_history_including_last_user_message(env, monkeyp
     flat = [(m["role"], m["content"]) for m in handoff.history]
     history_text = "\n".join(c for _, c in flat)
 
-    # 用户最后那句澄清回答在移交后的历史里，且角色是 user
-    assert last_user_line in history_text
-    assert ("user", last_user_line) in flat
-    # 之前的对话也一句不少
-    assert "我想问感情" in history_text
+    # 之前的对话一句不少
+    assert "我想问事业" in history_text
     assert "坐吧，阿岚。今天想聊些什么？" in history_text
-    # 移交后发给模型的第一条不是用户消息，而是移交指令（用户消息已在 history）
-    kind, sent_text = handoff.sent[0]
-    assert kind == "user"
-    assert last_user_line not in sent_text
+    # 用户最后那句原样发给解读 Agent，不是塞进 history 再另发一条移交指令
+    assert handoff.sent[0] == ("user", last_user_line)
+    assert last_user_line not in history_text
     # 策略单已注入解读 Agent 的系统提示词
-    assert "本场策略单" in handoff.system and "求认同" in handoff.system
+    assert "本场起手" in handoff.system and "我这两年的事业格局" in handoff.system
 
 
 def test_handoff_history_has_no_two_consecutive_user_turns(env, monkeypatch):
-    """移交后角色必须交替：history 以 assistant 收尾，紧接着的移交指令（user）才不会撞车。
+    """移交后角色必须交替，且不靠任何补进去的占位发言。
 
-    移交时 history 的最后一条是用户的澄清回答（user），而移交指令又是一个 user turn
-    —— 连续两个 user，模型可能把移交指令当成用户说的话来回应。补一条 assistant 确认语
-    保持交替（本文件既有惯例：系统提示词后的「我明白了。」、抽牌结果后的「我看到了…」）。
+    history 以 assistant 收尾、待发的是用户最后那句（user），交替天然成立。
     """
     last_user_line = "上周三他突然不回我消息了"
-    conv = _seed_conversation("opening", _greeting_and_user("我想问感情"))
+    conv = _seed_conversation("opening", _greeting_and_user("我想问事业"),
+                              session_type=SessionType.ASTROLOGY)
 
     scripts = [
-        [_call("submit_reading_brief", BRIEF_ARGS)],
+        [_call("submit_reading_brief", BRIEF_ASTRO)],
         [_text(TRANSITION)],
     ]
     prov = _install_gemini(monkeypatch, scripts)
 
-    resp = env.post("/api/tarot/message", json={
+    resp = env.post("/api/astrology/message", json={
         "conversation_id": conv.conversation_id, "content": last_user_line,
     })
     assert resp.status_code == 200
@@ -483,14 +525,13 @@ def test_handoff_history_has_no_two_consecutive_user_turns(env, monkeypatch):
 
     # 1) history 内部无连续两个 user
     assert not any(a == b == "user" for a, b in zip(roles, roles[1:])), roles
-    # 2) history 以 assistant 收尾 —— 下一条（移交指令，user）接上去仍是交替
+    # 2) history 以 assistant 收尾 —— 紧接着发的用户那句接上去仍是交替
     assert roles[-1] == "assistant", roles
-    # 3) 移交指令确实是紧随其后的那个 user turn
-    kind, _sent_text = prov.sessions[1].sent[0]
-    assert kind == "user"
-    # 4) 为了交替而补的 assistant 确认语，不能把用户最后那句澄清挤掉
-    flat = [(m["role"], m["content"]) for m in history]
-    assert ("user", last_user_line) in flat
+    # 3) 没有为了凑交替而补进去的占位发言
+    assert [m["content"] for m in history if m["role"] == "assistant"] == [
+        "坐吧，阿岚。今天想聊些什么？", "嗯，再说说。"]
+    # 4) 紧随其后发出的就是用户最后那句
+    assert prov.sessions[1].sent[0] == ("user", last_user_line)
 
 
 # ---------------------------------------------------------------------------
@@ -510,17 +551,17 @@ def test_force_brief_guard_reaches_model_as_force_tool(env, monkeypatch):
     history = _greeting_and_user(
         *[f"不知道欸{i}" for i in range(config.OPENING_FORCE_BRIEF_AFTER_USER_MSGS - 1)]
     )
-    conv = _seed_conversation("opening", history)
+    conv = _seed_conversation("opening", history, session_type=SessionType.ASTROLOGY)
 
     scripts = [
         # 守卫上膛后，模型在解码层已无法输出纯文本 —— 只能交单
-        [_call("submit_reading_brief", BRIEF_ARGS)],
-        # 交单 → 同轮移交给解读 Agent
+        # 走星盘路线，这样移交后的解读 session 会被开出来，能一并验它没被守卫污染
+        [_call("submit_reading_brief", BRIEF_ASTRO)],
         [_text(TRANSITION)],
     ]
     prov = _install_gemini(monkeypatch, scripts)
 
-    resp = env.post("/api/tarot/message", json={
+    resp = env.post("/api/astrology/message", json={
         "conversation_id": conv.conversation_id,
         "content": "还是说不上来",
     })
@@ -529,7 +570,7 @@ def test_force_brief_guard_reaches_model_as_force_tool(env, monkeypatch):
     # —— 核心断言：守卫真的到达了 provider（不是只在 service 里算了个 bool） ——
     assert prov.sessions[0].force_tool == "submit_reading_brief"
     # 允许的函数必须真在本轮工具集里，否则 mode=ANY 指名一个不存在的函数 = API 报错
-    assert tool_names(prov.sessions[0].tools) == ["submit_reading_brief"]
+    assert "submit_reading_brief" in tool_names(prov.sessions[0].tools)
 
     # —— 移交后的解读 session 绝不能继续带着守卫（否则解读 Agent 也被逼着只能交单） ——
     assert prov.sessions[1].force_tool is None
@@ -538,7 +579,41 @@ def test_force_brief_guard_reaches_model_as_force_tool(env, monkeypatch):
     # —— 守卫达成了它的目的：本轮收到策略单，会话离开开场幕 ——
     saved = _get_conversation(conv.conversation_id)
     assert saved.phase == "reading"
-    assert saved.strategy == BRIEF_ARGS
+    assert saved.strategy == BRIEF_ASTRO
+
+
+def test_forced_brief_speaks_for_the_model_before_the_drawer(env, monkeypatch):
+    """守卫上膛（mode=ANY）+ 塔罗路线 → 抽牌器前面补一句。
+
+    这是整条链路上唯一需要 harness 代言的地方：force 上膛时模型在解码层只能输出
+    函数调用，一个字也发不出来 —— 那个沉默不是它的选择。别的路径一律不补。
+    """
+    import config
+
+    history = _greeting_and_user(
+        *[f"不知道欸{i}" for i in range(config.OPENING_FORCE_BRIEF_AFTER_USER_MSGS - 1)]
+    )
+    conv = _seed_conversation("opening", history)
+    prov = _install_gemini(monkeypatch, [[_call("submit_reading_brief", BRIEF_ARGS)]])
+
+    resp = env.post("/api/tarot/message", json={
+        "conversation_id": conv.conversation_id,
+        "content": "还是说不上来",
+    })
+    assert resp.status_code == 200
+    events, done = _sse(resp.text)
+    assert done
+
+    # 守卫确实上膛了（否则这个测试测的是别的东西）
+    assert prov.sessions[0].force_tool == "submit_reading_brief"
+
+    # 代言的那句话先到，抽牌器后到，并作为正式发言落库
+    assert _sse_text(events) == context_service.FORCED_BRIEF_HANDOFF_LINE
+    first_draw = next(i for i, e in enumerate(events) if "draw_cards" in e)
+    assert "content" in events[0] and first_draw > 0
+    saved = _get_conversation(conv.conversation_id)
+    assert saved.messages[-1].content == context_service.FORCED_BRIEF_HANDOFF_LINE
+    assert saved.messages[-1].role == MessageRole.ASSISTANT
 
 
 # ---------------------------------------------------------------------------
@@ -577,3 +652,75 @@ def test_hard_exit_guard_forces_reading_phase_when_opening_overruns(
     saved = _get_conversation(conv.conversation_id)
     assert saved.phase == "reading"
     assert saved.strategy is None  # 兜底不伪造假策略单
+
+
+# ---------------------------------------------------------------------------
+# 7. 张数完全由 positions 决定——没有单独的张数字段可以和它对不上
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("positions", [
+    pytest.param(["今日指引"], id="1张"),
+    pytest.param(["现状", "阻碍", "流向"], id="3张"),
+    pytest.param(["现状", "A 的走向", "A 的代价", "B 的走向", "B 的代价"], id="5张"),
+    pytest.param([f"第{i}位" for i in range(1, 11)], id="10张·凯尔特十字"),
+])
+def test_any_number_of_positions_survives_the_whole_round_trip(env, monkeypatch, positions):
+    """起手单写几个位置，前端就收到几个位置，抽牌就抽几张。
+
+    这里锁的是「一个事实只有一份」：牌阵由位置定义，张数是它的长度。曾经张数是独立
+    字段，模型填 5 张却只给 3 个位置时，前端会画出 5 个槽位配「位置4 / 位置5」，
+    落库之后每次重放历史还会按位置索引越界 —— 那条路现在从数据形状上就不存在了。
+    """
+    from services.tarot_service import TarotService
+    from models import DrawCardsRequest
+
+    conv = _seed_conversation("opening", _greeting_and_user("想问问这件事"))
+    brief = {"question": "他还会回头吗", "route": "tarot",
+             "spread_type": "custom", "positions": positions}
+    _install_gemini(monkeypatch, [[_call("submit_reading_brief", brief)]])
+
+    resp = env.post("/api/tarot/message", json={
+        "conversation_id": conv.conversation_id,
+        "content": "上周三他突然不回我消息了",
+    })
+    assert resp.status_code == 200
+    events, _ = _sse(resp.text)
+
+    # 推给前端的槽位 = 起手单里的位置，逐字一致
+    draws = [e["draw_cards"] for e in events if "draw_cards" in e]
+    assert len(draws) == 1
+    assert draws[0]["positions"] == positions
+
+    # 真正抽牌时张数也随之而来，不需要任何地方再声明一次
+    cards = TarotService.draw_cards(DrawCardsRequest(**draws[0]))
+    assert len(cards) == len(positions)
+
+    # 落库的起手单同样只有位置
+    saved = _get_conversation(conv.conversation_id)
+    assert saved.strategy["positions"] == positions
+    assert "card_count" not in saved.strategy
+
+
+# ---------------------------------------------------------------------------
+# 8. 空消息只在「开场那一次」有意义
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("session_type,endpoint", ROUTES)
+def test_empty_content_after_the_greeting_is_rejected(env, monkeypatch, session_type, endpoint):
+    """开场白已经给过之后再收到空 content —— 这个请求不成立，直接 400。
+
+    放它过去的后果两个 router 各不相同（一边往对话里塞空的用户气泡、一边把 None 发给
+    模型），因为空 content 本来就是「请开场」的暗号，不是一条消息。前端只在新建会话后
+    发一次，正常流程走不到这里。
+    """
+    conv = _seed_conversation("reading", _greeting_and_user(), session_type=session_type)
+    prov = _install_gemini(monkeypatch, [[_text("不该被调用")]])
+
+    resp = env.post(endpoint, json={"conversation_id": conv.conversation_id, "content": ""})
+
+    assert resp.status_code == 400
+    assert prov.sessions == []          # 一次模型调用都不该发生
+
+    # 对话原样不动：没有空消息落库
+    saved = _get_conversation(conv.conversation_id)
+    assert [m.content for m in saved.messages] == [m.content for m in conv.messages]

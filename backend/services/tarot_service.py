@@ -16,8 +16,8 @@ class TarotService:
         # 随机洗牌
         random.shuffle(all_cards)
         
-        # 抽取指定数量的牌
-        drawn_card_ids = all_cards[:draw_request.card_count]
+        # 抽取指定数量的牌（张数 = 牌阵位置数）
+        drawn_card_ids = all_cards[:len(draw_request.positions or [])]
         
         # 生成塔罗牌对象
         cards = []

@@ -17,6 +17,16 @@ interface TarotCardDrawerProps {
   revealOnConfirm?: boolean;
 }
 
+// 装饰星点：坐标和节奏在模块加载时定死一次。原先是在 render 里现摇 Math.random()，
+// 拖动扇形时每帧重渲染都会给所有星点换一遍坐标（每帧重排重绘），
+// transition 对象也跟着变新，framer-motion 会不停重启这些无限循环动画。
+const AMBIENT_STARS = Array.from({ length: 18 }, () => ({
+  left: `${Math.random() * 100}%`,
+  top: `${Math.random() * 100}%`,
+  duration: 2 + Math.random() * 2,
+  delay: Math.random() * 2,
+}));
+
 type ShufflePatternType = 'orbital' | 'cascade' | 'burst';
 
 interface ShuffleCardConfig {
@@ -49,6 +59,8 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
   const [shuffleRunId, setShuffleRunId] = useState(0);
   const shuffleTimeoutRef = useRef<number | null>(null);
   const finishedRef = useRef(false);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [stageHeight, setStageHeight] = useState(0);
 
   // 生成78张牌的数组
   const cards = Array.from({ length: 78 }, (_, i) => i);
@@ -60,6 +72,18 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
   const FAN_RADIUS = 500;
   const FAN_VERTICAL_SQUASH = 0.95; // 扇形压缩系数，控制整体高度
   const FAN_BASE_Y_OFFSET = 180; // 扇形整体下移偏移量
+  // 扇形从舞台底部往上真正吃掉的高度：中间那张牌的位移 + 牌高 + 头顶序号徽标
+  // （= 500*0.95 - 180 + 144 + 32）。舞台矮于这个数，轮盘就会顶进上面的槽位里，
+  // 所以按舞台实测高度整体缩放，而不是把几何常量写死。
+  const FAN_DESIGN_HEIGHT = 471;
+  // 牌阵位置即槽位，个数即抽牌张数（唯一真源，见 DrawCardsRequest）
+  const positions = drawRequest?.positions ?? [];
+  const cardCount = positions.length;
+  // 张数多时换小槽位：10 张 w-20 会在 max-w-5xl 里换行，两行槽位再次撞上轮盘
+  const isCompactSlots = cardCount > 6;
+  const fanScale = stageHeight
+    ? Math.min(1, Math.max(0.5, stageHeight / FAN_DESIGN_HEIGHT))
+    : 1;
 
   // 计算当前可见的牌
   const getCenterIndex = () => {
@@ -113,6 +137,17 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
       }
     };
   }, []);
+
+  // 舞台高度随窗口大小、槽位行的出现/换行而变 —— 实测而非猜测
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const measure = () => setStageHeight(el.getBoundingClientRect().height);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isOpen, isSpread]);
 
   const handleShuffle = () => {
     if (isShuffling) return;
@@ -237,11 +272,11 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
     if (selectedIndices.includes(index)) {
       setSelectedIndices(selectedIndices.filter((i) => i !== index));
       setShowConfirm(false);
-    } else if (selectedIndices.length < drawRequest.card_count) {
+    } else if (selectedIndices.length < cardCount) {
       const newSelected = [...selectedIndices, index];
       setSelectedIndices(newSelected);
-      if (newSelected.length === drawRequest.card_count) {
-        if (drawRequest.card_count === 1) {
+      if (newSelected.length === cardCount) {
+        if (cardCount === 1) {
           finishSelection(newSelected); // 单张:选中即确认,省去二次确认面板
         } else {
           setShowConfirm(true);
@@ -287,7 +322,7 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 isolate"
           onClick={(e) => {
             if (e.target === e.currentTarget && !isShuffling) {
               onClose();
@@ -296,22 +331,19 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
         >
           {/* 背景装饰 - 漂浮的星星 */}
           <div className="absolute inset-0 overflow-hidden pointer-events-none">
-            {Array.from({ length: 30 }).map((_, i) => (
+            {AMBIENT_STARS.map((star, i) => (
               <motion.div
                 key={i}
                 className="absolute w-1 h-1 bg-mystic-gold rounded-full"
-                style={{
-                  left: `${Math.random() * 100}%`,
-                  top: `${Math.random() * 100}%`,
-                }}
+                style={{ left: star.left, top: star.top }}
                 animate={{
                   opacity: [0, 1, 0],
                   scale: [0, 1.5, 0],
                 }}
                 transition={{
-                  duration: 2 + Math.random() * 2,
+                  duration: star.duration,
                   repeat: Infinity,
-                  delay: Math.random() * 2,
+                  delay: star.delay,
                 }}
               />
             ))}
@@ -321,10 +353,25 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.9, opacity: 0 }}
-            className="relative w-full max-w-7xl h-[85vh] glass-morphism rounded-3xl shadow-2xl overflow-hidden border border-mystic-gold/30"
+            className="relative w-full max-w-7xl h-[85vh] glass-morphism rounded-3xl shadow-2xl overflow-hidden border border-mystic-gold/30 flex flex-col"
           >
+            {/* 牌桌底图：铺满整个弹层（头部/槽位也压在它上面），z-0 垫底 */}
+            <div className="absolute inset-4 z-0 rounded-[36px] overflow-hidden pointer-events-none">
+              <div
+                className="absolute inset-0"
+                style={{
+                  backgroundImage: `url(${TABLE_BACKGROUND_IMAGE})`,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                  filter: 'brightness(0.88)',
+                }}
+              />
+              <div className="absolute inset-0 bg-[#06060f]/78" />
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,228,185,0.18),transparent_78%)] mix-blend-screen" />
+            </div>
+
             {/* Header */}
-            <div className="absolute top-0 left-0 right-0 z-20 p-6 bg-gradient-to-b from-dark-bg/90 to-transparent backdrop-blur-sm">
+            <div className="relative z-20 shrink-0 p-6 bg-gradient-to-b from-dark-bg/90 to-transparent backdrop-blur-sm">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   <motion.div
@@ -349,7 +396,7 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
                     </h2>
                     <p className="text-gray-400 font-display mt-1">
                       {isSpread
-                        ? `请选择 ${drawRequest.card_count} 张牌 (已选${selectedIndices.length}/${drawRequest.card_count})`
+                        ? `请选择 ${cardCount} 张牌 (已选${selectedIndices.length}/${cardCount})`
                         : subtitle}
                     </p>
                   </div>
@@ -368,15 +415,15 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
 
             {/* Card Slots (选牌展示位置 - 在扇形牌阵正上方) */}
             {isSpread && (
-              <div className="absolute top-[200px] left-0 right-0 z-20 px-6">
-                <div className="flex gap-3 justify-center flex-wrap max-w-4xl mx-auto">
-                  {Array.from({ length: drawRequest.card_count }).map((_, idx) => (
+              <div className="relative z-20 shrink-0 px-6 pb-2">
+                <div className="flex gap-3 justify-center flex-wrap max-w-5xl mx-auto">
+                  {positions.map((position, idx) => (
                     <motion.div
                       key={idx}
                       initial={{ opacity: 0, y: 30, scale: 0.8 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       transition={{ delay: idx * 0.1 }}
-                      className="relative w-20 h-32 rounded-lg border-2 border-dashed border-mystic-gold/40 flex flex-col items-center justify-center bg-dark-bg/50 backdrop-blur-sm overflow-hidden"
+                      className={`relative ${isCompactSlots ? 'w-14 h-24' : 'w-20 h-32'} rounded-lg border-2 border-dashed border-mystic-gold/40 flex flex-col items-center justify-center bg-dark-bg/50 backdrop-blur-sm overflow-hidden`}
                     >
                       {/* 背景光效 */}
                       {selectedIndices[idx] !== undefined && (
@@ -398,7 +445,7 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
                           animate={{ scale: 1, rotateY: 0 }}
                           className="relative text-center"
                         >
-                          <div className="text-5xl mb-2">
+                          <div className={`${isCompactSlots ? 'text-3xl mb-1' : 'text-5xl mb-2'}`}>
                             {confirmedCards[idx].reversed ? '🔮' : '✨'}
                           </div>
                           <div className="text-xs text-white font-display font-medium">
@@ -414,11 +461,13 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
                           ✨
                         </motion.div>
                       ) : (
-                        <div className="text-center">
-                          <div className="text-sm text-gray-500 font-display font-medium mb-1">
-                            {drawRequest.positions?.[idx] || `位置${idx + 1}`}
+                        <div className="text-center px-1">
+                          <div className={`${isCompactSlots ? 'text-[10px] leading-tight' : 'text-sm mb-1'} text-gray-500 font-display font-medium`}>
+                            {position}
                           </div>
-                          <div className="w-8 h-8 mx-auto border border-mystic-gold/30 rounded-lg" />
+                          {!isCompactSlots && (
+                            <div className="w-8 h-8 mx-auto border border-mystic-gold/30 rounded-lg" />
+                          )}
                         </div>
                       )}
                     </motion.div>
@@ -428,22 +477,8 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
             )}
 
             {/* Cards Display */}
-            <motion.div className="relative h-full w-full flex items-center justify-center px-6 pb-4">
-              <div className="absolute inset-4 rounded-[36px] overflow-hidden pointer-events-none">
-                <div
-                  className="absolute inset-0"
-                  style={{
-                    backgroundImage: `url(${TABLE_BACKGROUND_IMAGE})`,
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center',
-                    filter: 'brightness(0.88)',
-                  }}
-                />
-                <div className="absolute inset-0 bg-[#06060f]/78" />
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,228,185,0.18),transparent_78%)] mix-blend-screen" />
-              </div>
-
-              <div className="relative z-10 w-full h-full flex items-center justify-center">
+            <motion.div className="relative flex-1 min-h-0 w-full flex items-center justify-center px-6 pb-4">
+              <div ref={stageRef} className="relative z-10 w-full h-full flex items-center justify-center">
                 {/* 洗牌按钮 */}
                 {!isSpread && !isShuffling && (
                   <motion.div
@@ -511,9 +546,9 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
                         }}
                         transition={{ duration: 9, ease: 'easeInOut', repeat: Infinity, repeatType: 'mirror' }}
                       >
-                        <div className="absolute inset-0 rounded-full bg-[radial-gradient(ellipse_at_center,rgba(253,244,215,0.25),rgba(168,216,234,0.08)_58%,transparent_85%)] blur-[120px] mix-blend-screen" />
+                        <div className="absolute inset-0 rounded-full bg-[radial-gradient(ellipse_at_center,rgba(253,244,215,0.25),rgba(168,216,234,0.08)_58%,transparent_85%)] blur-[56px] mix-blend-screen" />
                         <motion.div
-                          className="absolute inset-[18%] rounded-full bg-[conic-gradient(from_0deg,rgba(254,240,199,0.22),rgba(168,216,234,0.07),rgba(254,240,199,0.22))] opacity-60 blur-[90px] mix-blend-screen"
+                          className="absolute inset-[18%] rounded-full bg-[conic-gradient(from_0deg,rgba(254,240,199,0.22),rgba(168,216,234,0.07),rgba(254,240,199,0.22))] opacity-60 blur-[44px] mix-blend-screen"
                           animate={{ rotate: [0, 360] }}
                           transition={{ duration: 26, repeat: Infinity, ease: 'linear' }}
                         />
@@ -562,165 +597,170 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
 
                 {/* 展开的扇形牌阵 - 可拖动扇形展开，使用绝对定位直接贴底 */}
                 {isSpread && (
-                  <motion.div
-                    className="absolute bottom-0 left-0 right-0 w-full"
-                    drag="x"
-                    dragConstraints={{ left: 0, right: 0 }}
-                    dragElastic={0.05}
-                    dragMomentum={true}
-                    onDrag={handleDrag}
-                    style={{ cursor: 'grab' }}
-                    whileDrag={{ cursor: 'grabbing' }}
+                  <div
+                    className="absolute bottom-0 left-0 right-0"
+                    style={{ transform: `scale(${fanScale})`, transformOrigin: 'bottom center' }}
                   >
-                    <div className="relative h-[280px] flex items-end justify-center pointer-events-none">
-                      <div className="relative w-full max-w-5xl">
-                        <div className="absolute inset-0 -translate-y-10 h-[320px] rounded-[360px] bg-[radial-gradient(circle_at_center,rgba(255,214,150,0.14),transparent_80%)] blur-3xl opacity-75" />
-                        {visibleCards.map((cardId, visIdx) => {
-                          const isSelected = selectedIndices.includes(cardId);
-                          const selectionOrder = selectedIndices.indexOf(cardId);
+                    <motion.div
+                      className="relative w-full"
+                      drag="x"
+                      dragConstraints={{ left: 0, right: 0 }}
+                      dragElastic={0.05}
+                      dragMomentum={true}
+                      onDrag={handleDrag}
+                      style={{ cursor: 'grab' }}
+                      whileDrag={{ cursor: 'grabbing' }}
+                    >
+                      <div className="relative h-[280px] flex items-end justify-center pointer-events-none">
+                        <div className="relative w-full max-w-5xl">
+                          <div className="absolute inset-0 -translate-y-10 h-[320px] rounded-[360px] bg-[radial-gradient(circle_at_center,rgba(255,214,150,0.14),transparent_80%)] blur-3xl opacity-75" />
+                          {visibleCards.map((cardId, visIdx) => {
+                            const isSelected = selectedIndices.includes(cardId);
+                            const selectionOrder = selectedIndices.indexOf(cardId);
 
-                          const angleSpan = 110;
-                          const halfVisible = Math.floor(VISIBLE_CARDS / 2);
-                          const relativePos = visIdx - halfVisible;
-                          const angle = (relativePos / halfVisible) * (angleSpan / 2);
-                          const radius = FAN_RADIUS;
+                            const angleSpan = 110;
+                            const halfVisible = Math.floor(VISIBLE_CARDS / 2);
+                            const relativePos = visIdx - halfVisible;
+                            const angle = (relativePos / halfVisible) * (angleSpan / 2);
+                            const radius = FAN_RADIUS;
 
-                          const distanceFromCenter = Math.abs(relativePos);
-                          const opacity = 1 - (distanceFromCenter / halfVisible) * 0.3;
-                          const scale = 1 - (distanceFromCenter / halfVisible) * 0.1;
+                            const distanceFromCenter = Math.abs(relativePos);
+                            const opacity = 1 - (distanceFromCenter / halfVisible) * 0.3;
+                            const scale = 1 - (distanceFromCenter / halfVisible) * 0.1;
 
-                          const angleRad = (angle * Math.PI) / 180;
-                          const rawX = Math.sin(angleRad) * radius;
-                          const yPosition = -Math.cos(angleRad) * radius * FAN_VERTICAL_SQUASH + FAN_BASE_Y_OFFSET;
+                            const angleRad = (angle * Math.PI) / 180;
+                            const rawX = Math.sin(angleRad) * radius;
+                            const yPosition = -Math.cos(angleRad) * radius * FAN_VERTICAL_SQUASH + FAN_BASE_Y_OFFSET;
 
-                          return (
-                            <motion.div
-                              key={cardId}
-                              initial={{
-                                x: -CARD_HALF_WIDTH,
-                                y: 0,
-                                rotate: 0,
-                                opacity: 0,
-                                scale: 0.5,
-                              }}
-                              animate={{
-                                x: rawX - CARD_HALF_WIDTH,
-                                y: yPosition + (isSelected ? -30 : 0),
-                                rotate: angle,
-                                opacity: isSelected ? 1 : opacity,
-                                scale: isSelected ? 1.15 : scale,
-                              }}
-                              transition={{
-                                duration: 0.5,
-                                type: 'spring',
-                                stiffness: 150,
-                                damping: 20,
-                              }}
-                              className="absolute left-1/2 bottom-0 cursor-pointer pointer-events-auto"
-                              style={{
-                                transformOrigin: 'bottom center',
-                                zIndex: isSelected ? 100 : Math.round((1 - Math.abs(relativePos) / halfVisible) * 50),
-                              }}
-                              onClick={() => handleCardClick(cardId)}
-                            >
+                            return (
                               <motion.div
-                                whileHover={{
-                                  scale: 1.15,
-                                  y: -20,
-                                  transition: { type: 'spring', stiffness: 300 },
+                                key={cardId}
+                                initial={{
+                                  x: -CARD_HALF_WIDTH,
+                                  y: 0,
+                                  rotate: 0,
+                                  opacity: 0,
+                                  scale: 0.5,
                                 }}
-                                className="relative"
+                                animate={{
+                                  x: rawX - CARD_HALF_WIDTH,
+                                  y: yPosition + (isSelected ? -30 : 0),
+                                  rotate: angle,
+                                  opacity: isSelected ? 1 : opacity,
+                                  scale: isSelected ? 1.15 : scale,
+                                }}
+                                transition={{
+                                  duration: 0.5,
+                                  type: 'spring',
+                                  stiffness: 150,
+                                  damping: 20,
+                                }}
+                                className="absolute left-1/2 bottom-0 cursor-pointer pointer-events-auto"
+                                style={{
+                                  transformOrigin: 'bottom center',
+                                  zIndex: isSelected ? 100 : Math.round((1 - Math.abs(relativePos) / halfVisible) * 50),
+                                }}
+                                onClick={() => handleCardClick(cardId)}
                               >
                                 <motion.div
-                                  initial={{ opacity: 0, scale: 0 }}
-                                  animate={{ opacity: 1, scale: 1 }}
-                                  transition={{ delay: 0.5 }}
-                                  className={`
-                                    absolute -top-8 left-1/2 -translate-x-1/2 z-20
-                                    w-8 h-8 rounded-full flex items-center justify-center
-                                    font-display font-bold text-xs shadow-lg
-                                    ${isSelected
-                                      ? 'bg-mystic-gold text-dark-bg ring-2 ring-mystic-gold/50'
-                                      : 'bg-dark-elevated/90 text-gray-300 border-2 border-mystic-gold/30'}
-                                  `}
+                                  whileHover={{
+                                    scale: 1.15,
+                                    y: -20,
+                                    transition: { type: 'spring', stiffness: 300 },
+                                  }}
+                                  className="relative"
                                 >
-                                  {selectionOrder >= 0 ? `✨${selectionOrder + 1}` : cardId + 1}
-                                </motion.div>
-
-                                <motion.div
-                                  className={`
-                                    w-24 h-36 rounded-lg shadow-2xl overflow-hidden
-                                    transition-all duration-300
-                                    ${
-                                      isSelected
-                                        ? 'ring-4 ring-mystic-gold shadow-mystic-gold'
-                                        : 'ring-2 ring-white/25 hover:ring-mystic-gold/60'
-                                    }
-                                  `}
-                                >
-                                  <img
-                                    src={CARD_BACK_IMAGE}
-                                    alt={`塔罗牌 ${cardId + 1}`}
-                                    className="w-full h-full object-cover"
-                                    draggable={false}
-                                  />
-                                </motion.div>
-
-                                {isSelected && (
                                   <motion.div
-                                    className="absolute inset-0 rounded-lg pointer-events-none"
-                                    animate={{
-                                      boxShadow: [
-                                        '0 0 18px rgba(201, 169, 110, 0.5)',
-                                        '0 0 34px rgba(240, 208, 144, 0.85)',
-                                        '0 0 18px rgba(201, 169, 110, 0.5)',
-                                      ],
-                                    }}
-                                    transition={{
-                                      duration: 1.5,
-                                      repeat: Infinity,
-                                    }}
-                                  />
-                                )}
+                                    initial={{ opacity: 0, scale: 0 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    transition={{ delay: 0.5 }}
+                                    className={`
+                                      absolute -top-8 left-1/2 -translate-x-1/2 z-20
+                                      w-8 h-8 rounded-full flex items-center justify-center
+                                      font-display font-bold text-xs shadow-lg
+                                      ${isSelected
+                                        ? 'bg-mystic-gold text-dark-bg ring-2 ring-mystic-gold/50'
+                                        : 'bg-dark-elevated/90 text-gray-300 border-2 border-mystic-gold/30'}
+                                    `}
+                                  >
+                                    {selectionOrder >= 0 ? `✨${selectionOrder + 1}` : cardId + 1}
+                                  </motion.div>
+
+                                  <motion.div
+                                    className={`
+                                      w-24 h-36 rounded-lg shadow-2xl overflow-hidden
+                                      transition-all duration-300
+                                      ${
+                                        isSelected
+                                          ? 'ring-4 ring-mystic-gold shadow-mystic-gold'
+                                          : 'ring-2 ring-white/25 hover:ring-mystic-gold/60'
+                                      }
+                                    `}
+                                  >
+                                    <img
+                                      src={CARD_BACK_IMAGE}
+                                      alt={`塔罗牌 ${cardId + 1}`}
+                                      className="w-full h-full object-cover"
+                                      draggable={false}
+                                    />
+                                  </motion.div>
+
+                                  {isSelected && (
+                                    <motion.div
+                                      className="absolute inset-0 rounded-lg pointer-events-none"
+                                      animate={{
+                                        boxShadow: [
+                                          '0 0 18px rgba(201, 169, 110, 0.5)',
+                                          '0 0 34px rgba(240, 208, 144, 0.85)',
+                                          '0 0 18px rgba(201, 169, 110, 0.5)',
+                                        ],
+                                      }}
+                                      transition={{
+                                        duration: 1.5,
+                                        repeat: Infinity,
+                                      }}
+                                    />
+                                  )}
+                                </motion.div>
                               </motion.div>
-                            </motion.div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
 
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ delay: 1 }}
-                      className="absolute top-[160px] inset-x-0 flex justify-center z-50"
-                    >
                       <motion.div
-                        drag="x"
-                        dragConstraints={{ left: 0, right: 0 }}
-                        dragElastic={0.05}
-                        dragMomentum={true}
-                        onDrag={handleDrag}
-                        whileHover={{ scale: 1.03 }}
-                        whileDrag={{ scale: 1.08, cursor: 'grabbing' }}
-                        className="relative w-[210px] h-2 rounded-full bg-dark-elevated/80 backdrop-blur-sm border border-mystic-gold/30 shadow-lg cursor-grab"
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: 1 }}
+                        className="absolute top-[160px] inset-x-0 flex justify-center z-50"
                       >
-                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-mystic-gold/15 to-transparent pointer-events-none" />
-
                         <motion.div
-                          className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 pointer-events-none"
-                          animate={{
-                            left: `${sliderProgress * 100}%`,
-                          }}
-                          transition={{ type: 'spring', stiffness: 200, damping: 24 }}
+                          drag="x"
+                          dragConstraints={{ left: 0, right: 0 }}
+                          dragElastic={0.05}
+                          dragMomentum={true}
+                          onDrag={handleDrag}
+                          whileHover={{ scale: 1.03 }}
+                          whileDrag={{ scale: 1.08, cursor: 'grabbing' }}
+                          className="relative w-[210px] h-2 rounded-full bg-dark-elevated/80 backdrop-blur-sm border border-mystic-gold/30 shadow-lg cursor-grab"
                         >
-                          <div className="relative w-6 h-6 rounded-full bg-mystic-gold shadow-[0_0_18px_rgba(251,191,36,0.8)] border-2 border-dark-elevated/80">
-                            <div className="absolute inset-1 rounded-full bg-dark-elevated/90" />
-                          </div>
+                          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-mystic-gold/15 to-transparent pointer-events-none" />
+
+                          <motion.div
+                            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 pointer-events-none"
+                            animate={{
+                              left: `${sliderProgress * 100}%`,
+                            }}
+                            transition={{ type: 'spring', stiffness: 200, damping: 24 }}
+                          >
+                            <div className="relative w-6 h-6 rounded-full bg-mystic-gold shadow-[0_0_18px_rgba(251,191,36,0.8)] border-2 border-dark-elevated/80">
+                              <div className="absolute inset-1 rounded-full bg-dark-elevated/90" />
+                            </div>
+                          </motion.div>
                         </motion.div>
                       </motion.div>
                     </motion.div>
-                  </motion.div>
+                  </div>
                 )}
               </div>
             </motion.div>
@@ -764,7 +804,7 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
               <motion.div
                 initial={{ opacity: 0, scale: 0.8 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-md z-30"
+                className="absolute inset-0 flex items-center justify-center bg-black/85 z-30"
               >
                 <div className="text-center">
                   <motion.div

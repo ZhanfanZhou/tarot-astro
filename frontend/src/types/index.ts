@@ -57,7 +57,8 @@ export interface TarotCard {
 
 export interface DrawCardsRequest {
   spread_type: string;
-  card_count: number;
+  /** 牌阵每个位置的含义。长度即抽牌张数——牌阵由位置定义，没有单独的张数字段。
+   *  可空只为读 2026-07 之前的历史消息；新的抽牌请求一定带。 */
   positions?: string[];
 }
 

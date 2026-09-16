@@ -1,4 +1,5 @@
 """GeminiProvider：中性输入 → 复刻今天的 start_chat/send_message SDK 用法。全程 mock genai。"""
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -42,6 +43,49 @@ def test_send_user_returns_tool_call():
         r = asyncio.run(sess.send_user("他冷淡了"))
     assert r.tool_calls[0].name == "submit_reading_brief"
     assert r.tool_calls[0].args["user_goal"] == "求认同"
+
+
+class _FakeRepeated:
+    """模仿 proto 的 RepeatedComposite：可迭代，但不是 list。"""
+
+    def __init__(self, items):
+        self._items = items
+
+    def __iter__(self):
+        return iter(self._items)
+
+
+def test_tool_call_args_come_back_as_plain_python():
+    """proto 只在这一层出现，转换也只在这一层做。
+
+    下游（落库 json.dumps、拼提示词、SSE 推前端）拿到的必须已经是纯 python：
+    RepeatedComposite 漏下去会让 json.dumps 当场抛 TypeError，float 漏下去会让
+    起手单里的张数显示成「3.0」。
+    """
+    from services.llm.gemini_provider import GeminiProvider
+    from services.llm import tools
+    raw = {
+        "route": "tarot",
+        "positions": _FakeRepeated(["过去", "现在", "未来"]),
+        "nested": {"n": 5.0, "deep": _FakeRepeated([1.0, 2.0])},
+        "ratio": 0.5,          # 真正的小数不该被截成 int
+        "flag": True,          # bool 是 int 的子类，不能被数字分支吃掉
+    }
+    chat = MagicMock()
+    chat.send_message_async = AsyncMock(
+        return_value=_resp([_fc_part("submit_reading_brief", raw)]))
+    model = MagicMock(start_chat=MagicMock(return_value=chat))
+    with patch("services.llm.gemini_provider.genai.GenerativeModel", return_value=model):
+        sess = GeminiProvider("gemini-x").open_session(
+            "SYS", [], tools=tools.specs_by_names(["submit_reading_brief"]))
+        r = asyncio.run(sess.send_user("他冷淡了"))
+
+    args = r.tool_calls[0].args
+    assert args["positions"] == ["过去", "现在", "未来"]
+    assert args["nested"] == {"n": 5, "deep": [1, 2]}
+    assert args["ratio"] == 0.5
+    assert args["flag"] is True
+    json.dumps(args)   # 落库这一步不能炸
 
 
 def test_force_tool_sets_mode_any():

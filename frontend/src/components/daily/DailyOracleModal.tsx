@@ -13,7 +13,6 @@ import type { DailyDayView, DailyOverview, DrawCardsRequest } from '@/types';
 
 const DAILY_DRAW_REQUEST: DrawCardsRequest = {
   spread_type: 'single',
-  card_count: 1,
   positions: ['今日指引'],
 };
 // 与后端 services/daily_service.py 的 JOURNEY_MIN_RECORDS 保持一致

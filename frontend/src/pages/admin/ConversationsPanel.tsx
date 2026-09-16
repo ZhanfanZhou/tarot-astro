@@ -9,18 +9,14 @@ const TYPE_LABELS: Record<string, string> = {
   tarot: '塔罗', astrology: '星盘', chat: '聊愈', daily: '每日一签',
 };
 
-// 策略单字段固定顺序 + 中文标签，与 backend/services/context_service.py 的
+// 起手单字段固定顺序 + 中文标签，与 backend/services/context_service.py 的
 // _BRIEF_LABELS 保持一致。
 const BRIEF_LABELS: Array<[keyof ReadingBrief, string]> = [
-  ['question_topic', '议题'],
-  ['user_goal', '目标类型'],
-  ['emotional_intensity', '情绪浓度'],
-  ['pacing', '节奏'],
-  ['context_summary', '背景'],
-  ['desired_takeaway', '想带走'],
-  ['tool_route', '路线'],
-  ['suggested_spread', '牌阵'],
-  ['reading_strategy', '解读策略'],
+  ['question', '问题'],
+  ['context', '背景'],
+  ['route', '起手'],
+  ['spread_type', '牌阵'],
+  ['positions', '位置'],
 ];
 
 const fmtTime = (iso?: string) => (iso ? iso.slice(0, 16).replace('T', ' ') : '');
@@ -119,14 +115,17 @@ export default function ConversationsPanel() {
           </div>
           {detail.strategy && (
             <div className="strategy-brief">
-              <div className="strategy-brief-title">本场策略单（开场读人结论 · 不对用户外露）</div>
+              <div className="strategy-brief-title">本场起手（开场定下的记录 · 不对用户外露）</div>
               <dl>
-                {BRIEF_LABELS.filter(([key]) => detail.strategy?.[key]).map(([key, label]) => (
-                  <div className="strategy-brief-row" key={key}>
-                    <dt>{label}</dt>
-                    <dd>{detail.strategy?.[key]}</dd>
-                  </div>
-                ))}
+                {BRIEF_LABELS.filter(([key]) => detail.strategy?.[key]).map(([key, label]) => {
+                  const value = detail.strategy?.[key];
+                  return (
+                    <div className="strategy-brief-row" key={key}>
+                      <dt>{label}</dt>
+                      <dd>{Array.isArray(value) ? value.join(' / ') : value}</dd>
+                    </div>
+                  );
+                })}
               </dl>
             </div>
           )}

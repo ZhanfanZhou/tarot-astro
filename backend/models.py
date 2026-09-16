@@ -75,8 +75,10 @@ class TarotCard(BaseModel):
 
 class DrawCardsRequest(BaseModel):
     spread_type: str
-    card_count: int
-    positions: Optional[List[str]] = None  # 牌阵中每个位置的含义
+    # 牌阵中每个位置的含义。长度就是抽牌张数——牌阵由位置定义，再单独存一个
+    # card_count 只会和它对不上（那个字段已删，存量记录里的会被忽略）。
+    # 仍可空：2026-07 之前的记录有 positions=null，要能读回来。新请求一律带。
+    positions: Optional[List[str]] = None
 
 
 class Message(BaseModel):

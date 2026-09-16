@@ -18,17 +18,16 @@ DRAW_TAROT_CARDS = {
                 "description": "牌阵类型，你需要根据抽牌的目的，准确判断，选择适合的牌阵",
                 # "enum": ["single", "three_card", "celtic_cross", "custom"]
             },
-            "card_count": {
-                "type": "integer",
-                "description": "抽牌数量，必须和牌阵类型相匹配，`positions`参数必须和`card_count`参数相匹配。"
-            },
             "positions": {
                 "type": "array",
-                "description": "牌阵中每个位置的简要含义，或位置简单描述，例如：['过去', '现在', '未来']，如果是日运，则：['运势']",
+                "description": (
+                    "牌阵中每个位置的简要含义，例如：['过去', '现在', '未来']，如果是日运，则：['运势']。"
+                    "抽几张由这里的个数决定，牌阵类型要和它相匹配"
+                ),
                 "items": {"type": "string"}
             }
         },
-        "required": ["spread_type", "card_count"]
+        "required": ["spread_type", "positions"]
     },
 }
 
@@ -107,58 +106,39 @@ READ_DIVINATION_NOTEBOOK = {
 SUBMIT_READING_BRIEF = {
     "name": "submit_reading_brief",
     "description": (
-        "开场读人完成时调用，提交本场占卜的策略单。"
-        "调用后你的开场工作即结束，占卜正式开始——不要在调用的同时说话，"
-        "过渡语由解读阶段负责。"
-        "若用户中途更换了完全不同的新问题，可以再次调用以覆盖策略单。"
+        "开场定义完成时调用，提交本场占卜的起手单：问题是什么、用什么起手。"
+        "调用后你的开场工作即结束，占卜正式开始。"
     ),
     "parameters": {
         "type": "object",
         "properties": {
-            "question_topic": {
+            "question": {
                 "type": "string",
-                "description": "议题：感情 / 事业 / 财务 / 自我成长 / 综合 / 玄学知识",
+                "description": "一句话、可以直接起卦的具体问题，如「该不该接这个外地的 offer」",
             },
-            "user_goal": {
-                "type": "string",
-                "description": (
-                    "用户想从这次占卜带走什么："
-                    "求认同（心里已有答案，来找支持）/ "
-                    "辅助决策（有选项，卡在选择）/ "
-                    "看清现状（迷雾中，要一张地图）/ "
-                    "探索好奇（无急事，向内看）"
-                ),
-            },
-            "emotional_intensity": {
-                "type": "string",
-                "description": "情绪浓度：低 / 中 / 高",
-            },
-            "context_summary": {
+            "context": {
                 "type": "string",
                 "description": "2-3 句：用户的叙事背景，发生了什么",
             },
-            "desired_takeaway": {
+            "route": {
                 "type": "string",
-                "description": "一句话：用户真正想带走的东西",
+                "enum": ["tarot", "astrology"],
+                "description": "这场占卜用什么起手：tarot=抽牌，astrology=看本命盘。两个都想用就填先做的那个",
             },
-            "tool_route": {
+            "spread_type": {
                 "type": "string",
-                "description": "塔罗优先 / 星盘优先 / 结合。默认取用户入口偏好",
+                "description": "route=tarot 时必填：牌阵名，如 three_card / two_choice / celtic_cross",
             },
-            "suggested_spread": {
-                "type": "string",
-                "description": "塔罗路线时：牌阵名 + 各位置含义，如「三张关系阵（现状/他的态度/流向）」",
-            },
-            "reading_strategy": {
-                "type": "string",
-                "description": "验证式（求认同）/ 决策式（辅助决策）/ 探索式（看清现状、探索好奇）",
-            },
-            "pacing": {
-                "type": "string",
-                "description": "快（少铺垫，用户想直接看结果）/ 深（愿意慢慢聊）",
+            "positions": {
+                "type": "array",
+                "description": (
+                    "route=tarot 时必填：每个位置代表什么，如 ['现状', '阻碍', '流向']。"
+                    "抽几张由这里的个数决定，几张都可以"
+                ),
+                "items": {"type": "string"},
             },
         },
-        "required": ["question_topic", "user_goal", "emotional_intensity", "reading_strategy"],
+        "required": ["question", "route"],
     },
 }
 
@@ -168,8 +148,11 @@ ALL_TOOL_SPECS = [DRAW_TAROT_CARDS, GET_ASTROLOGY_CHART, REQUEST_USER_PROFILE,
 # 与 gemini_service._select_tools 现有语义一一对应
 DAILY_TOOL_NAMES = ["draw_tarot_cards", "get_astrology_chart",
                     "request_user_profile", "read_divination_notebook"]
-READING_TOOL_NAMES = DAILY_TOOL_NAMES + ["submit_reading_brief"]
-OPENING_TOOL_NAMES = ["submit_reading_brief"]
+# 解读相位不再持有 submit_reading_brief：起手单是「这场怎么开的」的一次性记录，
+# 不是可改写的当前状态。解读中要换牌阵/补抽，直接调 draw_tarot_cards 即可。
+READING_TOOL_NAMES = list(DAILY_TOOL_NAMES)
+# 开场相位要能替星盘路线要出生信息，否则它没法自己判断这条路走不走得通
+OPENING_TOOL_NAMES = ["submit_reading_brief", "request_user_profile"]
 
 _BY_NAME = {t["name"]: t for t in ALL_TOOL_SPECS}
 

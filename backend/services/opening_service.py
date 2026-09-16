@@ -100,7 +100,7 @@ async def save_strategy(conversation: Conversation, strategy: dict) -> Conversat
         target.phase = context_service.PHASE_READING
 
     await StorageService.save_conversation(target)
-    print(f"[Opening] 📋 策略单已落库: {strategy.get('user_goal')} / {strategy.get('reading_strategy')}")
+    print(f"[Opening] 📋 起手单已落库: {strategy.get('route')} / {strategy.get('question')}")
     return conversation
 
 
@@ -116,7 +116,6 @@ async def _generate_greeting_via_llm(prompt: str) -> str:
     return await provider.generate_text(
         prompt,
         temperature=1.0,      # 开场白要每次都不一样
-        max_tokens=200,
         timeout=config.OPENING_GREETING_TIMEOUT_SECONDS,
     )
 

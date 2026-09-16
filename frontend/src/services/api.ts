@@ -219,7 +219,6 @@ export const tarotApi = {
             } else if (parsed.draw_cards) {
               console.log('[Frontend SSE] 收到抽牌指令:', parsed.draw_cards);
               console.log('[Frontend SSE] parsed.draw_cards.spread_type:', parsed.draw_cards.spread_type);
-              console.log('[Frontend SSE] parsed.draw_cards.card_count:', parsed.draw_cards.card_count);
               console.log('[Frontend SSE] parsed.draw_cards.positions:', parsed.draw_cards.positions);
               onDrawCards(parsed.draw_cards);
             } else if (parsed.need_profile && onNeedProfile) {
@@ -243,7 +242,6 @@ export const tarotApi = {
     console.log('[Frontend API] conversationId:', conversationId);
     console.log('[Frontend API] drawRequest:', drawRequest);
     console.log('[Frontend API] drawRequest.spread_type:', drawRequest.spread_type);
-    console.log('[Frontend API] drawRequest.card_count:', drawRequest.card_count);
     console.log('[Frontend API] drawRequest.positions:', drawRequest.positions);
     
     const response = await api.post('/api/tarot/draw', drawRequest, {
@@ -358,7 +356,6 @@ export const astrologyApi = {
     console.log('[Frontend API] conversationId:', conversationId);
     console.log('[Frontend API] drawRequest:', drawRequest);
     console.log('[Frontend API] drawRequest.spread_type:', drawRequest.spread_type);
-    console.log('[Frontend API] drawRequest.card_count:', drawRequest.card_count);
     console.log('[Frontend API] drawRequest.positions:', drawRequest.positions);
     
     const response = await api.post('/api/astrology/draw', drawRequest, {

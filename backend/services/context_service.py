@@ -73,77 +73,85 @@ async def build_relationship_meta(user_id: str, current_conversation_id: str) ->
 
 
 def render_relationship_block(meta: dict) -> str:
-    """关系上下文块。新客与回头客两种变体；回头客明令禁止翻旧账。"""
+    """关系上下文块：只注入事实（称呼/第几次/距上次多久）。
+
+    「新客要安静、回头客要熟人语气、禁止翻旧账」这类语气指令已搬进 opening_system.md
+    （管理页可在线改）。这里留纯数据，代码里不再藏文案。
+    """
     nickname = meta.get("nickname") or "朋友"
     visit_count = meta.get("visit_count", 1)
 
-    if visit_count <= 1:
-        return (
-            "<关系上下文>\n"
-            f"称呼：{nickname} ｜ 首次来访\n"
-            "（新客：安静、稳、留白，给他开口的空间）"
-        )
-
-    days = meta.get("days_since_last")
-    gap = f"距上次：{days} 天" if days is not None else "距上次：不详"
-    return (
-        "<关系上下文>\n"
-        f"称呼：{nickname} ｜ 来访：第 {visit_count} 次 ｜ {gap}\n"
-        "（回头客：熟人语气，不主动提及任何旧话题、旧问题、旧牌面）"
-    )
+    line = f"称呼：{nickname} ｜ 来访：第 {visit_count} 次"
+    if visit_count > 1:
+        days = meta.get("days_since_last")
+        line += f" ｜ 距上次：{days} 天" if days is not None else " ｜ 距上次：不详"
+    return f"<关系上下文>\n{line}"
 
 
 _BRIEF_LABELS = [
-    ("question_topic", "议题"),
-    ("user_goal", "目标类型"),
-    ("emotional_intensity", "情绪浓度"),
-    ("pacing", "节奏"),
-    ("context_summary", "背景"),
-    ("desired_takeaway", "想带走"),
-    ("tool_route", "路线"),
-    ("suggested_spread", "牌阵"),
-    ("reading_strategy", "解读策略"),
+    ("question", "问题"),
+    ("context", "背景"),
+    ("route", "起手"),
+    ("spread_type", "牌阵"),
+    ("positions", "位置"),
 ]
 
 
 def render_brief_block(strategy: Optional[dict]) -> str:
-    """策略单块。None/空 → 空串（存量会话与守卫兜底场景，解读 Agent 表现同改动前）。"""
+    """起手单块。None/空 → 空串（存量会话与守卫兜底场景，解读 Agent 表现同改动前）。
+
+    措辞是「本场起手」而不是「当前策略」：它是开场定下的一次性记录，用户后来换了角度、
+    补抽了别的牌阵都不会回写这里，解读 Agent 不该拿它当当前指令用。
+    """
     if not strategy:
         return ""
-    lines = [
-        f"{label}：{strategy[key]}"
-        for key, label in _BRIEF_LABELS
-        if strategy.get(key)
-    ]
+    lines = []
+    for key, label in _BRIEF_LABELS:
+        value = strategy.get(key)
+        if not value:
+            continue
+        if isinstance(value, (list, tuple)):
+            value = " / ".join(str(v) for v in value)
+        lines.append(f"{label}：{value}")
     if not lines:
         return ""
     return (
-        "\n\n# <本场策略单>（开场读人的结论，内部参考，绝不向用户外露，"
-        "不要复述、不要向用户解释你的分类）\n" + "\n".join(lines)
+        "\n\n# <本场起手>（开场时定下的记录，内部参考，绝不向用户外露）\n"
+        + "\n".join(lines)
     )
 
 
 _GUARD_INSTRUCTION = (
     "\n\n# <本轮强制>\n"
-    "澄清预算已用尽。本轮必须立刻调用 submit_reading_brief 提交策略单，"
+    "追问预算已用尽。本轮必须立刻调用 submit_reading_brief 交单，"
     "不确定的字段按最可能的值填，不要再向用户提问。"
 )
+
+# 走塔罗但模型没给 positions 时的兜底——不为这个再花一次往返去问它
+_DEFAULT_SPREAD = {
+    "spread_type": "three_card",
+    "positions": ["现状", "阻碍", "流向"],
+}
 
 
 def build_opening_prompt(
     relationship_block: str,
     session_type: SessionType,
     force_brief: bool = False,
+    user_context: str = "",
 ) -> str:
-    """开场相位系统提示词 = opening_system.md + 关系上下文 + 入口偏好 [+ 守卫指令]。"""
+    """开场相位系统提示词 = opening_system.md + 用户资料 + 关系上下文 + 入口 [+ 守卫指令]。
+
+    用户资料必须注入：前置占卜师要自己判断「这个问题该不该走星盘」，而星盘要出生信息。
+    看不见资料它就只能盲调 request_user_profile 去撞。
+    """
     parts = [prompt_service.get_prompt("opening_system.md")]
 
     entry = _ENTRY_LABEL.get(session_type, "塔罗")
-    parts.append(
-        f"\n\n# <入口>\n用户从「{entry}」入口进来，这是他的先验偏好，"
-        f"作为策略单 tool_route 的默认值；若读人后判断另一条路线更合适，可以改。"
-    )
+    parts.append(f"\n\n# <入口>\n{entry}")
 
+    if user_context:
+        parts.append(f"\n{user_context}")
     if relationship_block:
         parts.append(f"\n\n{relationship_block}")
     if force_brief:
@@ -152,23 +160,38 @@ def build_opening_prompt(
     return "".join(parts)
 
 
+def first_action(strategy: dict) -> tuple:
+    """起手单 → 交单后 harness 要执行的第一个动作 (tool_name, args)。
+
+    route=tarot 时牌阵已经在单子里，直接推抽牌，不必再让解读 Agent 重念一遍；
+    positions 缺失则兜底三张阵。route 非 tarot 一律走星盘移交（解读 Agent 自己取盘）。
+
+    抽几张由 positions 的长度决定，没有单独的张数字段——见 DrawCardsRequest。
+    """
+    if (strategy or {}).get("route") != "tarot":
+        return (None, None)
+
+    args = {key: strategy.get(key) or fallback for key, fallback in _DEFAULT_SPREAD.items()}
+    return ("draw_tarot_cards", args)
+
+
+# 守卫第 2 层专用：强制交单走 mode=ANY，模型在解码层只被允许输出函数调用，
+# 一个字也说不出来——不是它选择沉默，是它没得选。这一条路上补这句，
+# 否则抽牌器会凭空弹到用户面前。
+# 其余路径一律不补：模型想说就说（说了照常流式输出），不想说就沉默，两种都正常。
+FORCED_BRIEF_HANDOFF_LINE = "好，这件事我们抽牌看看。"
+
+
 # 接场约束：只在「开场幕真的跑过」（strategy 非空）时追加。
 #
 # tarot_system.md / astrology_system.md 是给「从零开始的占卜师」写的，里面仍命令
-# 「首次对话先用占卜者的语气欢迎他」和「意图模糊时参数化澄清（哪方面？时间跨度？）」。
-# 移交之后这两条都已经由开场幕做完了——而后者恰恰是开场幕要消灭的填表式澄清。
-# 不压掉就会二次欢迎、重问旧问题。约束从这里注入，两份提示词本身不动（管理页可在线
-# 编辑它们，改坏了也波及不到接场逻辑）。
-_HANDOFF_INSTRUCTION = (
-    "\n\n# <接场>（本场已由前置占卜师完成开场读人，你是同一个占卜师，中途接手）\n"
-    "1. 开场、迎接、澄清都已经完成了。不要再欢迎用户，不要重问已经问过的问题，"
-    "直接接着往下走。\n"
-    "2. 上面系统提示词里「首次对话先用占卜者的语气欢迎他」，以及「意图模糊时先参数化"
-    "澄清（问要看哪方面、时间跨度多大）」这两条指示，在本场已失效——忽略它们。"
-    "（解读过程中与用户保持连接、收集反馈仍然照做。）\n"
-    "3. `submit_reading_brief` 只在用户彻底更换了新议题时才重新调用；"
-    "正常解读过程中不要调用它。"
-)
+# 「首次对话先用占卜者的语气欢迎他」和「意图模糊时参数化澄清」。移交之后这两条都
+# 已经由开场幕做完了。不压掉就会二次欢迎、重问旧问题。约束从 reading_handoff.md
+# 注入（管理页可在线改），两份大提示词本身不动。
+
+
+def _handoff_instruction() -> str:
+    return "\n\n" + prompt_service.get_prompt("reading_handoff.md")
 
 
 def build_reading_prompt(
@@ -187,5 +210,5 @@ def build_reading_prompt(
     brief_block = render_brief_block(strategy)
     prompt += brief_block
     if brief_block:
-        prompt += _HANDOFF_INSTRUCTION
+        prompt += _handoff_instruction()
     return prompt

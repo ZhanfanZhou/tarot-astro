@@ -4,6 +4,8 @@ from typing import Protocol, Optional
 @dataclass
 class ToolCall:
     name: str
+    # 纯 python 值（str/int/float/bool/list/dict），由 provider 在解析时负责转换。
+    # 下游可以直接 json.dumps、直接索引，不需要再判 SDK 的私有类型。
     args: dict
     id: str = ""            # OpenAI 需要；Gemini 用 name 兜
 
@@ -29,4 +31,4 @@ class LLMProvider(Protocol):
     ) -> LLMSession: ...
     async def generate_json(self, prompt: str) -> str: ...
     async def generate_text(self, prompt: str, *, temperature: float = 1.0,
-                            max_tokens: int = 200, timeout: int = 8) -> str: ...
+                            max_tokens: Optional[int] = None, timeout: int = 8) -> str: ...

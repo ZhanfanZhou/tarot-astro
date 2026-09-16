@@ -70,6 +70,7 @@ class GeminiService:
                 relationship_block=relationship_block,
                 session_type=session_type,
                 force_brief=force_brief,
+                user_context=self._build_user_context(user),
             )
         else:
             # 每次请求实时读文件（默认+覆盖双层），管理页改完即生效
@@ -90,8 +91,10 @@ class GeminiService:
                 # 处理塔罗抽牌结果
                 if msg.tarot_cards:
                     cards_desc = "[抽牌结果]如下：\n"
+                    # 2026-07 之前的记录 positions 可能为 null，逐张回退到「第N张」
+                    positions = (msg.draw_request.positions if msg.draw_request else None) or []
                     for i, card in enumerate(msg.tarot_cards, 1):
-                        position = msg.draw_request.positions[i-1] if msg.draw_request and msg.draw_request.positions else f"第{i}张"
+                        position = positions[i-1] if i <= len(positions) else f"第{i}张"
                         reversed_str = "（逆位）" if card.reversed else "（正位）"
                         cards_desc += f"{position}: {card.card_name} {reversed_str}\n"
                     history.append({"role": "user", "content": cards_desc})
@@ -189,6 +192,11 @@ class GeminiService:
             """选工具集。优先级与 _build_neutral 的提示词优先级一字不差：
             override > 相位 > 会话类型。override / daily / chat 用 daily 工具集
             （看不见 submit_reading_brief，那份提示词根本不认识它）。"""
+            # 没有执行器（心灵奇旅）= 这一路根本没人能执行工具调用。递过去就是给模型
+            # 一个会把整段回复变成空白的按钮：调了 → yield function_call 后 return，
+            # 而那个调用方只转发 content，用户拿到一片空白。不递，比在提示词里求它别用可靠。
+            if function_executor is None:
+                return []
             if has_override or session_type in (SessionType.DAILY, SessionType.CHAT):
                 return toolspecs.specs_by_names(toolspecs.DAILY_TOOL_NAMES)
             if for_opening:
@@ -244,40 +252,44 @@ class GeminiService:
 
             fn_result = await function_executor(call.name, call.args)
 
-            # 同轮移交：开场读人完成 → 换 provider(reading) + 解读工具集 + 重建 session，
-            # 解读 Agent 在同一次回复内接手（历史全是纯文本，重建无配对问题）。
-            # 移交后 is_opening=False，之后的 submit 不再触发移交（中途改判照常喂回）。
+            # 交单 = 开场结束。接下来按起手单里的 route 分两条路走。
             if (
                 is_opening
                 and call.name == "submit_reading_brief"
                 and fn_result.get("success", True)
             ):
-                print("[Agent] 🎬 开场幕收束，同轮移交给解读 Agent")
                 is_opening = False
                 phase = context_service.PHASE_READING
+                action, action_args = context_service.first_action(call.args)
+
+                # 塔罗路线：牌阵已经在单子里，直接推抽牌器给前端，然后收口等用户抽牌。
+                # 不必为了一句过渡语再叫解读 Agent 出来跑一轮——那是纯浪费的往返，
+                # 而且它会自己另选一副牌阵，跟单子上写的对不上。
+                if action == "draw_tarot_cards":
+                    print(f"[Agent] 🎬 开场收束 → 直接抽牌 {action_args}")
+                    # 模型这一轮说了什么，上面已经原样流式输出了——说与不说都由它。
+                    # 唯一的例外是守卫第 2 层：force 上膛时它在解码层就发不出文本，
+                    # 这时候的沉默不是它的选择，替它说一句，别让抽牌器凭空弹出来。
+                    if force and not (result.text or "").strip():
+                        yield {"content": context_service.FORCED_BRIEF_HANDOFF_LINE}
+                    yield {"function_call": {"name": action, "args": action_args}}
+                    await function_executor(action, action_args)
+                    yield {"done": True}
+                    return
+
+                # 星盘路线：不需要用户动手，同一次回复里换成解读 Agent 续跑，
+                # 由它自己调 get_astrology_chart 取盘并开口解读。
+                print("[Agent] 🎬 开场收束，移交解读 Agent（星盘路线）")
                 provider = llm.get_provider("reading")
 
                 system2, history2, last_user2 = self._build_neutral(
                     messages, user, session_type, system_prompt_override,
                     phase=phase, strategy=call.args,
                 )
-                # 重建的解读 session 必须带上用户最后一句澄清回答（读人素材，丢了就白读）。
-                # _build_neutral 把它拆进了 last_user2，这里补回 history 尾部。
-                if last_user2 is not None:
-                    history2 = history2 + [{"role": "user", "content": last_user2}]
-                # 保持角色交替：history2 末尾是用户澄清（user），紧接着要发的移交指令又是 user turn
-                # —— 连续两个 user 会让模型可能把移交指令当成用户的话来回应。补一条 assistant
-                # 确认语收口（与本文件既有惯例一致：系统提示词后的「我明白了。」等）。
-                if history2 and history2[-1]["role"] == "user":
-                    history2.append({"role": "assistant", "content": "（策略单已提交。）"})
+                # 解读 Agent 接手的就是用户那句还没人回的话：开场 Agent 这一轮只交了单，
+                # 没对用户开口。所以这里和普通一轮完全同形，不另造移交指令。
                 session = provider.open_session(system2, history2, _tool_specs(False), None)
-                pending = (
-                    "user",
-                    "（开场读人已完成，策略单已就位。现在以占卜师的身份接续这段对话："
-                    "先用一句自然的过渡语收住开场，然后按策略单直接开始工作——"
-                    "该抽牌就调用抽牌工具，不要复述策略单，不要向用户解释你的判断，"
-                    "不要重新问已经问过的问题。）",
-                )
+                pending = ("user", last_user2)
                 continue
 
             # 将函数结果发送回 AI，准备下一轮 loop

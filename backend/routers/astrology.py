@@ -54,16 +54,21 @@ async def send_message(
         # 用户即当前登录身份（对话归属已校验）
         user = current_user
 
+        # 空 content 是「请前置占卜师开场」的暗号，只在新建会话那一次有意义。
+        # 开场白已经给过之后再收到空 content，是没有任何语义的请求：放它过去，历史
+        # 末尾就是开场白（assistant），拆不出待发的 user 消息，最终把 None 发给模型。
+        # 前端只在建会话后发一次空消息，正常流程走不到这里。先于扣额度拦掉。
+        has_assistant_message = any(msg.role == MessageRole.ASSISTANT for msg in conversation.messages)
+        if not request.content and has_assistant_message:
+            raise HTTPException(status_code=400, detail="消息内容不能为空")
+
         # 用量控制：任何会触发 LLM 调用的路径都要先扣额度——开场白也是一次真实
         # LLM 调用（前置占卜师），若放它过去，「建会话 → 发空消息拿开场白」可无限白嫖。
         # 放在所有分支之前，保证一次请求恰好扣一次。
         await RateLimitService.check_and_consume(current_user)
 
-        # 🎯 检测首次对话（空消息）：由前置占卜师生成开场白
-        # 改进的判断逻辑：检查是否已经有 assistant 消息
-        has_assistant_message = any(msg.role == MessageRole.ASSISTANT for msg in conversation.messages)
-
-        if not request.content and not has_assistant_message:
+        # 🎯 首次对话（空消息）：由前置占卜师生成开场白
+        if not request.content:
             print("[Astrology Router] 🌟 首次对话，前置占卜师生成开场白")
             print(f"[Astrology Router] 当前消息数: {len(conversation.messages)}")
 
@@ -96,13 +101,12 @@ async def send_message(
                 media_type="text/event-stream"
             )
         
-        # 只有当用户发送了内容时才添加用户消息
-        if request.content:
-            conversation = await ConversationService.add_message(
-                request.conversation_id,
-                MessageRole.USER,
-                request.content
-            )
+        # 走到这里 content 必非空（空的两种情况上面都已分流）
+        conversation = await ConversationService.add_message(
+            request.conversation_id,
+            MessageRole.USER,
+            request.content
+        )
 
         # 开场幕上下文：守卫兜底 + 相位 + 强制交单 + 关系上下文（conversation 可能被就地翻相位）
         phase, force_brief, relationship_block = await opening_service.prepare_opening_context(
@@ -285,26 +289,13 @@ async def send_message(
                     
                     # 根据函数类型通知前端显示相应UI
                     if func_name == "draw_tarot_cards":
-                        # 🎴 通知前端显示抽牌器
-                        # 修复：将 RepeatedComposite 类型转换为普通列表
-                        if 'positions' in func_args:
-                            positions = func_args['positions']
-                            if hasattr(positions, '__iter__') and not isinstance(positions, (str, dict)):
-                                func_args['positions'] = list(positions)
-                        
-                        # 修复：将 card_count 转换为 int
-                        if 'card_count' in func_args and isinstance(func_args['card_count'], float):
-                            func_args['card_count'] = int(func_args['card_count'])
-                        
-                        # 确保完全可序列化
-                        serializable_args = json.loads(json.dumps(func_args, default=str))
-                        yield f"data: {json.dumps({'draw_cards': serializable_args})}\n\n"
+                        # 🎴 通知前端显示抽牌器（args 已是纯 python，见 llm.base.ToolCall）
+                        yield f"data: {json.dumps({'draw_cards': func_args})}\n\n"
                         print(f"[Astrology Router] 🎴 已通知前端显示抽牌器")
-                    
+
                     elif func_name == "request_user_profile":
                         # 📋 通知前端显示资料补充按钮
-                        serializable_args = json.loads(json.dumps(func_args, default=str))
-                        yield f"data: {json.dumps({'need_profile': serializable_args})}\n\n"
+                        yield f"data: {json.dumps({'need_profile': func_args})}\n\n"
                         print(f"[Astrology Router] 📋 已通知前端显示资料补充按钮")
                     
                     # get_astrology_chart 和 read_divination_notebook 不需要前端UI，静默执行即可
@@ -519,7 +510,6 @@ async def draw_cards(
         print(f"[Astrology Draw] conversation_id: {conversation_id}")
         print(f"[Astrology Draw] draw_request: {draw_request}")
         print(f"[Astrology Draw] draw_request.spread_type: {draw_request.spread_type}")
-        print(f"[Astrology Draw] draw_request.card_count: {draw_request.card_count}")
         print(f"[Astrology Draw] draw_request.positions: {draw_request.positions}")
 
         # 检查对话是否存在
