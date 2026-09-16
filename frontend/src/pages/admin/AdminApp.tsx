@@ -4,14 +4,16 @@ import OverviewPanel from './OverviewPanel';
 import ConversationsPanel from './ConversationsPanel';
 import UsersPanel from './UsersPanel';
 import PromptsPanel from './PromptsPanel';
+import ModelsPanel from './ModelsPanel';
 import './admin.css';
 
-type Tab = 'overview' | 'conversations' | 'users' | 'prompts';
+type Tab = 'overview' | 'conversations' | 'users' | 'prompts' | 'models';
 const TABS: Array<[Tab, string]> = [
   ['overview', '概览'],
   ['conversations', '会话'],
   ['users', '用户'],
   ['prompts', 'Prompt'],
+  ['models', '模型'],
 ];
 
 export default function AdminApp() {
@@ -81,6 +83,7 @@ export default function AdminApp() {
         {tab === 'conversations' && <ConversationsPanel />}
         {tab === 'users' && <UsersPanel />}
         {tab === 'prompts' && <PromptsPanel />}
+        {tab === 'models' && <ModelsPanel />}
       </main>
     </div>
   );

@@ -37,6 +37,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(db_mod, "_initialized", False)
     import services.prompt_service as ps_mod
     monkeypatch.setattr(ps_mod, "PROMPT_OVERRIDES_DIR", tmp_path / "prompt_overrides")
+    from services.llm import agent_config as ac_mod
+    monkeypatch.setattr(ac_mod, "_STORE", tmp_path / "llm_agents.json")
 
     async def _init():
         await db_mod.init_db()
@@ -390,3 +392,59 @@ class TestAdminPrompts:
 
     def test_requires_admin(self, client):
         assert client.get("/api/admin/prompts").status_code == 401
+
+
+# ── 模型配置 ────────────────────────────────────────────────────────────────
+
+def test_llm_config_lists_agents_and_options(client):
+    r = client.get("/api/admin/llm", headers=_admin_headers(client))
+    assert r.status_code == 200
+    body = r.json()
+    assert [a["agent"] for a in body["agents"]] == ["opening", "reading", "memory"]
+    assert {p["provider"] for p in body["providers"]} == {"gemini", "deepseek", "kimi"}
+    # 每个模型都带上「能不能强制交单」——管理页据此提示，和后端共用同一份数据
+    for prov in body["providers"]:
+        assert all("forced_tool" in m for m in prov["models"])
+
+
+def test_llm_config_requires_admin(client):
+    assert client.get("/api/admin/llm").status_code == 401
+    assert client.put("/api/admin/llm/reading",
+                      json={"provider": "gemini", "model": "gemini-3-pro"}).status_code == 401
+
+
+def test_set_and_reset_agent_round_trip(client, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "KIMI_API_KEY", "k")
+    h = _admin_headers(client)
+
+    r = client.put("/api/admin/llm/reading", json={"provider": "kimi", "model": "kimi-k3"}, headers=h)
+    assert r.status_code == 200
+    reading = next(a for a in r.json()["agents"] if a["agent"] == "reading")
+    assert (reading["provider"], reading["model"], reading["source"]) == ("kimi", "kimi-k3", "override")
+
+    r = client.delete("/api/admin/llm/reading", headers=h)
+    assert r.status_code == 200
+    assert next(a for a in r.json()["agents"] if a["agent"] == "reading")["source"] == "env"
+
+
+def test_set_agent_rejects_bad_input_with_400(client, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "KIMI_API_KEY", "")
+    h = _admin_headers(client)
+
+    # 清单外的模型（deepseek-chat 已退役）
+    monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "k")
+    r = client.put("/api/admin/llm/reading",
+                   json={"provider": "deepseek", "model": "deepseek-chat"}, headers=h)
+    assert r.status_code == 400 and "deepseek-chat" in r.json()["detail"]
+
+    # key 没配的 provider —— 放行就等于从管理页把线上聊天弄挂
+    r = client.put("/api/admin/llm/reading",
+                   json={"provider": "kimi", "model": "kimi-k3"}, headers=h)
+    assert r.status_code == 400 and "KIMI_API_KEY" in r.json()["detail"]
+
+    # 未知 Agent
+    r = client.put("/api/admin/llm/bogus",
+                   json={"provider": "gemini", "model": "gemini-3-pro"}, headers=h)
+    assert r.status_code == 400

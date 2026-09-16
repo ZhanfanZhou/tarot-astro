@@ -68,17 +68,13 @@ export interface AdminMessage {
   tarot_cards?: Array<{ card_id: number; card_name: string; reversed: boolean }> | null;
 }
 
-// 前置占卜师读人产出的策略单（九字段，均可选：字段缺失即当场读人未产出该项）。
+// 前置占卜师交单产出的起手单（六字段，均可选：字段缺失即当场未产出该项）。
 export interface ReadingBrief {
-  question_topic?: string;
-  user_goal?: string;
-  emotional_intensity?: string;
-  context_summary?: string;
-  desired_takeaway?: string;
-  tool_route?: string;
-  suggested_spread?: string;
-  reading_strategy?: string;
-  pacing?: string;
+  question?: string;
+  context?: string;
+  route?: string;
+  spread_type?: string;
+  positions?: string[];
 }
 
 export interface AdminConversation {
@@ -130,6 +126,38 @@ export const displayName = (u: {
   username?: string | null; nickname?: string | null; user_id: string;
 }) => u.nickname || u.username || u.user_id.slice(0, 12);
 
+export interface LlmModelOption {
+  id: string;
+  label: string;
+  /** 是否支持「指定函数的强制调用」——守卫第 2 层要用 */
+  forced_tool: boolean;
+}
+
+export interface LlmProviderOption {
+  provider: string;
+  label: string;
+  models: LlmModelOption[];
+}
+
+export interface LlmAgentState {
+  agent: string;
+  label: string;
+  provider: string;
+  model: string;
+  /** override = 管理页改过；env = 跟着 .env 走 */
+  source: 'override' | 'env';
+  env_provider: string;
+  env_model: string;
+  key_ready: boolean;
+  forced_tool: boolean;
+  in_catalog: boolean;
+}
+
+export interface LlmConfig {
+  agents: LlmAgentState[];
+  providers: LlmProviderOption[];
+}
+
 export const adminApi = {
   login: async (password: string): Promise<string> =>
     (await api.post('/api/admin/login', { password })).data.access_token,
@@ -155,4 +183,9 @@ export const adminApi = {
     (await api.put(`/api/admin/prompts/${name}`, { content })).data,
   resetPrompt: async (name: string): Promise<PromptInfo> =>
     (await api.delete(`/api/admin/prompts/${name}`)).data,
+  llmConfig: async (): Promise<LlmConfig> => (await api.get('/api/admin/llm')).data,
+  setLlmAgent: async (agent: string, provider: string, model: string): Promise<LlmConfig> =>
+    (await api.put(`/api/admin/llm/${agent}`, { provider, model })).data,
+  resetLlmAgent: async (agent: string): Promise<LlmConfig> =>
+    (await api.delete(`/api/admin/llm/${agent}`)).data,
 };

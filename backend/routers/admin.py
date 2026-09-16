@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 import config
 from services import prompt_service
+from services.llm import agent_config
 from services.auth_service import create_admin_token, decode_access_token
 from services.rate_limit_service import get_today_usage, reset_user_usage
 from services.storage_service import StorageService
@@ -201,3 +202,39 @@ async def admin_prompt_reset(name: str, _: None = Depends(require_admin)):
         return prompt_service.reset_override(name)
     except KeyError:
         raise HTTPException(status_code=404, detail="提示词不存在")
+
+
+# ── 三个 Agent 的 provider / model ────────────────────────────────────────────
+# 改完下一次请求即生效（get_provider 每次实时读盘），无需重启。
+
+
+class AgentModelRequest(BaseModel):
+    provider: str
+    model: str
+
+
+@router.get("/llm")
+async def admin_llm_config(_: None = Depends(require_admin)):
+    """每个 Agent 的现状 + 可选 provider/model 清单。"""
+    return agent_config.describe()
+
+
+@router.put("/llm/{agent}")
+async def admin_llm_set(
+    agent: str, request: AgentModelRequest, _: None = Depends(require_admin)
+):
+    try:
+        agent_config.set_agent(agent, request.provider, request.model)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return agent_config.describe()
+
+
+@router.delete("/llm/{agent}")
+async def admin_llm_reset(agent: str, _: None = Depends(require_admin)):
+    """撤销覆盖，回到 .env 的值。"""
+    try:
+        agent_config.reset_agent(agent)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return agent_config.describe()
