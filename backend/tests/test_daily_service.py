@@ -115,7 +115,7 @@ class TestExtractTagline:
 
 
 class TestRenderTemplate:
-    """每日一签模板经 prompt_service.render_prompt 渲染(默认+覆盖双层热加载,且按白名单校验 name)。
+    """每日一签模板经 prompt_service.render_prompt_parts 渲染(默认+覆盖双层热加载,且按白名单校验 name)。
     用已注册的模板名(daily_oracle_system.md)验证，monkeypatch 真正读盘的
     services.prompt_service.PROMPTS_DIR/PROMPT_OVERRIDES_DIR。"""
 
@@ -126,15 +126,15 @@ class TestRenderTemplate:
         (tmp_path / "daily_oracle_system.md").write_text(
             "你好 {nickname},今天是 {today_date}。{孤立花括号不崩}", encoding="utf-8"
         )
-        out = ps.render_prompt("daily_oracle_system.md", {"nickname": "小x", "today_date": "2026-06-11"})
+        out = ps.join(ps.render_prompt_parts("daily_oracle_system.md", {"nickname": "小x", "today_date": "2026-06-11"}))
         assert out == "你好 小x,今天是 2026-06-11。{孤立花括号不崩}"
         # 热加载:改文件后再次渲染立即生效
         (tmp_path / "daily_oracle_system.md").write_text("新版 {nickname}", encoding="utf-8")
-        assert ps.render_prompt("daily_oracle_system.md", {"nickname": "小x"}) == "新版 小x"
+        assert ps.join(ps.render_prompt_parts("daily_oracle_system.md", {"nickname": "小x"})) == "新版 小x"
 
     def test_missing_template_raises(self, tmp_path, monkeypatch):
         import services.prompt_service as ps
         monkeypatch.setattr(ps, "PROMPTS_DIR", tmp_path)
         monkeypatch.setattr(ps, "PROMPT_OVERRIDES_DIR", tmp_path / "overrides")
         with pytest.raises(FileNotFoundError):
-            ps.render_prompt("daily_oracle_system.md", {})
+            ps.join(ps.render_prompt_parts("daily_oracle_system.md", {}))

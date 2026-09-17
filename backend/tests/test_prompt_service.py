@@ -66,7 +66,7 @@ def test_empty_or_oversize_content_rejected(ps):
 
 def test_render_replaces_placeholders_and_tolerates_braces(ps):
     ps.save_override("notebook_system.md", '记录:{conversation_content} 例:{"summary":"x"}')
-    out = ps.render_prompt("notebook_system.md", {"conversation_content": "对话内容"})
+    out = ps.join(ps.render_prompt_parts("notebook_system.md", {"conversation_content": "对话内容"}))
     assert "对话内容" in out
     assert '{"summary":"x"}' in out  # 孤立花括号不崩、不吞
 
@@ -82,9 +82,9 @@ def test_render_parts_mark_file_text_and_variables(ps):
         ("notebook_system.md", False, "", "后"),
         ("notebook_system.md", True, "{question}", "Q"),
     ]
-    assert ps.render_prompt("notebook_system.md", {
+    assert ps.join(ps.render_prompt_parts("notebook_system.md", {
         "conversation_content": "用户：{question}", "question": "Q",
-    }) == "前用户：{question}后Q"
+    })) == "前用户：{question}后Q"
 
 
 def test_missing_default_raises(ps, monkeypatch, tmp_path):

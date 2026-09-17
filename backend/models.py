@@ -63,13 +63,6 @@ class MessageRole(str, Enum):
     SYSTEM = "system"
 
 
-class TarotSpread(str, Enum):
-    SINGLE = "single"  # 单张牌
-    THREE_CARD = "three_card"  # 三张牌
-    CELTIC_CROSS = "celtic_cross"  # 凯尔特十字
-    CUSTOM = "custom"  # 自定义数量
-
-
 class TarotCard(BaseModel):
     card_id: int  # 0-77 (78张塔罗牌)
     card_name: str

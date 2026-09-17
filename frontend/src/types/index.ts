@@ -50,13 +50,6 @@ export enum SessionType {
   DAILY = 'daily',
 }
 
-export enum TarotSpread {
-  SINGLE = 'single',
-  THREE_CARD = 'three_card',
-  CELTIC_CROSS = 'celtic_cross',
-  CUSTOM = 'custom',
-}
-
 export interface TarotCard {
   card_id: number;
   card_name: string;

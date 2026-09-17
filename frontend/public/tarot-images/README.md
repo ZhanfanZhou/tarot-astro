@@ -3,8 +3,6 @@
 ```
 tarot-images/
 ├── card-back.png      shared UI assets (used by the chat app)
-├── card-back2.svg
-├── placeholder2.svg
 └── decks/
     └── <deck-id>/                a single tarot deck (one art style, 78 cards)
         ├── deck.json             deck metadata (see below)

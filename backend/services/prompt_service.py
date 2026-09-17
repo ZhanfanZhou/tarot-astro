@@ -110,11 +110,6 @@ def render_prompt_parts(name: str, variables: Dict[str, str]) -> List[Part]:
     return parts
 
 
-def render_prompt(name: str, variables: Dict[str, str]) -> str:
-    """取当前生效内容并替换 {key} 占位符。"""
-    return join(render_prompt_parts(name, variables))
-
-
 def get_prompt_info(name: str) -> dict:
     _validate_name(name)
     ov = _override_path(name)
