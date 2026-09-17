@@ -237,7 +237,7 @@ def test_reading_phase_system_prompt_includes_strategy_block():
                   "spread_type": "三张关系阵"},
     )
     assert "他还会回来吗" in system
-    assert "绝不向用户外露" in system
+    assert "不要复述起手单" in system      # 接场约束（reading_handoff.md）随起手单一起进来
 
 
 def test_reading_phase_without_strategy_is_unchanged():

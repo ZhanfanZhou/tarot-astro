@@ -134,6 +134,9 @@ def render_brief_block(strategy: Optional[dict]) -> str:
 
     措辞是「本场起手」而不是「当前策略」：它是开场定下的一次性记录，用户后来换了角度、
     补抽了别的牌阵都不会回写这里，解读 Agent 不该拿它当当前指令用。
+
+    这里只放数据。「这是开场的记录、不是当前指令、不要向用户复述」这些话写在
+    reading_handoff.md（管理页可改），它和这个块同时出现。
     """
     if not strategy:
         return ""
@@ -148,7 +151,7 @@ def render_brief_block(strategy: Optional[dict]) -> str:
     if not lines:
         return ""
     return (
-        "\n\n# <本场起手>（开场时定下的记录，内部参考，绝不向用户外露）\n"
+        "\n\n# <本场起手>\n"
         + "\n".join(lines)
     )
 

@@ -204,7 +204,7 @@ def test_render_brief_block_none_returns_empty():
     assert context_service.render_brief_block(None) == ""
 
 
-def test_render_brief_block_includes_fields_and_secrecy_warning():
+def test_render_brief_block_is_heading_plus_fields_only():
     from services import context_service
 
     block = context_service.render_brief_block({
@@ -218,7 +218,8 @@ def test_render_brief_block_includes_fields_and_secrecy_warning():
     assert "two_choice" in block
     assert "选 A 的代价" in block          # 列表字段要摊平，不能渲染成 python repr
     assert "['" not in block
-    assert "绝不向用户外露" in block
+    # 只有标题和数据行；怎么对待这份记录由 reading_handoff.md 说
+    assert block.startswith("\n\n# <本场起手>\n问题：")
 
 
 def test_render_brief_block_skips_missing_fields():
