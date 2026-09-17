@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   adminApi, errMsg, isAuthError, type PromptDetail, type PromptInfo,
 } from '@/services/adminApi';
+import PromptComposition from './PromptComposition';
 
 export default function PromptsPanel() {
   const [list, setList] = useState<PromptInfo[]>([]);
@@ -10,6 +11,8 @@ export default function PromptsPanel() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  // 内容 = 编辑 .md；组成 = 它用在哪几次调用里、前后接了什么（切换文件时保持当前视图）
+  const [view, setView] = useState<'content' | 'composition'>('content');
 
   const refresh = () =>
     adminApi.prompts().then((r) => setList(r.items)).catch((e) => {
@@ -105,9 +108,24 @@ export default function PromptsPanel() {
             <button disabled={busy || text === current.content} onClick={save}>保存</button>
             <button disabled={busy || !current.overridden} onClick={reset}>重置为默认</button>
           </div>
+          <div className="prompt-views">
+            <button className={view === 'content' ? 'active' : ''} onClick={() => setView('content')}>内容</button>
+            <button className={view === 'composition' ? 'active' : ''} onClick={() => setView('composition')}>
+              组成 · {current.call_sites.length} 处调用
+            </button>
+          </div>
           {error && <p className="admin-error">{error}</p>}
           {notice && <p className="admin-notice">{notice}</p>}
-          <textarea value={text} onChange={(e) => setText(e.target.value)} spellCheck={false} />
+          {view === 'content' ? (
+            <textarea value={text} onChange={(e) => setText(e.target.value)} spellCheck={false} />
+          ) : (
+            <PromptComposition
+              sites={current.call_sites}
+              current={current.name}
+              stale={text !== current.content}
+              onOpen={open}
+            />
+          )}
         </div>
       ) : (
         <p className="admin-dim">← 选择一个提示词查看/编辑</p>

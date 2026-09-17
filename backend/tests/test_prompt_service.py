@@ -71,6 +71,22 @@ def test_render_replaces_placeholders_and_tolerates_braces(ps):
     assert '{"summary":"x"}' in out  # 孤立花括号不崩、不吞
 
 
+def test_render_parts_mark_file_text_and_variables(ps):
+    ps.save_override("notebook_system.md", "前{conversation_content}后{question}")
+    parts = ps.render_prompt_parts("notebook_system.md", {
+        "conversation_content": "用户：{question}", "question": "Q",
+    })
+    assert [(p.prompt, p.variable, p.label, p.text) for p in parts] == [
+        ("notebook_system.md", False, "", "前"),
+        ("notebook_system.md", True, "{conversation_content}", "用户：{question}"),  # 值里的占位符不替换
+        ("notebook_system.md", False, "", "后"),
+        ("notebook_system.md", True, "{question}", "Q"),
+    ]
+    assert ps.render_prompt("notebook_system.md", {
+        "conversation_content": "用户：{question}", "question": "Q",
+    }) == "前用户：{question}后Q"
+
+
 def test_missing_default_raises(ps, monkeypatch, tmp_path):
     monkeypatch.setattr(ps, "PROMPTS_DIR", tmp_path / "empty")  # 默认目录也指到空处
     with pytest.raises(FileNotFoundError):
@@ -112,11 +128,12 @@ def test_notebook_hardcoded_prompt_removed(ps):
     assert not hasattr(NotebookService, "NOTEBOOK_PROMPT")
 
 
-def test_daily_render_template_is_prompt_service(ps):
+def test_daily_prompt_reads_prompt_service(ps):
+    from datetime import date
     from services import daily_service
     ps.save_override("daily_oracle_system.md", "DAILY:{nickname}")
-    out = daily_service.render_template("daily_oracle_system.md", {"nickname": "小明"})
-    assert out == "DAILY:小明"
+    parts = daily_service.daily_oracle_prompt_parts(None, None, [], date.today())
+    assert ps.join(parts) == "DAILY:朋友"
 
 
 def test_opening_system_prompt_registered_and_loadable():

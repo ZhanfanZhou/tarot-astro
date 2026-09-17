@@ -376,6 +376,9 @@ class TestAdminPrompts:
         d2 = client.get("/api/admin/prompts/tarot_system.md", headers=h).json()
         assert d2["content"] == "新版提示词"
         assert "职业占卜师" in d2["default_content"]  # 默认版不受影响
+        # 组成里展示的就是保存后的生效版
+        parts = d2["call_sites"][0]["parts"]
+        assert parts[0]["prompt"] == "tarot_system.md" and parts[0]["text"] == "新版提示词"
 
         r2 = client.delete("/api/admin/prompts/tarot_system.md", headers=h)
         assert r2.status_code == 200 and r2.json()["overridden"] is False

@@ -122,6 +122,57 @@
   .admin-prompts { flex-direction: column; }
   .prompt-list { width: 100%; }
 }
+.prompt-views { display: flex; gap: 4px; border-bottom: 1px solid #2c2838; margin-bottom: 12px; }
+.admin-main .prompt-views button {
+  background: none; border: none; border-radius: 0; color: #9a94a8; padding: 6px 12px;
+}
+.admin-main .prompt-views button.active { color: #cfa94a; border-bottom: 2px solid #cfa94a; }
+
+/* prompt 组成：一次调用一张卡，段落按发送顺序竖排 */
+.cs-card {
+  background: #1c1926; border: 1px solid #2c2838; border-radius: 10px;
+  padding: 14px 16px; margin-bottom: 14px;
+}
+.cs-card header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cs-card h3 { margin: 0; font-size: 14px; color: #d8d4c8; flex: 1; min-width: 0; }
+.cs-delivery { color: #8d8799; font-size: 12px; margin: 6px 0 10px; line-height: 1.7; }
+.cs-parts { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.cs-part { border: 1px solid #2c2838; border-left-width: 3px; border-radius: 6px; padding: 6px 10px; background: #18161f; }
+.cs-part.cs-file { border-left-color: #6f86a8; }
+.cs-part.cs-file.current { border-left-color: #cfa94a; border-color: #4a4358; }
+.cs-part.cs-code { border-left-color: #5d586a; }
+.cs-part-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.cs-kind {
+  color: #8d8799; border: 1px solid #3a3548; border-radius: 4px; padding: 0 5px;
+  font-size: 11px; line-height: 1.6; white-space: nowrap;
+}
+.cs-label { color: #d8d4c8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.cs-when { color: #d9b86c; }
+.admin-main button.cs-link {
+  background: none; border: none; padding: 0; color: #8fb0dd; text-decoration: underline;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+}
+.admin-main button.cs-toggle {
+  margin-left: auto; background: none; border: 1px solid #3a3548; color: #8d8799;
+  padding: 1px 8px; font-size: 11px; border-radius: 4px;
+}
+.cs-part pre, .cs-tool pre {
+  margin: 6px 0 2px; white-space: pre-wrap; word-break: break-word; color: #cfc9bb;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.6;
+}
+.cs-var {
+  background: rgba(207, 169, 74, 0.12); color: #e6d9b0; border-radius: 3px;
+  box-shadow: inset 0 -1px 0 rgba(207, 169, 74, 0.5);
+}
+.cs-var-name {
+  color: #cfa94a; font-size: 10px; border: 1px solid #6b5a2a; border-radius: 3px;
+  padding: 0 3px; margin-right: 4px; vertical-align: 1px;
+}
+.cs-meta, .cs-after { color: #8d8799; font-size: 12px; margin: 10px 0 0; line-height: 1.7; }
+.cs-meta code, .cs-tool code { color: #cfa94a; }
+.cs-tools { margin-top: 10px; border-top: 1px dashed #2c2838; padding-top: 8px; }
+.cs-tool { margin-top: 8px; padding-left: 8px; border-left: 2px solid #3a3548; }
+.cs-tool .cs-params { color: #9a94a8; }
 
 /* ── 模型配置 ───────────────────────────────────────────────────────────── */
 .models-intro { color: #8d8799; font-size: 13px; line-height: 1.8; margin: 4px 0 16px; }

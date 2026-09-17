@@ -4,11 +4,12 @@
 杜绝「路由认为在开场、工具集却给了抽牌」的分裂。
 """
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
-from models import Conversation, SessionType
+from models import Conversation, SessionType, User
 from services import prompt_service
 from services.db import get_db
+from services.prompt_service import Part
 
 PHASE_OPENING = "opening"
 PHASE_READING = "reading"
@@ -72,6 +73,37 @@ async def build_relationship_meta(user_id: str, current_conversation_id: str) ->
     }
 
 
+_GENDER_LABEL = {"male": "男", "female": "女", "other": "其他", "prefer_not_say": "保密"}
+
+
+def build_user_context(user: Optional[User]) -> str:
+    """用户资料块：两个相位的系统提示词都带。"""
+    if not user or not user.profile:
+        return ""
+
+    profile = user.profile
+    context_parts = []
+
+    if profile.nickname:
+        context_parts.append(f"昵称：{profile.nickname}")
+    if profile.gender:
+        context_parts.append(f"性别：{_GENDER_LABEL.get(profile.gender, '未知')}")
+    if all([profile.birth_year, profile.birth_month, profile.birth_day]):
+        birth_str = f"{profile.birth_year}年{profile.birth_month}月{profile.birth_day}日"
+        if profile.birth_hour is not None and profile.birth_minute is not None:
+            birth_str += f" {profile.birth_hour:02d}:{profile.birth_minute:02d}"
+        context_parts.append(f"生日：{birth_str}")
+    if profile.birth_city:
+        context_parts.append(f"出生地点：{profile.birth_city}")
+
+    if context_parts:
+        return "\n# <用户资料>\n" + "\n".join(context_parts)
+    # 只报状态，不带指令：「资料不全就去调 request_user_profile」这条规则
+    # tarot_system.md / astrology_system.md / opening_system.md 都已写明，
+    # 代码里再写一遍就是第四份，改提示词时必然漏掉这一份。
+    return "\n# <用户资料>\n尚未完善"
+
+
 def render_relationship_block(meta: dict) -> str:
     """关系上下文块：只注入事实（称呼/第几次/距上次多久）。
 
@@ -128,33 +160,61 @@ _DEFAULT_SPREAD = {
 }
 
 
-def build_opening_prompt(
+_BRIEF_ONLY = "开场幕交过单才有（旧会话、守卫兜底进来的没有）"
+_FORCED_ONLY = "追问预算用尽的那一轮才有"
+
+
+def opening_prompt_parts(
     relationship_block: str,
     session_type: SessionType,
     force_brief: bool = False,
     user_context: str = "",
-) -> str:
+) -> List[Part]:
     """开场相位系统提示词 = opening_system.md + 入口 + 用户资料 + 关系上下文
-    [+ opening_force_brief.md]。
+    [+ opening_force_brief.md 的 <本轮强制> 小节]。
 
     用户资料必须注入：前置占卜师要自己判断「这个问题该不该走星盘」，而星盘要出生信息。
     看不见资料它就只能盲调 request_user_profile 去撞。
 
     所有模型可见的文案都来自 .md（管理页可改）；这里只负责拼接顺序和数据。
     """
-    parts = [prompt_service.get_prompt("opening_system.md")]
+    parts = [prompt_service.prompt_part("opening_system.md")]
 
     entry = _ENTRY_LABEL.get(session_type, "塔罗")
-    parts.append(f"\n\n# <入口>\n{entry}")
+    parts.append(Part(f"\n\n# <入口>\n{entry}", label="入口",
+                      when="按会话入口：" + " / ".join(_ENTRY_LABEL.values())))
 
     if user_context:
-        parts.append(f"\n{user_context}")
+        parts.append(Part(f"\n{user_context}", label="用户资料"))
     if relationship_block:
-        parts.append(f"\n\n{relationship_block}")
+        parts.append(Part(f"\n\n{relationship_block}", label="关系上下文"))
     if force_brief:
-        parts.append("\n\n" + _forced_brief_parts()[0])
+        parts.append(Part("\n\n"))
+        parts.append(Part(_forced_brief_parts()[0], prompt="opening_force_brief.md",
+                          label="<本轮强制> 小节", when=_FORCED_ONLY))
+    return parts
 
-    return "".join(parts)
+
+def build_opening_prompt(
+    relationship_block: str,
+    session_type: SessionType,
+    force_brief: bool = False,
+    user_context: str = "",
+) -> str:
+    return prompt_service.join(opening_prompt_parts(
+        relationship_block, session_type, force_brief, user_context))
+
+
+def greeting_prompt_parts(relationship_block: str, session_type: SessionType) -> List[Part]:
+    """开场白那一次调用 = 开场相位系统提示词（不带用户资料、不强制）+ opening_greeting.md。
+
+    这一轮的指令不能并进 opening_system.md：那份提示词开场相位每一轮都在用，
+    而「用户刚刚坐下、还没开口」只在第一轮成立，写进去会让后续每轮都想再迎接一次。
+    """
+    return opening_prompt_parts(relationship_block, session_type) + [
+        Part("\n\n"),
+        prompt_service.prompt_part("opening_greeting.md"),
+    ]
 
 
 def first_action(strategy: dict) -> tuple:
@@ -203,25 +263,34 @@ def forced_brief_handoff_line() -> str:
 # 注入（管理页可在线改），两份大提示词本身不动。
 
 
-def _handoff_instruction() -> str:
-    return "\n\n" + prompt_service.get_prompt("reading_handoff.md")
+def reading_base_prompt_name(session_type: SessionType) -> str:
+    return "astrology_system.md" if session_type == SessionType.ASTROLOGY else "tarot_system.md"
 
 
-def build_reading_prompt(
-    base_prompt: str,
+def reading_prompt_parts(
+    session_type: SessionType,
     user_context: str,
     strategy: Optional[dict],
-) -> str:
-    """解读相位系统提示词 = 现有系统提示词 + 用户资料 + 策略单块 [+ 接场约束]。
+) -> List[Part]:
+    """解读相位系统提示词 = 塔罗/占星提示词 + 用户资料 + 起手单块 [+ 接场约束]。
 
     strategy 为空（存量会话 / 守卫兜底）→ 不追加接场约束，表现与开场幕上线前一致。
     """
-    prompt = base_prompt
+    parts = [prompt_service.prompt_part(reading_base_prompt_name(session_type))]
     if user_context:
-        prompt += f"\n\n{user_context}"
+        parts.append(Part(f"\n\n{user_context}", label="用户资料"))
 
     brief_block = render_brief_block(strategy)
-    prompt += brief_block
     if brief_block:
-        prompt += _handoff_instruction()
-    return prompt
+        parts.append(Part(brief_block, label="本场起手", when=_BRIEF_ONLY))
+        parts.append(Part("\n\n"))
+        parts.append(prompt_service.prompt_part("reading_handoff.md", when=_BRIEF_ONLY))
+    return parts
+
+
+def build_reading_prompt(
+    session_type: SessionType,
+    user_context: str,
+    strategy: Optional[dict],
+) -> str:
+    return prompt_service.join(reading_prompt_parts(session_type, user_context, strategy))

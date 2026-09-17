@@ -79,7 +79,7 @@
 | `GET /users?limit&offset` | 用户列表 + 每人会话数（LEFT JOIN count）+ 最后活跃时间 |
 | `GET /usage` | 今日各身份已用 LLM 次数（usage.json）+ 限额配置 |
 | `GET /prompts` | 清单：name、是否已覆盖默认、更新时间、字符数 |
-| `GET /prompts/{name}` | 当前生效内容 + 默认内容 + 是否覆盖 |
+| `GET /prompts/{name}` | 当前生效内容 + 默认内容 + 是否覆盖 + `call_sites`（用到它的每次模型调用及拼接顺序，见下「组成」） |
 | `PUT /prompts/{name}` `{content}` | 保存 override（原子写 + .bak） |
 | `DELETE /prompts/{name}` | 重置为默认（删 override） |
 
@@ -94,6 +94,8 @@
   - **概览**：指标数字一排。
   - **会话**（核心）：左列表（倒序、类型筛选、分页）+ 右详情（气泡区分 user/assistant，塔罗牌消息显示牌名+正逆位）；窄屏堆叠。
   - **Prompt**：文件列表（覆盖徽标+更新时间）→ 等宽 textarea 编辑 → 保存（二次确认）/ 重置为默认。
+    - **组成**（只读）：这个文件用在哪几次模型调用里，每次按实际发送顺序列出各段——可编辑的 .md、代码拼接的段（入口 / 用户资料 / 关系上下文 / 本场起手…）、模板变量填进去的值，以及出现条件、发给哪个 Agent/模型、可用工具与强制调用、其后接的会话历史。
+      动态段用示例数据展示。来源是 `services/prompt_assembly.py` 直接调运行时的拼装函数（拼装函数产出带出处的 `prompt_service.Part`，运行时 join 发出、管理页原样展示），不另写说明，拼装改了展示自动跟着变；新增 prompt 或调用点在 `_call_sites()` 登记，`tests/test_prompt_assembly.py` 检查每个登记的 prompt 至少接进一处。
   - **用量**：今日计数表。
 
 ## 四、错误处理

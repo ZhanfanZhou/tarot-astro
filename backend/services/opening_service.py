@@ -135,14 +135,8 @@ async def build_greeting(
             conversation.user_id, conversation.conversation_id
         )
         meta["nickname"] = _nickname(user)
-        system_prompt = context_service.build_opening_prompt(
-            relationship_block=context_service.render_relationship_block(meta),
-            session_type=session_type,
-            force_brief=False,
-        )
-        # 这一轮的指令不能并进 opening_system.md：那份提示词开场相位每一轮都在用，
-        # 而「用户刚刚坐下、还没开口」只在第一轮成立，写进去会让后续每轮都想再迎接一次。
-        prompt = f"{system_prompt}\n\n{prompt_service.get_prompt('opening_greeting.md')}"
+        prompt = prompt_service.join(context_service.greeting_prompt_parts(
+            context_service.render_relationship_block(meta), session_type))
         text = (await _generate_greeting_via_llm(prompt)).strip()
     except Exception as e:  # noqa: BLE001 —— 统一翻成一个调用方认得的失败
         raise GreetingUnavailable(f"开场白生成失败: {e}") from e

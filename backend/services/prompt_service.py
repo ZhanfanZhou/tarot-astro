@@ -7,6 +7,8 @@
 写入原子替换（tmp + os.replace）并把旧的生效内容留 .bak（一步回退）。
 """
 import os
+import re
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List
@@ -61,12 +63,56 @@ def get_prompt(name: str) -> str:
     return get_default(name)
 
 
+@dataclass
+class Part:
+    """发给模型的一段文字，带出处。
+
+    拼装函数产出 parts，运行时 join 成整段发出去，管理页把同一份 parts 原样摊开——
+    看到的拼接顺序和代码实际发的是同一个来源，不另写一份说明。
+      prompt    来自哪个 .md（管理页可改）；空 = 代码拼的
+      variable  True = 这段是 prompt 模板里某个变量填进去的值，不是文件正文
+      label     这一段是什么（代码段的名字、模板变量名、文件里的哪个小节）
+      when      什么情况下才有；空 = 每次都有
+    """
+    text: str
+    prompt: str = ""
+    variable: bool = False
+    label: str = ""
+    when: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def join(parts: List[Part]) -> str:
+    return "".join(p.text for p in parts)
+
+
+def prompt_part(name: str, **kw) -> Part:
+    return Part(get_prompt(name), prompt=name, **kw)
+
+
+def render_prompt_parts(name: str, variables: Dict[str, str]) -> List[Part]:
+    """取当前生效内容，按 {key} 占位符切开：模板正文是文件段，占位符处是变量值。
+
+    只替换模板里的占位符；变量值里碰巧含 {key}（用户发言、笔记正文）原样保留。
+    """
+    text = get_prompt(name)
+    if not variables:
+        return [Part(text, prompt=name)]
+    pattern = "|".join(re.escape("{" + key + "}") for key in variables)
+    parts = []
+    for i, piece in enumerate(re.split(f"({pattern})", text)):
+        if i % 2:
+            parts.append(Part(str(variables[piece[1:-1]]), prompt=name, variable=True, label=piece))
+        elif piece:
+            parts.append(Part(piece, prompt=name))
+    return parts
+
+
 def render_prompt(name: str, variables: Dict[str, str]) -> str:
     """取当前生效内容并替换 {key} 占位符。"""
-    text = get_prompt(name)
-    for key, value in variables.items():
-        text = text.replace("{" + key + "}", str(value))
-    return text
+    return join(render_prompt_parts(name, variables))
 
 
 def get_prompt_info(name: str) -> dict:

@@ -14,14 +14,15 @@
   - `conversations.py` 会话 CRUD（创建时生成开场白）+ `/exit`（触发生成笔记）
   - `tarot.py` / `astrology.py` 薄壳：`/message` `/resume` `/draw` 都转 `turn_service`
   - `daily.py` 每日一签：抽签（服务端当场生成解读）/概览/印证/心灵奇旅（单次生成）
-  - admin.py 后台管理(/api/admin:登录/概览/全局会话/用户/用量/prompt 在线编辑;env ADMIN_PASSWORD 未配置则整体404)
+  - admin.py 后台管理(/api/admin:登录/概览/全局会话/用户/用量/prompt 在线编辑+组成查看;env ADMIN_PASSWORD 未配置则整体404)
   - `wallet.py` 钱包+商城 · `payments.py` 支付 · `decks.py` 牌组资源
 - services/ 业务层
   - `turn_service.py` ★一轮对话：校验/收口 interrupt/扣额度/跑 Loop/逐条落库/SSE（塔罗占星共用）· `tool_turns.py` 工具轮落库形状、interrupt 结果、旧会话判定
   - `gemini_service.py` ★Agent Loop（按相位取 provider/提示词/工具集；yield content/message/done；SSE 只推正文）
   - `llm/` provider 抽象：`base.py` 中性消息契约 · `gemini_provider.py` / `openai_provider.py` · `tools.py` 工具规格唯一真源（含 INTERRUPT_TOOL_NAMES）· `catalog.py` `agent_config.py`
   - `conversation_service.py` 会话消息逻辑 · `storage_service.py` 用户+会话存取(SQLite) · `db.py` SQLite 连接/建表(aiosqlite+WAL)
-  - prompt_service.py 提示词统一热加载(默认 prompts/*.md + 覆盖 data/prompts/,白名单5个,原子写+bak)
+  - prompt_service.py 提示词统一热加载(默认 prompts/*.md + 覆盖 data/prompts/,白名单见 PROMPT_REGISTRY,原子写+bak);拼装函数产出带出处的 `Part` 再 join
+  - `prompt_assembly.py` 管理页「组成」视图:用示例数据调运行时拼装函数,列出每个 prompt 用在哪些调用、前后接了什么;新增 prompt/调用点在 `_call_sites()` 登记(测试会检查)
   - `user_service.py` 用户/密码 · `auth_service.py` JWT · `rate_limit_service.py` 限流
   - `daily_service.py` 每日一签逻辑 · `astrology_service.py` 星盘 API · `tarot_service.py` 抽牌
   - `notebook_service.py` 占卜笔记本 · `notebook_task_scheduler.py` 定时生成笔记

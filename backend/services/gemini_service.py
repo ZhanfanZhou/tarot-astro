@@ -1,7 +1,24 @@
 import json
 from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional, Tuple
 from models import Message, MessageRole, ToolCallRecord, User, SessionType
-from services import context_service, prompt_service, tool_turns
+from services import context_service, tool_turns
+
+
+# 守卫第 2 层强制调用的工具
+FORCED_BRIEF_TOOL = "submit_reading_brief"
+
+
+def tool_names(session_type: SessionType, *, opening: bool, has_override: bool) -> List[str]:
+    """选工具集。优先级与 _build_neutral 的提示词优先级一字不差：
+    override > 相位 > 会话类型。override / daily / chat 用 daily 工具集
+    （看不见 submit_reading_brief，那份提示词根本不认识它）。"""
+    from services.llm import tools as toolspecs
+
+    if has_override or session_type in (SessionType.DAILY, SessionType.CHAT):
+        return toolspecs.DAILY_TOOL_NAMES
+    if opening:
+        return toolspecs.OPENING_TOOL_NAMES
+    return toolspecs.READING_TOOL_NAMES
 
 
 class GeminiService:
@@ -15,34 +32,6 @@ class GeminiService:
     # Agent Loop 的迭代上限（含移交后的解读轮）。提出来是因为它是个真实的天花板：
     # 移交会多吃一次迭代，测试要按它构造「恰好烧到最后一轮」的边界场景。
     MAX_AGENT_ITERATIONS = 6
-
-    def _build_user_context(self, user: Optional[User]) -> str:
-        """构建用户上下文信息"""
-        if not user or not user.profile:
-            return ""
-
-        profile = user.profile
-        context_parts = []
-
-        if profile.nickname:
-            context_parts.append(f"昵称：{profile.nickname}")
-        if profile.gender:
-            gender_map = {"male": "男", "female": "女", "other": "其他", "prefer_not_say": "保密"}
-            context_parts.append(f"性别：{gender_map.get(profile.gender, '未知')}")
-        if all([profile.birth_year, profile.birth_month, profile.birth_day]):
-            birth_str = f"{profile.birth_year}年{profile.birth_month}月{profile.birth_day}日"
-            if profile.birth_hour is not None and profile.birth_minute is not None:
-                birth_str += f" {profile.birth_hour:02d}:{profile.birth_minute:02d}"
-            context_parts.append(f"生日：{birth_str}")
-        if profile.birth_city:
-            context_parts.append(f"出生地点：{profile.birth_city}")
-
-        if context_parts:
-            return "\n# <用户资料>\n" + "\n".join(context_parts)
-        # 只报状态，不带指令：「资料不全就去调 request_user_profile」这条规则
-        # tarot_system.md:16,36 / astrology_system.md:17,28 / opening_system.md:52 都已写明，
-        # 代码里再写一遍就是第四份，改提示词时必然漏掉这一份。
-        return "\n# <用户资料>\n尚未完善"
 
     def _build_neutral(
         self,
@@ -74,17 +63,13 @@ class GeminiService:
                 relationship_block=relationship_block,
                 session_type=session_type,
                 force_brief=force_brief,
-                user_context=self._build_user_context(user),
+                user_context=context_service.build_user_context(user),
             )
         else:
             # 每次请求实时读文件（默认+覆盖双层），管理页改完即生效
-            if session_type == SessionType.ASTROLOGY:
-                base_prompt = prompt_service.get_prompt("astrology_system.md")
-            else:
-                base_prompt = prompt_service.get_prompt("tarot_system.md")
             system_prompt = context_service.build_reading_prompt(
-                base_prompt=base_prompt,
-                user_context=self._build_user_context(user),
+                session_type=session_type,
+                user_context=context_service.build_user_context(user),
                 strategy=strategy,
             )
 
@@ -164,14 +149,8 @@ class GeminiService:
         is_opening = (not has_override) and phase == context_service.PHASE_OPENING
 
         def _tool_specs(for_opening: bool) -> List[Dict]:
-            """选工具集。优先级与 _build_neutral 的提示词优先级一字不差：
-            override > 相位 > 会话类型。override / daily / chat 用 daily 工具集
-            （看不见 submit_reading_brief，那份提示词根本不认识它）。"""
-            if has_override or session_type in (SessionType.DAILY, SessionType.CHAT):
-                return toolspecs.specs_by_names(toolspecs.DAILY_TOOL_NAMES)
-            if for_opening:
-                return toolspecs.specs_by_names(toolspecs.OPENING_TOOL_NAMES)
-            return toolspecs.specs_by_names(toolspecs.READING_TOOL_NAMES)
+            return toolspecs.specs_by_names(
+                tool_names(session_type, opening=for_opening, has_override=has_override))
 
         provider = llm.get_provider("opening" if is_opening else "reading")
         system, history, pending = self._build_neutral(
@@ -180,7 +159,7 @@ class GeminiService:
             force_brief=force_brief,
         )
         # 守卫第 2 层：opening 且预算用尽 → 本轮 mode=ANY，模型只能交单（provider 负责编码）
-        force = "submit_reading_brief" if (is_opening and force_brief) else None
+        force = FORCED_BRIEF_TOOL if (is_opening and force_brief) else None
         session = provider.open_session(system, history, _tool_specs(is_opening), force)
 
         print(f"\n[Agent] 会话类型: {session_type.value} | 相位: {phase}" + (" | 强制交单" if is_opening and force_brief else ""))

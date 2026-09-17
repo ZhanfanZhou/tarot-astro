@@ -92,8 +92,8 @@ def extract_tagline(conversation: Optional[Conversation]) -> Optional[str]:
     return sentence[:40]
 
 
-# render_template 已收敛到 prompt_service（默认+覆盖双层热加载），别名保持旧调用点不变
-from services.prompt_service import render_prompt as render_template
+from services import prompt_service
+from services.prompt_service import Part
 
 
 def _nickname(user: Optional[User]) -> str:
@@ -108,6 +108,45 @@ def _birth_info(user: Optional[User]) -> str:
         if all([p.birth_year, p.birth_month, p.birth_day]):
             return f"生日:{p.birth_year}年{p.birth_month}月{p.birth_day}日"
     return "生日:未提供"
+
+
+def daily_oracle_prompt_parts(
+    user: Optional[User], own: Optional[DailyDrawRecord],
+    history: List[DailyDrawRecord], anchor: date,
+) -> List[Part]:
+    """每日一签提示词：本对话自己的牌作 {today_card}，history 进 {history_block}。"""
+    if own:
+        pos = "逆位" if own.card.reversed else "正位"
+        today_card = f"{own.card.card_name}·{pos}"
+        today_date_str = own.effective_date
+    else:
+        today_card = "(未找到本对话的抽牌记录)"
+        today_date_str = anchor.isoformat()
+    return prompt_service.render_prompt_parts("daily_oracle_system.md", {
+        "nickname": _nickname(user),
+        "birth_info": _birth_info(user),
+        "today_date": today_date_str,
+        "today_card": today_card,
+        "history_block": build_history_block(history),
+    })
+
+
+def journey_prompt_parts(
+    user: Optional[User], recent: List[DailyDrawRecord], notebook_entries: List[dict],
+) -> List[Part]:
+    """心灵奇旅提示词：recent 升序且非空；只摘这些日子对应对话的笔记。"""
+    conv_ids = {r.conversation_id for r in recent}
+    nb_lines = [
+        f"- {e.get('summary')}"
+        for e in notebook_entries
+        if e.get("conversation_id") in conv_ids and e.get("summary")
+    ]
+    return prompt_service.render_prompt_parts("daily_journey.md", {
+        "nickname": _nickname(user),
+        "date_range": f"{recent[0].effective_date} ~ {recent[-1].effective_date}",
+        "history_block": build_history_block(recent),
+        "notebook_block": "\n".join(nb_lines) if nb_lines else "(无)",
+    })
 
 
 class DailyService:
@@ -202,20 +241,7 @@ class DailyService:
         }
         anchor = date.today()
         history = select_history_records(others, anchor)
-        if own:
-            pos = "逆位" if own.card.reversed else "正位"
-            today_card = f"{own.card.card_name}·{pos}"
-            today_date_str = own.effective_date
-        else:
-            today_card = "(未找到本对话的抽牌记录)"
-            today_date_str = anchor.isoformat()
-        return render_template("daily_oracle_system.md", {
-            "nickname": _nickname(user),
-            "birth_info": _birth_info(user),
-            "today_date": today_date_str,
-            "today_card": today_card,
-            "history_block": build_history_block(history),
-        })
+        return prompt_service.join(daily_oracle_prompt_parts(user, own, history, anchor))
 
     @staticmethod
     async def build_journey_prompt(
@@ -233,15 +259,4 @@ class DailyService:
         ]
         if len(recent) < JOURNEY_MIN_RECORDS:
             return None
-        conv_ids = {r.conversation_id for r in recent}
-        nb_lines = [
-            f"- {e.get('summary')}"
-            for e in notebook_entries
-            if e.get("conversation_id") in conv_ids and e.get("summary")
-        ]
-        return render_template("daily_journey.md", {
-            "nickname": _nickname(user),
-            "date_range": f"{recent[0].effective_date} ~ {recent[-1].effective_date}",
-            "history_block": build_history_block(recent),
-            "notebook_block": "\n".join(nb_lines) if nb_lines else "(无)",
-        })
+        return prompt_service.join(journey_prompt_parts(user, recent, notebook_entries))

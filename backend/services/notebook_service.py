@@ -101,6 +101,23 @@ def build_transcript(conversation: Conversation) -> str:
     return "\n".join(lines)
 
 
+def first_question(conversation: Conversation) -> str:
+    """第一条用户发言（前 100 字）。"""
+    for msg in conversation.messages:
+        if msg.role == MessageRole.USER and msg.content.strip():
+            return msg.content[:100]
+    return "未知问题"
+
+
+def notebook_prompt_parts(conversation: Conversation) -> List[prompt_service.Part]:
+    """记忆 Agent 的整段输入（replace 渲染，正文 JSON 花括号安全）。"""
+    return prompt_service.render_prompt_parts("notebook_system.md", {
+        "conversation_content": build_transcript(conversation),
+        "start_time": datetime.fromisoformat(conversation.created_at).strftime("%Y年%m月%d日"),
+        "question": first_question(conversation),
+    })
+
+
 class NotebookService:
     """笔记本管理服务"""
     
@@ -153,25 +170,12 @@ class NotebookService:
         Returns:
             生成的摘要文本
         """
-        # 提取问题（第一条用户消息）
-        question = "未知问题"
-        for msg in conversation.messages:
-            if msg.role == MessageRole.USER and msg.content.strip():
-                question = msg.content[:100]  # 取前100字
-                break
-        
-        conversation_str = build_transcript(conversation)
-        print(f"[Notebook] 对话内容: {conversation_str}")
+        print(f"[Notebook] 对话内容: {build_transcript(conversation)}")
         
         # 格式化时间
         start_time = datetime.fromisoformat(conversation.created_at).strftime("%Y年%m月%d日")
         
-        # 构建提示词（热加载文件模板；replace 渲染，正文 JSON 花括号安全）
-        prompt = prompt_service.render_prompt("notebook_system.md", {
-            "conversation_content": conversation_str,
-            "start_time": start_time,
-            "question": question,
-        })
+        prompt = prompt_service.join(notebook_prompt_parts(conversation))
         
         # 调用AI生成摘要（结构化输出，走记忆 Agent 的 provider）
         try:
@@ -225,12 +229,7 @@ class NotebookService:
         # 生成摘要（AI 会从对话中自动提取抽到的牌）
         summary, cards_drawn = await self.generate_summary(conversation, user)
         
-        # 提取问题
-        question = "未知问题"
-        for msg in conversation.messages:
-            if msg.role == MessageRole.USER and msg.content.strip():
-                question = msg.content[:100]
-                break
+        question = first_question(conversation)
         
         # 创建新条目（使用 AI 提取的 cards_drawn）
         new_entry = NotebookEntry(

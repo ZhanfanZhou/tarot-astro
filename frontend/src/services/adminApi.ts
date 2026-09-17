@@ -117,9 +117,42 @@ export interface PromptInfo {
   updated_at: string | null;
 }
 
+/** 发给模型的一段文字。prompt 非空 = 来自该 .md；否则是代码拼的（label 说明是哪一块）。 */
+export interface PromptPart {
+  text: string;
+  prompt: string;
+  /** true = prompt 模板里某个变量（label 是变量名）填进去的值 */
+  variable: boolean;
+  label: string;
+  /** 什么情况下才有；空 = 每次都有 */
+  when: string;
+}
+
+export interface PromptTool {
+  name: string;
+  description: string;
+  parameters: unknown;
+}
+
+/** 用到某个提示词的一次模型调用：按实际发送顺序的各段 + 工具 + 其后接什么。 */
+export interface PromptCallSite {
+  title: string;
+  /** null = 这段文字不发给模型 */
+  agent: string | null;
+  agent_label: string | null;
+  provider: string | null;
+  model: string | null;
+  delivery: string;
+  parts: PromptPart[];
+  tools: PromptTool[];
+  force_tool: { name: string; when: string; supported: boolean } | null;
+  after: string;
+}
+
 export interface PromptDetail extends PromptInfo {
   content: string;
   default_content: string;
+  call_sites: PromptCallSite[];
 }
 
 export const displayName = (u: {

@@ -256,23 +256,35 @@ def test_build_opening_prompt_with_force_brief_appends_guard_instruction():
     assert "预算已用尽" in prompt
 
 
-def test_build_reading_prompt_without_strategy_is_base_plus_user_context():
+@pytest.fixture
+def base_prompt(monkeypatch):
+    """解读相位的底稿换成固定串，断言只看拼接。"""
+    from services import prompt_service
+
+    real = prompt_service.get_prompt
+    monkeypatch.setattr(
+        prompt_service, "get_prompt",
+        lambda name: f"BASE:{name}" if name.endswith("_system.md") else real(name),
+    )
+
+
+def test_build_reading_prompt_without_strategy_is_base_plus_user_context(base_prompt):
     from services import context_service
 
     prompt = context_service.build_reading_prompt(
-        base_prompt="BASE", user_context="<用户资料>昵称：小夏", strategy=None,
+        session_type=SessionType.TAROT, user_context="<用户资料>昵称：小夏", strategy=None,
     )
-    assert prompt.startswith("BASE")
+    assert prompt.startswith("BASE:tarot_system.md")
     assert "小夏" in prompt
     assert "本场起手" not in prompt
 
 
-def test_build_reading_prompt_with_strategy_appends_handoff_constraints():
+def test_build_reading_prompt_with_strategy_appends_handoff_constraints(base_prompt):
     """移交后追加接场约束：这一场的开场已经有人做过了，别从头再来一遍。"""
     from services import context_service
 
     prompt = context_service.build_reading_prompt(
-        base_prompt="BASE", user_context="",
+        session_type=SessionType.TAROT, user_context="",
         strategy={"question": "该不该接 offer", "route": "tarot"},
     )
     assert "本场起手" in prompt
@@ -298,14 +310,14 @@ def test_reading_prompts_carry_no_opening_phase_instructions():
         assert "期望，诉求" not in text, name        # 背景与诉求采集
 
 
-def test_build_reading_prompt_legacy_conversation_has_no_handoff_constraints():
+def test_build_reading_prompt_legacy_conversation_has_no_handoff_constraints(base_prompt):
     """存量会话（strategy=None）零影响：不追加任何接场约束，行为与改动前完全一致。"""
     from services import context_service
 
     prompt = context_service.build_reading_prompt(
-        base_prompt="BASE", user_context="<用户资料>昵称：小夏", strategy=None,
+        session_type=SessionType.ASTROLOGY, user_context="<用户资料>昵称：小夏", strategy=None,
     )
     assert "接场" not in prompt
     assert "不要再欢迎用户" not in prompt
     assert "submit_reading_brief" not in prompt
-    assert prompt == "BASE\n\n<用户资料>昵称：小夏"
+    assert prompt == "BASE:astrology_system.md\n\n<用户资料>昵称：小夏"

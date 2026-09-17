@@ -15,7 +15,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 import config
-from services import prompt_service
+from services import prompt_assembly, prompt_service
 from services.llm import agent_config
 from services.auth_service import create_admin_token, decode_access_token
 from services.rate_limit_service import get_today_usage, reset_user_usage
@@ -177,6 +177,8 @@ async def admin_prompt_detail(name: str, _: None = Depends(require_admin)):
             **info,
             "content": prompt_service.get_prompt(name),
             "default_content": prompt_service.get_default(name),
+            # 用到它的每一次模型调用，前后接了什么（只读展示，示例数据）
+            "call_sites": prompt_assembly.call_sites_for(name),
         }
     except KeyError:
         raise HTTPException(status_code=404, detail="提示词不存在")
