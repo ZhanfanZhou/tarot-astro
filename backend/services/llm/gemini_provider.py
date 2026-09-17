@@ -4,6 +4,7 @@
 FunctionResponse proto），保证 Gemini 路径字节级零回归。
 """
 import json
+import uuid
 import google.generativeai as genai
 from typing import Optional
 from google.generativeai.types import FunctionDeclaration, Tool
@@ -16,16 +17,34 @@ genai.configure(api_key=config.GEMINI_API_KEY)
 _GEN_CONFIG = {"temperature": 0.9, "top_p": 0.95, "top_k": 40, "max_output_tokens": 8192}
 
 
-def _to_history(system_prompt: str, history: list) -> list:
-    """系统提示词 → user 首轮 + model『我明白了。』确认语；其余文本轮按角色映射。
-    与今天 _format_messages_for_gemini 的框架逐字一致。"""
-    out = [
-        {"role": "user", "parts": [{"text": system_prompt}]},
-        {"role": "model", "parts": [{"text": "我明白了。"}]},
-    ]
+def _to_history(history: list) -> list:
+    """中性历史 → Gemini contents（系统提示词走 GenerativeModel(system_instruction=)）。
+
+    工具轮就是 Gemini 的 functionCall / functionResponse part。Gemini 无状态，重建的
+    contents 与当初实时产生的等价；contents 以 model 轮开头（开场白是第一条）、历史里
+    含本次未声明的函数、functionResponse 结尾，三种形状都合法（2026-09 对真 API 验证）。
+    """
+    out = []
     for m in history:
-        role = "user" if m["role"] == "user" else "model"
-        out.append({"role": role, "parts": [{"text": m["content"]}]})
+        if m["role"] == "tool_result":
+            out.append({"role": "user", "parts": [genai.protos.Part(
+                function_response=genai.protos.FunctionResponse(
+                    name=m["name"], response=m["result"]))]})
+            continue
+
+        if m["role"] == "user":
+            out.append({"role": "user", "parts": [genai.protos.Part(text=m["content"])]})
+            continue
+
+        # assistant：话和调用是同一个 model 轮里的两个 part
+        parts = []
+        if m.get("content"):
+            parts.append(genai.protos.Part(text=m["content"]))
+        for call in m.get("tool_calls") or []:
+            parts.append(genai.protos.Part(
+                function_call=genai.protos.FunctionCall(name=call["name"], args=call["args"])))
+        if parts:
+            out.append({"role": "model", "parts": parts})
     return out
 
 
@@ -56,7 +75,9 @@ def _parse(response) -> TurnResult:
     for part in response.parts:
         if getattr(part, "function_call", None) and part.function_call:
             fc = part.function_call
-            calls.append(ToolCall(name=fc.name, args=_to_plain(dict(fc.args)), id=fc.name))
+            # Gemini 的 FunctionCall 没有 id；落库要靠 id 把调用和结果对上，这里生成一个
+            calls.append(ToolCall(name=fc.name, args=_to_plain(dict(fc.args)),
+                                  id=f"{fc.name}-{uuid.uuid4().hex[:8]}"))
         elif getattr(part, "text", None):
             text += part.text
     return TurnResult(text=text, tool_calls=calls)
@@ -72,8 +93,9 @@ class _GeminiSession:
             kwargs["tool_config"] = {"function_calling_config": {
                 "mode": "ANY", "allowed_function_names": [force_tool]}}
         model = genai.GenerativeModel(
-            model_name=model_name, generation_config=_GEN_CONFIG, tools=gtools, **kwargs)
-        self._chat = model.start_chat(history=_to_history(system_prompt, history))
+            model_name=model_name, generation_config=_GEN_CONFIG, tools=gtools,
+            system_instruction=system_prompt, **kwargs)
+        self._chat = model.start_chat(history=_to_history(history))
 
     async def send_user(self, text: str) -> TurnResult:
         return _parse(await self._chat.send_message_async(text, stream=False))

@@ -149,8 +149,8 @@ OPENING_FORCE_BRIEF_AFTER_USER_MSGS = int(os.getenv("OPENING_FORCE_BRIEF_AFTER_U
 # harness 直接翻 phase=reading，strategy 保持 None，不伪造假策略单。
 OPENING_HARD_EXIT_AFTER_USER_MSGS = int(os.getenv("OPENING_HARD_EXIT_AFTER_USER_MSGS", "5"))
 
-# 开场白 LLM 调用的超时（秒）。开场白是全 App 的第一印象，Gemini 卡住时宁可
-# 快速降级到模板，也不让用户对着转圈等——超时抛异常，由 build_greeting 接住。
+# 开场白 LLM 调用的超时（秒）。开场白是全 App 的第一印象，provider 卡住时宁可
+# 快速失败让用户重试，也不让他对着转圈等——超时抛异常，建会话接口返回 503。
 OPENING_GREETING_TIMEOUT_SECONDS = int(os.getenv("OPENING_GREETING_TIMEOUT_SECONDS", "8"))
 
 

@@ -85,7 +85,7 @@ def test_list_prompts_covers_registry(ps):
 # ---------------------------------------------------------------------------
 # 接线测试：三个服务确实从 prompt_service 取词（覆盖版生效 = 证明走了文件）
 # ---------------------------------------------------------------------------
-from models import SessionType  # noqa: E402
+from models import Message, MessageRole, SessionType  # noqa: E402
 
 
 def test_gemini_selects_prompt_file_by_session_type(ps):
@@ -93,10 +93,12 @@ def test_gemini_selects_prompt_file_by_session_type(ps):
     ps.save_override("astrology_system.md", "ASTRO-FILE-PROMPT")
     from services.gemini_service import GeminiService
     svc = GeminiService()
-    tarot_msgs = svc._format_messages_for_gemini([], user=None, session_type=SessionType.TAROT)
-    astro_msgs = svc._format_messages_for_gemini([], user=None, session_type=SessionType.ASTROLOGY)
-    assert tarot_msgs[0]["parts"][0]["text"].startswith("TAROT-FILE-PROMPT")
-    assert astro_msgs[0]["parts"][0]["text"].startswith("ASTRO-FILE-PROMPT")
+    # 带一条待发的用户消息：_build_neutral 的契约是「这一轮发什么」，空会话没得发
+    msgs = [Message(role=MessageRole.USER, content="问题")]
+    tarot_system, _, _ = svc._build_neutral(msgs, user=None, session_type=SessionType.TAROT)
+    astro_system, _, _ = svc._build_neutral(msgs, user=None, session_type=SessionType.ASTROLOGY)
+    assert tarot_system.startswith("TAROT-FILE-PROMPT")
+    assert astro_system.startswith("ASTRO-FILE-PROMPT")
 
 
 def test_gemini_hardcoded_prompts_removed(ps):

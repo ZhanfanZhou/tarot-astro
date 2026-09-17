@@ -32,7 +32,15 @@ export interface User {
 export enum MessageRole {
   USER = 'user',
   ASSISTANT = 'assistant',
-  SYSTEM = 'system',
+  TOOL = 'tool',       // 某次工具调用的结果（对应前一条 assistant 的 tool_calls）；抽牌的牌挂在这条上
+  SYSTEM = 'system',   // 仅旧版本对话有；含它的对话只能查看
+}
+
+/** 模型发起的一次工具调用；随后那条 tool 记录用 tool_call_id 指回来 */
+export interface ToolCallRecord {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
 }
 
 export enum SessionType {
@@ -66,6 +74,11 @@ export interface Message {
   role: MessageRole;
   content: string;
   timestamp: string;
+  tool_calls?: ToolCallRecord[];   // assistant
+  reasoning?: string;              // assistant：思考模型的推理内容（不渲染）
+  tool_call_id?: string;           // tool
+  tool_name?: string;              // tool
+  /** 展示用的牌面：抽牌的 tool 记录上带牌；每日一签的解读把当日的牌挂在 assistant 上 */
   tarot_cards?: TarotCard[];
   draw_request?: DrawCardsRequest;
 }

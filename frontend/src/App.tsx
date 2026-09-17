@@ -26,7 +26,15 @@ import { useConversationStore } from './stores/useConversationStore';
 import { userApi, conversationApi, tarotApi, astrologyApi, dailyApi } from './services/api';
 import { getEffectiveDate } from './utils/dailyDate';
 import { MessageRole } from './types';
-import type { SessionType, DrawCardsRequest, Message, UserProfile, DailyOverview } from './types';
+import type { Conversation, SessionType, DrawCardsRequest, Message, ToolCallRecord, UserProfile, DailyOverview } from './types';
+
+/** 会话末尾是一次还在等用户动手的调用（抽牌 / 补资料）→ 返回它。和后端 tool_turns.pending_interrupt 同一个判据。 */
+const INTERRUPT_TOOLS = new Set(['draw_tarot_cards', 'request_user_profile']);
+function pendingInterrupt(conv: Conversation): ToolCallRecord | undefined {
+  const tail = conv.messages[conv.messages.length - 1];
+  const call = tail?.role === 'assistant' ? tail.tool_calls?.[0] : undefined;
+  return call && INTERRUPT_TOOLS.has(call.name) ? call : undefined;
+}
 
 const App: React.FC = () => {
   const { user, setUser, setAuth, logout } = useAuthStore();
@@ -39,21 +47,19 @@ const App: React.FC = () => {
     updateConversation,
     removeConversation,
     addMessageToCurrentConversation,
+    liveTurns,
+    startTurn,
+    appendTurn,
+    finishTurn,
   } = useConversationStore();
 
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showConvertModal, setShowConvertModal] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [streamingMessage, setStreamingMessage] = useState('');
   const [showCardDrawer, setShowCardDrawer] = useState(false);
-  const [pendingDrawRequest, setPendingDrawRequest] = useState<DrawCardsRequest | null>(null);
-  const [showDrawButton, setShowDrawButton] = useState(false); // 是否显示抽牌按钮
   const [showAstrologyProfileModal, setShowAstrologyProfileModal] = useState(false);
-  const [pendingAstrologyConversation, setPendingAstrologyConversation] = useState<string | null>(null);
-  const [showProfileButton, setShowProfileButton] = useState(false); // 是否显示补充资料按钮
-  const [pendingProfileRequest, setPendingProfileRequest] = useState<any>(null); // 待处理的资料请求
   const isCreatingSessionRef = useRef(false); // 防止重复创建会话
+  const [creatingSessionType, setCreatingSessionType] = useState<SessionType | null>(null);
   const previousConversationIdRef = useRef<string | null>(null); // 追踪上一次的对话ID，用于退出时保存笔记
   // 侧边栏：桌面常驻、移动端抽屉；初始按视口决定
   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1024);
@@ -115,7 +121,7 @@ const App: React.FC = () => {
   // 自动滚动到底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [currentConversation?.messages, streamingMessage]);
+  }, [currentConversation?.messages, currentConversation ? liveTurns[currentConversation.conversation_id] : undefined]);
 
   // 页面卸载时保存笔记
   useEffect(() => {
@@ -172,7 +178,6 @@ const App: React.FC = () => {
     try {
       const { user: newUser, access_token } = await userApi.register(username, password, profile);
       setAuth(newUser, access_token);
-      setPendingAstrologyConversation(null);
       setShowAstrologyProfileModal(true); // Prompt new users to complete their profile
     } catch (error: any) {
       console.error('注册失败:', error);
@@ -204,146 +209,19 @@ const App: React.FC = () => {
       return;
     }
     isCreatingSessionRef.current = true;
+    setCreatingSessionType(sessionType);
 
     try {
+      // 塔罗/占星的开场白由后端在建会话时生成，随响应一起回来（会阻塞几秒）——
+      // 前端不需要再发一条消息去把占卜师叫醒。
       const newConv = await conversationApi.create(user.user_id, sessionType);
       addConversation(newConv);
       setCurrentConversation(newConv);
-
-      // 处理塔罗占卜
-      if (sessionType === 'tarot') {
-        setIsLoading(true);
-        setStreamingMessage('');
-
-        try {
-          // 发送空消息，让后端返回预设开场白
-          await tarotApi.sendMessage(
-            newConv.conversation_id,
-            '', // 空内容，触发后端返回预设开场白
-            (chunk) => {
-              setStreamingMessage((prev) => prev + chunk);
-            },
-            (drawRequest) => {
-              setPendingDrawRequest(drawRequest);
-              setShowDrawButton(true); // 显示抽牌按钮而非立即弹出抽牌器
-            },
-            (instruction) => {
-              // 塔罗AI也可以请求用户资料
-              console.log('塔罗AI请求用户资料:', instruction);
-              setPendingAstrologyConversation(newConv.conversation_id);
-              setPendingProfileRequest(instruction);
-              setShowProfileButton(true); // 显示补充资料按钮而非立即弹窗
-            },
-            async (instruction) => {
-              // 塔罗AI也可以请求获取星盘数据
-              console.log('塔罗AI请求获取星盘:', instruction);
-              if (user) {
-                try {
-                  await astrologyApi.fetchChart(newConv.conversation_id);
-                } catch (error) {
-                  console.error('获取星盘数据失败:', error);
-                }
-              }
-            }
-          );
-
-          const updatedConv = await conversationApi.get(newConv.conversation_id);
-          updateConversation(updatedConv);
-          setCurrentConversation(updatedConv);
-          setStreamingMessage('');
-        } catch (error) {
-          console.error('塔罗AI开场失败:', error);
-          toast.error('初始化失败，请重试');
-        } finally {
-          setIsLoading(false);
-        }
-      }
-      // 处理星座咨询
-      else if (sessionType === 'astrology') {
-        setIsLoading(true);
-        setStreamingMessage('');
-        setPendingAstrologyConversation(newConv.conversation_id);
-
-        try {
-          let chartWasFetched = false; // 追踪当前消息周期中是否获取了星盘
-          
-          // 发送空消息，让AI主动开场
-          await astrologyApi.sendMessage(
-            newConv.conversation_id,
-            '', // 空内容，触发AI主动说话
-            (chunk) => {
-              setStreamingMessage((prev) => prev + chunk);
-            },
-            (instruction) => {
-              // AI检测到需要资料
-              console.log('星座AI请求用户资料:', instruction);
-              setPendingAstrologyConversation(newConv.conversation_id);
-              setPendingProfileRequest(instruction);
-              setShowProfileButton(true); // 显示补充资料按钮而非立即弹窗
-            },
-            async (instruction) => {
-              // AI请求获取星盘数据
-              console.log('星座AI请求获取星盘:', instruction);
-              if (user) {
-                try {
-                  await astrologyApi.fetchChart(newConv.conversation_id);
-                  chartWasFetched = true; // 标记本次消息周期中获取了星盘
-                } catch (error) {
-                  console.error('获取星盘数据失败:', error);
-                }
-              }
-            },
-            (drawRequest) => {
-              // 星座AI也可以抽塔罗牌
-              console.log('星座AI请求抽塔罗牌:', drawRequest);
-              setPendingDrawRequest(drawRequest);
-              setShowDrawButton(true); // 显示抽牌按钮而非立即弹出抽牌器
-            }
-          );
-
-          const updatedConv = await conversationApi.get(newConv.conversation_id);
-          updateConversation(updatedConv);
-          setCurrentConversation(updatedConv);
-          setStreamingMessage('');
-          
-          // 如果星盘数据刚被获取，自动触发AI继续解读
-          // 使用本地追踪的chartWasFetched而不是React状态，以确保只触发一次
-          if (chartWasFetched) {
-            setIsLoading(true);
-            setStreamingMessage('');
-            
-            try {
-              // 自动发送触发消息让AI基于星盘数据继续
-              await astrologyApi.sendMessage(
-                newConv.conversation_id,
-                '星盘数据已准备好，请继续解读',
-                (chunk) => {
-                  setStreamingMessage((prev) => prev + chunk);
-                }
-              );
-              
-              // 刷新对话
-              const finalConv = await conversationApi.get(newConv.conversation_id);
-              updateConversation(finalConv);
-              setCurrentConversation(finalConv);
-              setStreamingMessage('');
-            } catch (error) {
-              console.error('AI继续解读失败:', error);
-            } finally {
-              setIsLoading(false);
-            }
-          }
-        } catch (error) {
-          console.error('AI开场失败:', error);
-          toast.error('初始化失败，请重试');
-        } finally {
-          setIsLoading(false);
-        }
-      }
-    } catch (error) {
+    } catch (error: any) {
       console.error('创建对话失败:', error);
-      toast.error('创建对话失败，请重试');
+      toast.error(error?.response?.data?.detail || '创建对话失败，请重试');
     } finally {
+      setCreatingSessionType(null);
       isCreatingSessionRef.current = false;
     }
   };
@@ -379,7 +257,13 @@ const App: React.FC = () => {
         await handleExitConversation(currentConversation.conversation_id);
       }
 
-      const fullConv = await conversationApi.get(conversation.conversation_id);
+      // 这场会话还有一轮在跑：服务端可能已经落了这一轮的前半段（先说一句、再调工具接着跑），
+      // 而这段话还在流式气泡里。用本地这份（这一轮开始时的样子），这一轮结束时 finishTurn
+      // 统一换成服务端的——和一直停在这场会话里看到的一样。
+      const fullConv =
+        conversation.conversation_id in liveTurns
+          ? conversation
+          : await conversationApi.get(conversation.conversation_id);
       setCurrentConversation(fullConv);
       previousConversationIdRef.current = fullConv.conversation_id;
     } catch (error) {
@@ -427,308 +311,92 @@ const App: React.FC = () => {
   const handleScrollToLatest = () =>
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
 
-  const handleAstrologyProfileSubmit = async (profile: UserProfile) => {
-    if (!user) return;
+  const turnApi = (sessionType: SessionType) => (sessionType === 'astrology' ? astrologyApi : tarotApi);
 
-    const conversationId = pendingAstrologyConversation;
-
+  /**
+   * 在某场会话里跑一轮：流式正文记在这场会话名下，结束后刷新这场会话。
+   * 刷新只在它仍是当前会话时替换当前视图——用户中途切走不会被拽回来。
+   */
+  const runTurn = async (
+    conv: Conversation,
+    start: (onChunk: (chunk: string) => void) => Promise<void>,
+    failMessage: string
+  ) => {
+    const id = conv.conversation_id;
+    startTurn(id);
     try {
-      // 更新用户资料
-      await userApi.updateProfile(user.user_id, profile);
-      
-      // 更新本地用户状态
-      const updatedUser = await userApi.getUser(user.user_id);
-      setUser(updatedUser);
-
-      // 关闭弹窗
-      setShowAstrologyProfileModal(false);
-      setShowProfileButton(false); // 清除补充资料按钮状态
-      setPendingProfileRequest(null); // 清除待处理的资料请求
-      
-      // 如果没有挂起的对话，仅保存资料即可
-      if (!conversationId) {
-        setPendingAstrologyConversation(null);
-        return;
-      }
-
-      setIsLoading(true);
-
-      // 获取星盘数据
-      await astrologyApi.fetchChart(conversationId);
-      
-      // 发送简单的通知消息，让AI知道资料已补充
-      setStreamingMessage('');
-      const triggerMessage = '我已经填写好出生信息了';
-      
-      await astrologyApi.sendMessage(
-        conversationId,
-        triggerMessage,
-        (chunk) => {
-          setStreamingMessage((prev) => prev + chunk);
-        },
-        (instruction) => {
-          // 理论上不应该再触发，但保留处理
-          console.log('AI再次请求用户资料:', instruction);
-        },
-        async (instruction) => {
-          // 理论上星盘数据已获取，但保留处理
-          console.log('AI再次请求获取星盘:', instruction);
-        }
-      );
-
-      // 刷新对话
-      const updatedConv = await conversationApi.get(conversationId);
-      updateConversation(updatedConv);
-      setCurrentConversation(updatedConv);
-      setStreamingMessage('');
-      setPendingAstrologyConversation(null);
+      await start((chunk) => appendTurn(id, chunk));
     } catch (error: any) {
-      console.error('更新资料失败:', error);
-      const errorMessage = error.response?.data?.detail || error.message || '更新资料失败，请重试';
-      throw new Error(errorMessage);
-    } finally {
-      if (conversationId) {
-        setIsLoading(false);
-      }
+      console.error(failMessage, error);
+      toast.error(error?.message || failMessage);
     }
+    let refreshed: Conversation | null = null;
+    try {
+      refreshed = await conversationApi.get(id);
+    } catch (error) {
+      console.error('刷新对话失败:', error);
+    }
+    finishTurn(id, refreshed);
   };
 
-  const handleAstrologyProfileSkip = async () => {
-    // 用户跳过填写资料，关闭弹窗，让用户继续自由对话
+  const handleAstrologyProfileSubmit = async (profile: UserProfile) => {
+    if (!user) return;
+    try {
+      await userApi.updateProfile(user.user_id, profile);
+      setUser(await userApi.getUser(user.user_id));
+    } catch (error: any) {
+      console.error('更新资料失败:', error);
+      throw new Error(error.response?.data?.detail || error.message || '更新资料失败，请重试');
+    }
     setShowAstrologyProfileModal(false);
-    setShowProfileButton(false); // 清除补充资料按钮状态
-    setPendingProfileRequest(null); // 清除待处理的资料请求
-    // 不清空 pendingAstrologyConversation，以便用户后续想填写时还可以使用
+
+    // 当前会话正等着这份资料（末尾是一次 request_user_profile 调用）才接着跑：后端把用户
+    // 现在填的资料记成那次调用的结果，模型自己去调 get_astrology_chart。从设置/注册打开的
+    // 资料表单，或者当前会话没在等资料，只保存资料。
+    const conv = useConversationStore.getState().currentConversation;
+    if (!conv || pendingInterrupt(conv)?.name !== 'request_user_profile') return;
+    await runTurn(conv, (onChunk) => turnApi(conv.session_type).resume(conv.conversation_id, onChunk), '解读失败，请重试');
+  };
+
+  const handleAstrologyProfileSkip = () => {
+    // 跳过：关弹窗，按钮还在（模型仍在等）；用户直接发消息时后端会把「没填」记成结果
+    setShowAstrologyProfileModal(false);
   };
 
   const handleSendMessage = async (content: string) => {
-    if (!currentConversation || isLoading) return;
+    const conv = currentConversation;
+    if (!conv || conv.conversation_id in liveTurns) return;
 
-    setIsLoading(true);
-    setStreamingMessage('');
-
-    try {
-      let chartWasFetched = false; // 追踪当前消息周期中是否获取了星盘
-      
-      // 立即将用户消息添加到对话中（无需等待API响应）
-      const userMessage: Message = {
-        role: 'user' as MessageRole,
-        content,
-        timestamp: new Date().toISOString(),
-      };
-      addMessageToCurrentConversation(userMessage);
-      
-      // 根据会话类型选择API
-      if (currentConversation.session_type === 'astrology') {
-        await astrologyApi.sendMessage(
-          currentConversation.conversation_id,
-          content,
-          (chunk) => {
-            setStreamingMessage((prev) => prev + chunk);
-          },
-          (instruction) => {
-            // AI检测到需要资料
-            console.log('星座AI请求用户资料:', instruction);
-            setPendingAstrologyConversation(currentConversation.conversation_id);
-            setPendingProfileRequest(instruction);
-            setShowProfileButton(true); // 显示补充资料按钮而非立即弹窗
-          },
-          async (instruction) => {
-            // AI请求获取星盘数据
-            console.log('星座AI请求获取星盘:', instruction);
-            if (user) {
-              try {
-                await astrologyApi.fetchChart(currentConversation.conversation_id);
-                chartWasFetched = true; // 标记本次消息周期中获取了星盘
-              } catch (error) {
-                console.error('获取星盘数据失败:', error);
-              }
-            }
-          },
-          (drawRequest) => {
-            // 星座AI也可以抽塔罗牌（用于辅助解读）
-            console.log('星座AI请求抽塔罗牌:', drawRequest);
-            console.log('drawRequest.spread_type:', drawRequest.spread_type);
-            console.log('drawRequest.positions:', drawRequest.positions);
-            setPendingDrawRequest(drawRequest);
-            setShowDrawButton(true); // 显示抽牌按钮而非立即弹出抽牌器
-          }
-        );
-      } else {
-        await tarotApi.sendMessage(
-          currentConversation.conversation_id,
-          content,
-          (chunk) => {
-            setStreamingMessage((prev) => prev + chunk);
-          },
-          (drawRequest) => {
-            console.log('塔罗AI请求抽塔罗牌:', drawRequest);
-            console.log('drawRequest.spread_type:', drawRequest.spread_type);
-            console.log('drawRequest.positions:', drawRequest.positions);
-            setPendingDrawRequest(drawRequest);
-            setShowDrawButton(true); // 显示抽牌按钮而非立即弹出抽牌器
-          },
-          (instruction) => {
-            // 塔罗AI也可以请求用户资料（用于结合星盘的深入解读）
-            console.log('塔罗AI请求用户资料:', instruction);
-            setPendingAstrologyConversation(currentConversation.conversation_id);
-            setPendingProfileRequest(instruction);
-            setShowProfileButton(true); // 显示补充资料按钮而非立即弹窗
-          },
-          async (instruction) => {
-            // 塔罗AI也可以请求获取星盘数据
-            console.log('塔罗AI请求获取星盘:', instruction);
-            if (user) {
-              try {
-                await astrologyApi.fetchChart(currentConversation.conversation_id);
-                chartWasFetched = true;
-              } catch (error) {
-                console.error('获取星盘数据失败:', error);
-              }
-            }
-          }
-        );
-      }
-
-      // 刷新对话
-      const finalConv = await conversationApi.get(currentConversation.conversation_id);
-      updateConversation(finalConv);
-      setCurrentConversation(finalConv);
-      setStreamingMessage('');
-      
-      // 如果星盘数据刚被获取，自动触发AI继续解读（仅在星座AI中）
-      // 使用本地追踪的chartWasFetched而不是React状态，以确保只触发一次
-      if (chartWasFetched && currentConversation.session_type === 'astrology') {
-        setIsLoading(true);
-        setStreamingMessage('');
-        
-        try {
-          // 自动发送触发消息让AI基于星盘数据继续
-          await astrologyApi.sendMessage(
-            currentConversation.conversation_id,
-            '星盘数据已准备好，请继续解读',
-            (chunk) => {
-              setStreamingMessage((prev) => prev + chunk);
-            }
-          );
-          
-          // 刷新对话
-          const continuedConv = await conversationApi.get(currentConversation.conversation_id);
-          updateConversation(continuedConv);
-          setCurrentConversation(continuedConv);
-          setStreamingMessage('');
-        } catch (error) {
-          console.error('AI继续解读失败:', error);
-        } finally {
-          setIsLoading(false);
-        }
-      }
-    } catch (error) {
-      console.error('发送消息失败:', error);
-      toast.error('发送失败，请重试');
-    } finally {
-      setIsLoading(false);
-    }
+    // 立即将用户消息添加到对话中（无需等待API响应）
+    addMessageToCurrentConversation({
+      role: 'user' as MessageRole,
+      content,
+      timestamp: new Date().toISOString(),
+    });
+    await runTurn(conv, (onChunk) => turnApi(conv.session_type).sendMessage(conv.conversation_id, content, onChunk), '发送失败，请重试');
   };
 
-  // 用户点击"我准备好了"按钮，打开抽牌器
-  const handleReadyToDraw = () => {
-    setShowDrawButton(false); // 隐藏按钮
-    setShowCardDrawer(true); // 显示抽牌器
-  };
+  const handleReadyToDraw = () => setShowCardDrawer(true);
 
-  // 用户点击"补充资料"按钮，打开资料填写窗口
-  const handleReadyToFillProfile = () => {
-    setShowProfileButton(false); // 隐藏按钮
-    setShowAstrologyProfileModal(true); // 显示资料填写窗口
-  };
+  const handleReadyToFillProfile = () => setShowAstrologyProfileModal(true);
 
   const handleCardsDrawn = async () => {
-    if (!currentConversation || !pendingDrawRequest) return;
+    // 抽牌器是全屏弹层，走到这里当前会话就是发起抽牌的那一场
+    const conv = useConversationStore.getState().currentConversation;
+    const call = conv ? pendingInterrupt(conv) : undefined;
+    if (!conv || call?.name !== 'draw_tarot_cards') return;
+    const api = turnApi(conv.session_type);
 
-    try {
-      // 根据会话类型选择正确的API
-      if (currentConversation.session_type === 'astrology') {
-        await astrologyApi.drawCards(currentConversation.conversation_id, pendingDrawRequest);
-      } else {
-        await tarotApi.drawCards(currentConversation.conversation_id, pendingDrawRequest);
+    await runTurn(conv, async (onChunk) => {
+      // 真牌由后端生成，作为那次 draw_tarot_cards 调用的结果落库；先刷新让牌面出来，再请模型解读
+      try {
+        await api.drawCards(conv.conversation_id, call.args as unknown as DrawCardsRequest);
+      } catch {
+        throw new Error('抽牌失败，请重试');
       }
-      
-      // 刷新对话（包含抽牌结果）
-      const updatedConv = await conversationApi.get(currentConversation.conversation_id);
-      updateConversation(updatedConv);
-      setCurrentConversation(updatedConv);
-      
-      setPendingDrawRequest(null);
-      
-      // 自动触发AI解读（不显示用户消息，直接调用AI）
-      setIsLoading(true);
-      setStreamingMessage('');
-      
-      setTimeout(async () => {
-        try {
-          // 根据会话类型选择正确的API
-          if (currentConversation.session_type === 'astrology') {
-            await astrologyApi.sendMessage(
-              currentConversation.conversation_id,
-              '请根据抽牌结果进行解读',
-              (chunk) => {
-                setStreamingMessage((prev) => prev + chunk);
-              },
-              (instruction) => {
-                // AI检测到需要资料
-                console.log('星座AI请求用户资料:', instruction);
-                setPendingAstrologyConversation(currentConversation.conversation_id);
-                setPendingProfileRequest(instruction);
-                setShowProfileButton(true); // 显示补充资料按钮而非立即弹窗
-              },
-              async (instruction) => {
-                // AI请求获取星盘数据
-                console.log('星座AI请求获取星盘:', instruction);
-                if (user) {
-                  try {
-                    await astrologyApi.fetchChart(currentConversation.conversation_id);
-                    // 注：在handleCardsDrawn中不需要触发自动回复，解读会在finally中进行
-                  } catch (error) {
-                    console.error('获取星盘数据失败:', error);
-                  }
-                }
-              },
-              () => {
-                // 不应该再次触发抽牌，但保留处理以防万一
-                console.warn('警告：解读时不应该再次触发抽牌');
-              }
-            );
-          } else {
-            await tarotApi.sendMessage(
-              currentConversation.conversation_id,
-              '请根据抽牌结果进行解读',
-              (chunk) => {
-                setStreamingMessage((prev) => prev + chunk);
-              },
-              () => {
-                // 不应该再次触发抽牌，但保留处理以防万一
-                console.warn('警告：解读时不应该再次触发抽牌');
-              }
-            );
-          }
-
-          // 刷新对话
-          const finalConv = await conversationApi.get(currentConversation.conversation_id);
-          updateConversation(finalConv);
-          setCurrentConversation(finalConv);
-          setStreamingMessage('');
-        } catch (error) {
-          console.error('AI解读失败:', error);
-          toast.error('解读失败，请重试');
-        } finally {
-          setIsLoading(false);
-        }
-      }, 500);
-    } catch (error) {
-      console.error('抽牌失败:', error);
-      toast.error('抽牌失败，请重试');
-    }
+      updateConversation(await conversationApi.get(conv.conversation_id));
+      await api.resume(conv.conversation_id, onChunk);
+    }, '解读失败，请重试');
   };
 
   // 「继续这段对话」:关弹窗,把 daily 对话设为当前会话(后续消息走 tarot 链路)
@@ -818,22 +486,37 @@ const App: React.FC = () => {
     }
   };
 
-  const nonSystemMessages = currentConversation?.messages.filter((msg) => msg.role !== MessageRole.SYSTEM) ?? [];
-  const lastNonSystemMessage = nonSystemMessages[nonSystemMessages.length - 1];
-  const hasAssistantMessageAtEnd = lastNonSystemMessage?.role === MessageRole.ASSISTANT;
-  const shouldRenderStandaloneDrawPrompt = Boolean(
-    currentConversation &&
-    showDrawButton &&
-    pendingDrawRequest &&
-    !hasAssistantMessageAtEnd &&
-    streamingMessage.trim().length === 0
-  );
-  const shouldRenderStandaloneProfilePrompt = Boolean(
-    currentConversation &&
-    showProfileButton &&
-    pendingProfileRequest &&
-    !hasAssistantMessageAtEnd &&
-    streamingMessage.trim().length === 0
+  // 当前会话的一切界面状态都从它自己的数据推出来，切换会话不会串台
+  const liveText = currentConversation ? liveTurns[currentConversation.conversation_id] : undefined;
+  const isTurnRunning = liveText !== undefined;
+  const pendingCall = currentConversation && !isTurnRunning ? pendingInterrupt(currentConversation) : undefined;
+  const pendingDrawRequest =
+    pendingCall?.name === 'draw_tarot_cards' ? (pendingCall.args as unknown as DrawCardsRequest) : null;
+  const needsProfile = pendingCall?.name === 'request_user_profile';
+
+  // 可见行：tool 记录和只有调用、没正文的 assistant 记录不渲染；抽牌的牌面跟着抽牌之后
+  // 第一条有正文的回复显示（每日一签的解读自己带牌，直接渲染）。还没等到回复的牌
+  // （抽完牌、模型还没开口或正在解读）交给流式气泡。
+  type Row = { message: Message; idx: number; cards?: Message };
+  const visibleRows: Row[] = [];
+  let unansweredCards: Message | undefined;
+  (currentConversation?.messages ?? []).forEach((message, idx) => {
+    if (message.role === 'tool') {
+      if (message.tarot_cards?.length) unansweredCards = message;
+      return;
+    }
+    if (message.role === 'system') return;
+    if (message.role === 'assistant' && !message.content.trim() && !message.tarot_cards?.length) return;
+    const cards = message.role === 'assistant' && !message.tarot_cards?.length ? unansweredCards : undefined;
+    if (cards) unansweredCards = undefined;
+    visibleRows.push({ message, idx, cards });
+  });
+  const lastVisibleMessage = visibleRows[visibleRows.length - 1]?.message;
+  // 按钮挂在最后一条可见的 AI 回复上；模型没开口就发起了调用（最后一条可见的是用户发言）时单独画一个
+  const buttonOnLastRow = lastVisibleMessage?.role === MessageRole.ASSISTANT;
+  // 旧版本对话：抽牌结果套在 system 里、没有记录调用，后端拒绝继续，这里只给看
+  const isLegacyConversation = Boolean(
+    currentConversation?.messages.some((m) => m.role === 'system' || (m.role === 'tool' && !m.tool_call_id))
   );
 
   return (
@@ -944,7 +627,8 @@ const App: React.FC = () => {
 
             <SessionButtons
               onSelectSession={handleSelectSession}
-              disabled={isLoading}
+              disabled={creatingSessionType !== null}
+              pendingType={creatingSessionType}
             />
 
             <div className="w-full max-w-2xl mt-12 space-y-6">
@@ -973,89 +657,53 @@ const App: React.FC = () => {
             {/* Messages */}
             <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6">
               <div className="max-w-[720px] mx-auto space-y-6">
-                {currentConversation.messages.map((message, idx) => {
-                  // 检查是否是最后一条 AI 消息且有待处理的抽牌请求
-                  const isLastAssistantMessage = 
-                    message.role === 'assistant' && 
-                    idx === currentConversation.messages.length - 1;
-                  const shouldShowDrawButton = 
-                    isLastAssistantMessage && 
-                    showDrawButton && 
-                    pendingDrawRequest !== null;
-                  const shouldShowProfileButton = 
-                    isLastAssistantMessage && 
-                    showProfileButton && 
-                    pendingProfileRequest !== null;
-                  
-                  return message.role !== 'system' && (
-                    <ChatMessage 
-                      key={idx} 
-                      message={message} 
+                {visibleRows.map(({ message, idx, cards }) => {
+                  const isLast = buttonOnLastRow && message === lastVisibleMessage;
+                  return (
+                    <ChatMessage
+                      key={idx}
+                      message={message}
+                      drawnCards={cards?.tarot_cards}
+                      drawnRequest={cards?.draw_request}
                       sessionType={currentConversation.session_type}
-                      showDrawButton={shouldShowDrawButton}
+                      showDrawButton={isLast && pendingDrawRequest !== null}
                       onReadyToDraw={handleReadyToDraw}
-                      showProfileButton={shouldShowProfileButton}
+                      showProfileButton={isLast && needsProfile}
                       onReadyToFillProfile={handleReadyToFillProfile}
                     />
                   );
                 })}
-                
-                {streamingMessage && (
+
+                {!buttonOnLastRow && (pendingDrawRequest !== null || needsProfile) && (
                   <ChatMessage
-                    message={{
-                      role: 'assistant' as MessageRole,
-                      content: streamingMessage,
-                      timestamp: new Date().toISOString(),
-                    }}
+                    key="pending-call-prompt"
+                    message={{ role: MessageRole.ASSISTANT, content: '', timestamp: new Date().toISOString() }}
                     sessionType={currentConversation.session_type}
-                    isStreaming
-                    showDrawButton={showDrawButton}
+                    showDrawButton={pendingDrawRequest !== null}
                     onReadyToDraw={handleReadyToDraw}
-                    showProfileButton={showProfileButton}
-                    onReadyToFillProfile={handleReadyToFillProfile}
-                  />
-                )}
-                
-                {shouldRenderStandaloneDrawPrompt && (
-                  <ChatMessage
-                    key="draw-button-placeholder"
-                    message={{
-                      role: MessageRole.ASSISTANT,
-                      content: '',
-                      timestamp: new Date().toISOString(),
-                    }}
-                    sessionType={currentConversation.session_type}
-                    showDrawButton={true}
-                    onReadyToDraw={handleReadyToDraw}
-                  />
-                )}
-                
-                {shouldRenderStandaloneProfilePrompt && (
-                  <ChatMessage
-                    key="profile-button-placeholder"
-                    message={{
-                      role: MessageRole.ASSISTANT,
-                      content: '',
-                      timestamp: new Date().toISOString(),
-                    }}
-                    sessionType={currentConversation.session_type}
-                    showProfileButton={true}
+                    showProfileButton={needsProfile}
                     onReadyToFillProfile={handleReadyToFillProfile}
                   />
                 )}
 
-                {isLoading && !streamingMessage && (
+                {(liveText || unansweredCards) && (
                   <ChatMessage
-                    message={{
-                      role: 'assistant' as MessageRole,
-                      content: '',
-                      timestamp: new Date().toISOString(),
-                    }}
+                    message={{ role: MessageRole.ASSISTANT, content: liveText ?? '', timestamp: new Date().toISOString() }}
+                    drawnCards={unansweredCards?.tarot_cards}
+                    drawnRequest={unansweredCards?.draw_request}
+                    sessionType={currentConversation.session_type}
+                    isStreaming
+                  />
+                )}
+
+                {isTurnRunning && !liveText && (
+                  <ChatMessage
+                    message={{ role: MessageRole.ASSISTANT, content: '', timestamp: new Date().toISOString() }}
                     isThinking={true}
                     sessionType={currentConversation.session_type}
                   />
                 )}
-                
+
                 <div ref={messagesEndRef} />
               </div>
             </div>
@@ -1066,17 +714,21 @@ const App: React.FC = () => {
               style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
             >
               <div className="max-w-[720px] mx-auto space-y-3">
-                <QuickReplies
-                  conversationType={currentConversation.session_type}
-                  onReplyClick={handleSendMessage}
-                />
+                {!isLegacyConversation && (
+                  <QuickReplies
+                    conversationType={currentConversation.session_type}
+                    onReplyClick={handleSendMessage}
+                  />
+                )}
                 <Composer
                   onSend={handleSendMessage}
-                  disabled={isLoading}
+                  disabled={isTurnRunning || isLegacyConversation}
                   placeholder={
-                    currentConversation.has_drawn_cards
-                      ? '继续深入探讨，或提出新的疑问…'
-                      : '输入你的问题，开启心灵对话…'
+                    isLegacyConversation
+                      ? '这是旧版本的对话，只能查看；想继续聊请开一场新的'
+                      : currentConversation.has_drawn_cards
+                        ? '继续深入探讨，或提出新的疑问…'
+                        : '输入你的问题，开启心灵对话…'
                   }
                 />
               </div>
@@ -1096,13 +748,11 @@ const App: React.FC = () => {
           onLogin={handleLogin}
         />
 
+        {/* 常驻挂载以保留退场动画；牌阵取自当前会话末尾那次抽牌调用，没有就关着 */}
         <TarotCardDrawer
-          isOpen={showCardDrawer}
+          isOpen={showCardDrawer && pendingDrawRequest !== null}
           drawRequest={pendingDrawRequest!}
-          onClose={() => {
-            setShowCardDrawer(false);
-            setPendingDrawRequest(null);
-          }}
+          onClose={() => setShowCardDrawer(false)}
           onCardsDrawn={handleCardsDrawn}
         />
 
@@ -1120,10 +770,7 @@ const App: React.FC = () => {
         <AstrologyProfileModal
           isOpen={showAstrologyProfileModal}
           currentProfile={user?.profile}
-          onClose={() => {
-            setShowAstrologyProfileModal(false);
-            setPendingAstrologyConversation(null);
-          }}
+          onClose={() => setShowAstrologyProfileModal(false)}
           onSubmit={handleAstrologyProfileSubmit}
           onSkip={handleAstrologyProfileSkip}
         />

@@ -184,14 +184,18 @@ class DailyService:
     # ── 提示词组装 ────────────────────────────────────────────────
 
     @staticmethod
-    async def render_daily_system_prompt(conversation: Conversation, user: Optional[User]) -> str:
-        """每次消息请求时调用(热加载):锚点取服务器今日,
-        本对话自己的牌作 {today_card},其余记录进 {history_block}。"""
+    async def render_daily_system_prompt(
+        conversation: Conversation, user: Optional[User],
+        own: Optional[DailyDrawRecord] = None,
+    ) -> str:
+        """每次请求实时渲染（热加载）：锚点取服务器今日，本对话自己的牌作 {today_card}，
+        其余记录进 {history_block}。抽签那一刻记录还没落库，由调用方把 own 传进来。"""
         records = await DailyService.get_user_records(conversation.user_id)
-        own = next(
-            (r for r in records.values() if r.conversation_id == conversation.conversation_id),
-            None,
-        )
+        if own is None:
+            own = next(
+                (r for r in records.values() if r.conversation_id == conversation.conversation_id),
+                None,
+            )
         others = {
             d: r for d, r in records.items()
             if r.conversation_id != conversation.conversation_id

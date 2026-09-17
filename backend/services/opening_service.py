@@ -1,21 +1,22 @@
-"""开场幕的 router 侧公共逻辑：开场白生成（含降级）、守卫判定、交单落库。
+"""开场幕的 router 侧公共逻辑：开场白生成、守卫判定、交单落库。
 
 塔罗与占星两个 router 共用，避免复制粘贴。
 """
-import random
 from typing import Optional, Tuple
 
 import config
 from models import Conversation, MessageRole, SessionType, User
-from services import context_service
+from services import context_service, prompt_service
 from services.storage_service import StorageService
 
-# LLM 失败时的保底模板（正常路径不再使用；口吻已按新开场规范重写，不再是客服体）
-FALLBACK_GREETINGS = [
-    "{nickname}，坐吧。今天想聊些什么？",
-    "{nickname}，我在。慢慢说。",
-    "又见面了，{nickname}。这次是什么事？",
-]
+
+class GreetingUnavailable(RuntimeError):
+    """开场白生成失败。调用方负责翻成一个明确的错误响应，让用户重试。
+
+    这里刻意不返回保底文案：开场白之后紧接着的那一轮 Agent Loop 用的是同一个
+    provider（gemini_service 里的 get_provider("opening")），provider 挂了就是挂了，
+    发一句假问候只会让用户先认真打完一个问题再撞同一堵墙。
+    """
 
 
 def _nickname(user: Optional[User]) -> str:
@@ -108,7 +109,6 @@ async def _generate_greeting_via_llm(prompt: str) -> str:
     """无工具的轻量调用：只要一两句迎接语。
 
     必须带超时：这是全 App 的第一印象，provider 挂起时用户只会看到永久转圈。
-    超时抛异常 → build_greeting 的 try/except 接住 → 降级模板。
     """
     from services import llm
 
@@ -125,28 +125,28 @@ async def build_greeting(
     conversation: Conversation,
     session_type: SessionType,
 ) -> str:
-    """开场白：走前置占卜师提示词生成；任何异常/空输出 → 降级回模板（保底不坏）。"""
-    nickname = _nickname(user)
+    """开场白：走前置占卜师提示词生成。失败一律抛 GreetingUnavailable。
+
+    不吞异常：关系元数据的 SQL 错、提示词文件缺失、provider 故障，都该原样浮出来，
+    而不是被一条看起来正常的问候盖住、让会话带着空的关系上下文继续往下走。
+    """
     try:
         meta = await context_service.build_relationship_meta(
             conversation.user_id, conversation.conversation_id
         )
-        meta["nickname"] = nickname
+        meta["nickname"] = _nickname(user)
         system_prompt = context_service.build_opening_prompt(
             relationship_block=context_service.render_relationship_block(meta),
             session_type=session_type,
             force_brief=False,
         )
-        prompt = (
-            f"{system_prompt}\n\n"
-            "（用户刚刚坐下，还没有开口。说出你的迎接语——只说这一句，"
-            "不要提问之外的任何解释，不要调用工具。）"
-        )
+        # 这一轮的指令不能并进 opening_system.md：那份提示词开场相位每一轮都在用，
+        # 而「用户刚刚坐下、还没开口」只在第一轮成立，写进去会让后续每轮都想再迎接一次。
+        prompt = f"{system_prompt}\n\n{prompt_service.get_prompt('opening_greeting.md')}"
         text = (await _generate_greeting_via_llm(prompt)).strip()
-        if text:
-            return text
-        print("[Opening] ⚠️ 开场白模型返回空，降级模板")
-    except Exception as e:  # noqa: BLE001 —— 开场白绝不能开天窗
-        print(f"[Opening] ⚠️ 开场白生成失败({e})，降级模板")
+    except Exception as e:  # noqa: BLE001 —— 统一翻成一个调用方认得的失败
+        raise GreetingUnavailable(f"开场白生成失败: {e}") from e
 
-    return random.choice(FALLBACK_GREETINGS).format(nickname=nickname)
+    if not text:
+        raise GreetingUnavailable("开场白模型返回空")
+    return text

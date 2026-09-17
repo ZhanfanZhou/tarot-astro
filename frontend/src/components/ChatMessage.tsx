@@ -10,6 +10,13 @@ import Markdown from './Markdown';
 
 interface ChatMessageProps {
   message: Message;
+  /**
+   * 这条回复要一起展示的牌面。牌存在抽牌的 tool 记录上，由 App 关联到抽牌之后第一条
+   * 有正文的回复——只有那一条带牌，后续追问不重复画。
+   * 每日一签的解读自己带 message.tarot_cards（服务端直接生成，没有工具调用），优先用它。
+   */
+  drawnCards?: Message['tarot_cards'];
+  drawnRequest?: Message['draw_request'];
   isThinking?: boolean;
   sessionType?: SessionType;
   showDrawButton?: boolean; // 是否显示抽牌按钮
@@ -32,6 +39,8 @@ const THINKING_MESSAGES = [
 
 const ChatMessage: React.FC<ChatMessageProps> = ({
   message,
+  drawnCards,
+  drawnRequest,
   isThinking = false,
   sessionType,
   showDrawButton = false,
@@ -41,7 +50,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   isStreaming = false,
 }) => {
   const isUser = message.role === 'user';
-  const isSystem = message.role === 'system';
+  // 都不是「谁说的话」：tool 是工具结果（牌面由之后的回复画），system 只在旧版本对话里有
+  const isSystem = message.role === 'system' || message.role === 'tool';
+  const cards = message.tarot_cards?.length ? message.tarot_cards : drawnCards;
+  const spread = message.tarot_cards?.length ? message.draw_request : drawnRequest;
   const trimmedContent = message.content?.trim() ?? '';
   const [copied, setCopied] = useState(false);
   const [previewCard, setPreviewCard] = useState<{ card: any; cardInfo: any } | null>(null);
@@ -70,15 +82,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
   // 系统消息不显示
   if (isSystem) return null;
-
-  // 隐藏自动触发解读 / 星盘的消息
-  if (isUser && message.content === '请根据抽牌结果进行解读') return null;
-  if (
-    isUser &&
-    (message.content === '资料补充好了，我的星盘信息已经准备好了' ||
-      message.content === '星盘数据已准备好，请继续解读' ||
-      message.content === '我已经填写好出生信息了')
-  ) {
+  // 只有工具调用、没正文也没牌的 AI 记录不显示（除非要挂按钮）
+  if (!isUser && !isThinking && !trimmedContent && !cards?.length && !showDrawButton && !showProfileButton) {
     return null;
   }
 
@@ -211,13 +216,13 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
           )}
 
           {/* 抽到的牌 */}
-          {message.tarot_cards && message.tarot_cards.length > 0 && (
+          {cards && cards.length > 0 && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.25 }}
-              className="mt-6 pt-5"
-              style={{ borderTop: '1px solid var(--line)' }}
+              className={trimmedContent ? 'mt-6 pt-5' : ''}
+              style={trimmedContent ? { borderTop: '1px solid var(--line)' } : undefined}
             >
               <div className="flex items-center justify-center gap-3 mb-5">
                 <span className="h-px w-8 bg-gradient-to-r from-transparent to-mystic-gold/50" />
@@ -228,14 +233,14 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
               </div>
 
               <div className="flex flex-wrap gap-5 justify-center">
-                {message.tarot_cards.map((card, idx) => {
+                {cards.map((card, idx) => {
                   const cardInfo = getCardInfo(card.card_id);
                   return (
                     <TarotCardDisplay
                       key={idx}
                       card={card}
                       cardInfo={cardInfo}
-                      position={message.draw_request?.positions?.[idx]}
+                      position={spread?.positions?.[idx]}
                       index={idx}
                       onPreview={() => setPreviewCard({ card, cardInfo })}
                     />

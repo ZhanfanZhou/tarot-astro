@@ -152,6 +152,7 @@ def test_override_never_arms_force_brief_guard(monkeypatch):
         system_prompt_override="（日运提示词）",
         phase="opening",
         force_brief=True,
+        function_executor=_ok_executor,
     ))
 
     assert prov.sessions[0].force_tool is None
@@ -167,8 +168,9 @@ def test_override_in_reading_phase_also_drops_submit_tool(monkeypatch):
         messages=[Message(role=MessageRole.USER, content="嗯")],
         user=None,
         session_type=SessionType.TAROT,
-        system_prompt_override="（心灵奇旅提示词）",
+        system_prompt_override="（日运提示词）",
         phase="reading",
+        function_executor=_ok_executor,
     ))
 
     assert "submit_reading_brief" not in tool_names(prov.sessions[0].tools)
@@ -253,7 +255,7 @@ def test_reading_phase_without_strategy_is_unchanged():
 
 
 def test_build_neutral_splits_last_user_from_history():
-    """中性拆分：history 不含最后一条待发 user；last_user 是那条文本。"""
+    """中性拆分：history 不含最后一条待发 user；pending 是「本轮发什么」。"""
     from services.gemini_service import GeminiService
 
     _system, history, last_user = GeminiService()._build_neutral(
@@ -265,7 +267,7 @@ def test_build_neutral_splits_last_user_from_history():
         session_type=SessionType.TAROT,
         phase="opening",
     )
-    assert last_user == "他上周冷淡了"
+    assert last_user == ("user", "他上周冷淡了")
     assert history == [{"role": "assistant", "content": "坐吧。"}]
 
 
@@ -305,18 +307,28 @@ def test_tarot_route_draws_straight_from_the_brief(monkeypatch):
     assert tool_names(prov.sessions[0].tools) == [
         "submit_reading_brief", "request_user_profile"]
 
-    # 交单是纯后台工具，绝不推给前端；抽牌才推，且参数逐字取自起手单
-    pushed = [e["function_call"] for e in events if "function_call" in e]
-    assert [p["name"] for p in pushed] == ["draw_tarot_cards"]
-    assert pushed[0]["args"] == {
-        "spread_type": "three_card",
-        "positions": ["你的位置", "他的位置", "这段关系的流向"],
-    }
+    # 事件只有正文、记录、收口——没有另开的「推给前端」通道
+    assert all(set(e) <= {"content", "message", "done"} for e in events)
 
-    assert [name for name, _ in executed] == ["submit_reading_brief", "draw_tarot_cards"]
+    # 只执行了交单；抽牌是 interrupt，没有可执行的东西
+    assert [name for name, _ in executed] == ["submit_reading_brief"]
     # 过渡语照常流式吐出，然后收口等用户抽牌
     assert "".join(e.get("content", "") for e in events) == "好，这件事我们抽牌看。"
     assert events[-1] == {"done": True}
+
+    # 落库形状：开场 Agent 的一轮（话 + 交单调用）→ 交单结果 → harness 替解读 Agent
+    # 发起的抽牌调用。抽牌结果由 /draw 用同一个 id 补上。
+    recorded = [e["message"] for e in events if "message" in e]
+    assert [m.role.value for m in recorded] == ["assistant", "tool", "assistant"]
+    assert recorded[0].content == "好，这件事我们抽牌看。"
+    assert recorded[0].tool_calls[0].name == "submit_reading_brief"
+    assert recorded[1].tool_call_id == recorded[0].tool_calls[0].id
+    assert recorded[2].content == "" and recorded[2].tool_calls[0].name == "draw_tarot_cards"
+    # 抽牌参数逐字取自起手单
+    assert recorded[2].tool_calls[0].args == {
+        "spread_type": "three_card",
+        "positions": ["你的位置", "他的位置", "这段关系的流向"],
+    }
 
 
 def test_tarot_route_falls_back_to_three_card_when_spread_missing(monkeypatch):
@@ -334,7 +346,9 @@ def test_tarot_route_falls_back_to_three_card_when_spread_missing(monkeypatch):
         phase="opening",
     ))
 
-    args = [e["function_call"]["args"] for e in events if "function_call" in e][0]
+    args = [e["message"].tool_calls[0].args for e in events
+            if "message" in e and e["message"].tool_calls
+            and e["message"].tool_calls[0].name == "draw_tarot_cards"][0]
     assert len(args["positions"]) == 3
     assert args["positions"] == ["现状", "阻碍", "流向"]
 
@@ -487,43 +501,3 @@ def test_reading_phase_submit_brief_does_not_trigger_handoff(monkeypatch):
     assert len(prov.sessions[0].sent) == 2
     assert prov.sessions[0].sent[1][0] == "tool"
     assert events[-1] == {"done": True}
-
-
-def test_no_executor_means_no_tools_handed_over(monkeypatch):
-    """心灵奇旅（无 executor）：一个工具都不递给模型。
-
-    这一路没人能执行工具调用，调用方（routers/daily.py）也只转发 content——模型真调了
-    工具，整段回望就是一片空白。所以由 harness 保证「调不出来」，而不是在提示词里求它别调。
-    """
-    from services.gemini_service import GeminiService
-
-    prov = _install(monkeypatch, [[_text("你从一张宝剑三出发……")]])
-
-    events = _run(GeminiService().stream_response(
-        messages=[Message(role=MessageRole.USER, content="回望我的旅程")],
-        user=None,
-        session_type=SessionType.CHAT,
-        function_executor=None,
-        system_prompt_override="（心灵奇旅提示词）",
-    ))
-
-    assert prov.sessions[0].tools == []
-    assert "".join(e["content"] for e in events if "content" in e)
-
-
-def test_no_executor_still_never_yields_done_on_a_tool_call(monkeypatch):
-    """兜底：万一还是拿到了 tool_call（换了 provider/越权），也绝不吐 done。"""
-    from services.gemini_service import GeminiService
-
-    _install(monkeypatch, [[_call("draw_tarot_cards", {"spread_type": "single", "positions": ["今日指引"]})]])
-
-    events = _run(GeminiService().stream_response(
-        messages=[Message(role=MessageRole.USER, content="今天运势")],
-        user=None,
-        session_type=SessionType.CHAT,
-        function_executor=None,
-        system_prompt_override="（心灵奇旅提示词）",
-    ))
-
-    assert any("function_call" in e for e in events)
-    assert not any("done" in e for e in events)

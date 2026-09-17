@@ -8,7 +8,7 @@ DRAW_TAROT_CARDS = {
         "当用户提出需要占卜的问题时，根据问题性质决定使用何种牌阵和抽几张牌。"
         "当塔罗牌作为辅助牌和星座结合时，判断结合的思路，选择适合的抽牌数量和每张牌的意义。"
         "用户追问可以再抽一次牌，以追问抽牌的方式（通常是抽1张），继续解读。"
-        "⚠️ 重要：调用此工具后，系统会通知用户准备抽牌，等待用户完成抽牌后，你会收到包含具体塔罗牌的消息，再开始解读。"
+        "⚠️ 重要：调用此工具后，系统会通知用户准备抽牌；用户抽完后，这次调用的结果会带着具体的牌回到你这里，那时再开始解读。"
     ),
     "parameters": {
         "type": "object",
@@ -153,6 +153,11 @@ DAILY_TOOL_NAMES = ["draw_tarot_cards", "get_astrology_chart",
 READING_TOOL_NAMES = list(DAILY_TOOL_NAMES)
 # 开场相位要能替星盘路线要出生信息，否则它没法自己判断这条路走不走得通
 OPENING_TOOL_NAMES = ["submit_reading_brief", "request_user_profile"]
+
+# interrupt 式工具：调用只是把界面推到用户面前（抽牌器 / 资料表单），结果要等用户动手，
+# 跨一次 HTTP 请求才产生。Agent Loop 见到它就收口；结果由 /draw（抽牌）或 /resume
+# （资料，从用户当前 profile 取）写成 TOOL 记录，下一轮作为 functionResponse 发回模型。
+INTERRUPT_TOOL_NAMES = frozenset({"draw_tarot_cards", "request_user_profile"})
 
 _BY_NAME = {t["name"]: t for t in ALL_TOOL_SPECS}
 

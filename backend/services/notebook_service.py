@@ -57,6 +57,50 @@ class NotebookEntry:
         )
 
 
+def _cards_line(label: str, cards, draw_request) -> str:
+    positions = (draw_request.positions if draw_request else None) or []
+    return f"[{label}] " + "；".join(
+        f"{positions[i] if i < len(positions) else f'第{i + 1}张'}：{c.card_name}（{'逆位' if c.reversed else '正位'}）"
+        for i, c in enumerate(cards)
+    )
+
+
+def build_transcript(conversation: Conversation) -> str:
+    """记忆 Agent 看到的整场对话：每一句话 + 用户在界面上做过的事，按发生顺序，不截断。
+
+    工具记录只写用户看得见、做过的事（抽了什么牌在什么位置、填了资料、看了星盘、没抽牌
+    就接着聊）；交单、翻笔记本、取盘失败这些后台动作不写。星盘原始数据不写——占卜师的
+    解读已经把它讲给用户了，笔记记的是这场对话。
+    """
+    msgs = conversation.messages
+    lines = []
+    for i, msg in enumerate(msgs):
+        if msg.role == MessageRole.USER:
+            lines.append(f"用户：{msg.content}")
+        elif msg.role == MessageRole.ASSISTANT:
+            if msg.tarot_cards:   # 每日一签：服务端抽的今日牌挂在解读上
+                lines.append(_cards_line("今日签", msg.tarot_cards, msg.draw_request))
+            if msg.content.strip():
+                lines.append(f"占卜师：{msg.content}")
+            call = msg.tool_calls[0] if msg.tool_calls else None
+            if call and i == len(msgs) - 1:   # 对话停在一次没有下文的请求上
+                if call.name == "draw_tarot_cards":
+                    lines.append("[占卜师请用户抽牌，用户没有抽]")
+                elif call.name == "request_user_profile":
+                    lines.append("[占卜师请用户补充出生资料，用户没有填]")
+        elif msg.role == MessageRole.TOOL:
+            result = json.loads(msg.content) if msg.content else {}
+            ok = result.get("success", True)
+            if msg.tool_name == "draw_tarot_cards":
+                lines.append(_cards_line("抽牌", msg.tarot_cards, msg.draw_request) if ok
+                             else f"[{result.get('error')}]")
+            elif msg.tool_name == "request_user_profile":
+                lines.append("[用户补充了出生资料]" if ok else f"[{result.get('error')}]")
+            elif msg.tool_name == "get_astrology_chart" and ok:
+                lines.append("[占卜师取出了用户的本命星盘]")
+    return "\n".join(lines)
+
+
 class NotebookService:
     """笔记本管理服务"""
     
@@ -116,24 +160,7 @@ class NotebookService:
                 question = msg.content[:100]  # 取前100字
                 break
         
-        # 构建对话内容（在 ASSISTANT 消息中显示抽牌信息，跳过 SYSTEM 消息）
-        conversation_content = []
-        for msg in conversation.messages:
-            if msg.role == MessageRole.USER:
-                conversation_content.append(f"用户：{msg.content}")
-            elif msg.role == MessageRole.ASSISTANT:
-                # 如果这条消息包含抽牌信息，在内容后附加
-                content = f"占卜师：{msg.content}"
-                if msg.tarot_cards:
-                    cards_info = []
-                    for card in msg.tarot_cards:
-                        reversed_str = "逆位" if card.reversed else "正位"
-                        cards_info.append(f"{card.card_name}（{reversed_str}）")
-                    content += f"\n[本次解读的牌: {'、'.join(cards_info)}]"
-                conversation_content.append(content)
-            # 跳过 SYSTEM 消息（抽牌信息已经附加在 ASSISTANT 消息中）
-        
-        conversation_str = "\n".join(conversation_content[:20])  # 只取前20条消息
+        conversation_str = build_transcript(conversation)
         print(f"[Notebook] 对话内容: {conversation_str}")
         
         # 格式化时间

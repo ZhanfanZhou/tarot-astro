@@ -1,6 +1,7 @@
-from typing import AsyncGenerator, Optional, Dict, List, Any, Tuple
-from models import Message, MessageRole, User, SessionType
-from services import context_service, prompt_service
+import json
+from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional, Tuple
+from models import Message, MessageRole, ToolCallRecord, User, SessionType
+from services import context_service, prompt_service, tool_turns
 
 
 class GeminiService:
@@ -38,8 +39,10 @@ class GeminiService:
 
         if context_parts:
             return "\n# <用户资料>\n" + "\n".join(context_parts)
-        else:
-            return "\n# <用户资料>\n尚未完善（如需星盘分析，请使用 request_user_profile 工具请求用户补充信息）"
+        # 只报状态，不带指令：「资料不全就去调 request_user_profile」这条规则
+        # tarot_system.md:16,36 / astrology_system.md:17,28 / opening_system.md:52 都已写明，
+        # 代码里再写一遍就是第四份，改提示词时必然漏掉这一份。
+        return "\n# <用户资料>\n尚未完善"
 
     def _build_neutral(
         self,
@@ -51,16 +54,17 @@ class GeminiService:
         strategy: Optional[dict] = None,
         relationship_block: str = "",
         force_brief: bool = False,
-    ) -> Tuple[str, List[Dict[str, str]], Optional[str]]:
-        """把消息拆成 provider 中性形状：(system_prompt, history, last_user)。
+    ) -> Tuple[str, List[Dict[str, Any]], Tuple[str, Any]]:
+        """把消息拆成 provider 中性形状：(system_prompt, history, pending)。
 
         - system_prompt 按相位拼装（context_service 是相位的唯一权威）：
-            · override(daily/journey)：调用方完整渲染，原样透传
+            · override(daily)：调用方完整渲染，原样透传
             · opening: opening_system.md + 入口偏好 + 关系上下文 [+ 守卫指令]
             · reading: 塔罗/占星提示词 + 用户资料 + 策略单块（策略单可空）
-        - history：除最后一条待发 user 外的全部文本轮 [{role: user|assistant, content}]
-          （抽牌结果/星盘 SYSTEM 消息 → user 文本 + assistant 确认语两条，与改动前逐字一致）
-        - last_user：最后一条 user 文本（末尾若非 user 则 None；发消息时末尾必是 user）
+        - history：除末尾那条外的全部记录，逐条映射成 NeutralMsg（见 llm.base）
+        - pending：末尾那条，就是本轮要发给模型的东西：
+            ("user", 文本)                 用户发言
+            ("tool", (名字, 结果, id))     resume：用户在界面上做完了动作，结果已落库
         """
         # override(daily/journey)由调用方完整渲染,已含用户资料,不再追加 user_context
         if system_prompt_override is not None:
@@ -84,76 +88,45 @@ class GeminiService:
                 strategy=strategy,
             )
 
-        history: List[Dict[str, str]] = []
+        history: List[Dict[str, Any]] = []
         for msg in messages:
-            # 处理系统消息（抽牌结果或星盘数据）
-            if msg.role == MessageRole.SYSTEM:
-                # 处理塔罗抽牌结果
-                if msg.tarot_cards:
-                    cards_desc = "[抽牌结果]如下：\n"
-                    # 2026-07 之前的记录 positions 可能为 null，逐张回退到「第N张」
-                    positions = (msg.draw_request.positions if msg.draw_request else None) or []
-                    for i, card in enumerate(msg.tarot_cards, 1):
-                        position = positions[i-1] if i <= len(positions) else f"第{i}张"
-                        reversed_str = "（逆位）" if card.reversed else "（正位）"
-                        cards_desc += f"{position}: {card.card_name} {reversed_str}\n"
-                    history.append({"role": "user", "content": cards_desc})
-                    # 在抽牌结果后添加确认语
-                    history.append({"role": "assistant", "content": "我看到了，让我为你解读这些牌。"})
-                # 处理星盘数据（内容以[星盘数据]开头）
-                elif msg.content.startswith("[星盘数据]"):
-                    history.append({"role": "user", "content": msg.content})
-                    # 在星盘数据后添加确认语
-                    history.append({"role": "assistant", "content": "我看到了你的星盘数据，让我为你解读。"})
-                continue
+            if msg.role == MessageRole.USER:
+                history.append({"role": "user", "content": msg.content})
+            elif msg.role == MessageRole.ASSISTANT:
+                m: Dict[str, Any] = {"role": "assistant", "content": msg.content}
+                if msg.tool_calls:
+                    m["tool_calls"] = [{"id": c.id, "name": c.name, "args": c.args}
+                                       for c in msg.tool_calls]
+                if msg.reasoning:
+                    m["reasoning"] = msg.reasoning
+                history.append(m)
+            elif msg.role == MessageRole.TOOL:
+                history.append({
+                    "role": "tool_result", "id": msg.tool_call_id, "name": msg.tool_name,
+                    "result": json.loads(msg.content) if msg.content else {},
+                })
+            # SYSTEM：旧格式的残留，这种会话在 turn_service 就被挡成只读，走不到这里
 
-            # 如果是助手消息且有抽牌请求，不再添加抽牌结果（已在SYSTEM消息中处理）
-            role = "user" if msg.role == MessageRole.USER else "assistant"
-            history.append({"role": role, "content": msg.content})
-
-        last_user: Optional[str] = None
-        if history and history[-1]["role"] == "user":
-            last_user = history.pop()["content"]
-        return system_prompt, history, last_user
-
-    def _format_messages_for_gemini(
-        self,
-        messages: List[Message],
-        user: Optional[User] = None,
-        session_type: SessionType = SessionType.TAROT,
-        system_prompt_override: Optional[str] = None,
-        phase: str = "reading",
-        strategy: Optional[dict] = None,
-        relationship_block: str = "",
-        force_brief: bool = False,
-    ) -> List[Dict]:
-        """[保留] 供 prompt_service 接线测试断言系统提示词。
-
-        产出 Gemini 形状（系统提示词 → user 首轮 + model『我明白了。』，其余文本轮按角色）。
-        内部委托 _build_neutral（唯一真源），再拼回 Gemini 形状，避免与 provider 路径分裂。
-        """
-        system, history, last_user = self._build_neutral(
-            messages, user, session_type, system_prompt_override,
-            phase=phase, strategy=strategy, relationship_block=relationship_block,
-            force_brief=force_brief,
-        )
-        out = [
-            {"role": "user", "parts": [{"text": system}]},
-            {"role": "model", "parts": [{"text": "我明白了。"}]},
-        ]
-        for m in history:
-            role = "user" if m["role"] == "user" else "model"
-            out.append({"role": role, "parts": [{"text": m["content"]}]})
-        if last_user is not None:
-            out.append({"role": "user", "parts": [{"text": last_user}]})
-        return out
+        if not history:
+            raise ValueError("没有可发送的内容：会话是空的")
+        tail = history.pop()
+        if tail["role"] == "user":
+            pending: Tuple[str, Any] = ("user", tail["content"])
+        elif tail["role"] == "tool_result":
+            pending = ("tool", (tail["name"], tail["result"], tail["id"]))
+        else:
+            # 末尾是 assistant = 没有人在等模型说话。以前这里悄悄退化成 send_user(None)，
+            # 一路发到 provider 才炸，错误信息和真正的原因隔了三层。
+            raise ValueError("没有可发送的内容：历史末尾既不是用户发言也不是工具结果")
+        return system_prompt, history, pending
 
     async def stream_response(
         self,
         messages: List[Message],
         user: Optional[User] = None,
+        *,
+        function_executor: Callable[[str, dict], Awaitable[dict]],
         session_type: SessionType = SessionType.TAROT,
-        function_executor: Optional[callable] = None,
         system_prompt_override: Optional[str] = None,
         phase: str = "reading",
         strategy: Optional[dict] = None,
@@ -175,14 +148,16 @@ class GeminiService:
 
         Yields:
             Dict 包含以下可能的键：
-            - content: str - 文本内容
-            - function_call: Dict - 函数调用请求（提交策略单除外，纯后台工具不推前端）
+            - content: str - 文本内容（流式推给用户）
+            - message: Message - 一条该落库的记录（模型的一轮 / 一个工具结果），按序产生。
+              interrupt 式调用（抽牌、补资料）就在这里：界面要不要显示抽牌/补资料按钮，
+              前端看会话末尾那条记录的 tool_calls，不另开事件通道
             - done: bool - 是否完成
         """
         from services import llm
         from services.llm import tools as toolspecs
 
-        # override（日运/心灵奇旅自带完整提示词）优先级高于相位——_build_neutral 就是这么判的。
+        # override（日运自带完整提示词）优先级高于相位——_build_neutral 就是这么判的。
         # 这里必须同源：override 在场 → 整个开场幕语义（开场工具集、强制交单守卫、同轮移交）
         # 一律不适用，否则提示词与工具集/守卫会分裂。
         has_override = system_prompt_override is not None
@@ -192,11 +167,6 @@ class GeminiService:
             """选工具集。优先级与 _build_neutral 的提示词优先级一字不差：
             override > 相位 > 会话类型。override / daily / chat 用 daily 工具集
             （看不见 submit_reading_brief，那份提示词根本不认识它）。"""
-            # 没有执行器（心灵奇旅）= 这一路根本没人能执行工具调用。递过去就是给模型
-            # 一个会把整段回复变成空白的按钮：调了 → yield function_call 后 return，
-            # 而那个调用方只转发 content，用户拿到一片空白。不递，比在提示词里求它别用可靠。
-            if function_executor is None:
-                return []
             if has_override or session_type in (SessionType.DAILY, SessionType.CHAT):
                 return toolspecs.specs_by_names(toolspecs.DAILY_TOOL_NAMES)
             if for_opening:
@@ -204,7 +174,7 @@ class GeminiService:
             return toolspecs.specs_by_names(toolspecs.READING_TOOL_NAMES)
 
         provider = llm.get_provider("opening" if is_opening else "reading")
-        system, history, last_user = self._build_neutral(
+        system, history, pending = self._build_neutral(
             messages, user, session_type, system_prompt_override,
             phase=phase, strategy=strategy, relationship_block=relationship_block,
             force_brief=force_brief,
@@ -215,9 +185,16 @@ class GeminiService:
 
         print(f"\n[Agent] 会话类型: {session_type.value} | 相位: {phase}" + (" | 强制交单" if is_opening and force_brief else ""))
 
+        # 本轮产生的记录（模型的每一轮 + 每个工具结果），按发生顺序 yield {"message"} 交给
+        # 调用方落库；同轮移交时 messages + turns 就是解读 Agent 该看到的完整历史。
+        turns: List[Message] = []
+
+        def _record(msg: Message) -> Dict[str, Any]:
+            turns.append(msg)
+            return {"message": msg}
+
         # pending = 下一次要对 session 发的动作。每次 provider 往返都算一轮，
-        # 总往返 ≤ MAX_AGENT_ITERATIONS（与改动前 while iteration<max 的预算一致）。
-        pending: Tuple[str, Any] = ("user", last_user)
+        # 总往返 ≤ MAX_AGENT_ITERATIONS。
         for _ in range(self.MAX_AGENT_ITERATIONS):
             if pending[0] == "user":
                 result = await session.send_user(pending[1])
@@ -225,32 +202,35 @@ class GeminiService:
                 name, fn_result, cid = pending[1]
                 result = await session.send_tool_result(name, fn_result, cid)
 
-            # 有文本内容 → 立即分块流式输出（与改动前 chunk_size=50 一致）
+            # 有文本内容 → 立即分块流式输出
             if result.text:
                 for i in range(0, len(result.text), 50):
                     yield {"content": result.text[i:i+50]}
 
+            # 只处理第一个调用（provider 层也只回写第一个，保证一次调用对一条结果）
+            calls = [ToolCallRecord(name=c.name, args=c.args, id=c.id or tool_turns.new_call_id(c.name))
+                     for c in result.tool_calls[:1]]
+            if result.text or calls:
+                yield _record(tool_turns.assistant_message(result.text, calls, result.reasoning))
+
             # 没有函数调用 → 对话自然收尾。done 在本方法里必须是唯一出口事件
-            # （否则 router 的 `elif "done" in event` 会把同一段回复 add_message 两次）。
-            if not result.tool_calls:
+            # （否则调用方会把同一段回复落库两次）。
+            if not calls:
                 yield {"done": True}
                 return
 
-            # 处理第一个函数调用
-            call = result.tool_calls[0]
+            call = calls[0]
 
-            if function_executor is None:
-                # 没有函数执行器（日运心灵奇旅）：通知外部执行，然后 return。
-                # 本轮不算完成，绝不吐 done —— 等外部喂结果后重新进入本方法。
-                yield {"function_call": {"name": call.name, "args": call.args}}
+            # interrupt 式调用：结果要等用户在界面上动手，跨请求产生。这里停住，不编造结果。
+            # 调用本身已经落库（上面那条 assistant），结果由 /draw 或 /resume 补上，
+            # 下一轮作为 functionResponse 发回，模型接着往下说就是它的默认行为。
+            if call.name in toolspecs.INTERRUPT_TOOL_NAMES:
+                print(f"[Agent] ⏸ {call.name} interrupt：等用户做完，下一轮带真结果恢复")
+                yield {"done": True}
                 return
 
-            # 通知前端有函数调用（用于显示 UI，如抽牌动画、资料补充按钮）。
-            # submit_reading_brief 是纯后台工具（无 UI），不推给前端。
-            if call.name != "submit_reading_brief":
-                yield {"function_call": {"name": call.name, "args": call.args}}
-
             fn_result = await function_executor(call.name, call.args)
+            yield _record(tool_turns.tool_message(call, fn_result))
 
             # 交单 = 开场结束。接下来按起手单里的 route 分两条路走。
             if (
@@ -262,18 +242,22 @@ class GeminiService:
                 phase = context_service.PHASE_READING
                 action, action_args = context_service.first_action(call.args)
 
-                # 塔罗路线：牌阵已经在单子里，直接推抽牌器给前端，然后收口等用户抽牌。
-                # 不必为了一句过渡语再叫解读 Agent 出来跑一轮——那是纯浪费的往返，
-                # 而且它会自己另选一副牌阵，跟单子上写的对不上。
+                # 塔罗路线：牌阵已经在单子里，harness 替解读 Agent 发起抽牌调用，推抽牌器
+                # 给前端，然后收口等用户抽牌。不必为了一句过渡语再叫解读 Agent 出来跑一轮——
+                # 那是纯浪费的往返，而且它会自己另选一副牌阵，跟单子上写的对不上。
+                # 这次调用照样记成一条 assistant，抽牌结果落库后和它配对。
                 if action == "draw_tarot_cards":
                     print(f"[Agent] 🎬 开场收束 → 直接抽牌 {action_args}")
                     # 模型这一轮说了什么，上面已经原样流式输出了——说与不说都由它。
                     # 唯一的例外是守卫第 2 层：force 上膛时它在解码层就发不出文本，
                     # 这时候的沉默不是它的选择，替它说一句，别让抽牌器凭空弹出来。
+                    line = ""
                     if force and not (result.text or "").strip():
-                        yield {"content": context_service.FORCED_BRIEF_HANDOFF_LINE}
-                    yield {"function_call": {"name": action, "args": action_args}}
-                    await function_executor(action, action_args)
+                        line = context_service.forced_brief_handoff_line()
+                        yield {"content": line}
+                    draw_call = ToolCallRecord(
+                        name=action, args=action_args, id=tool_turns.new_call_id(action))
+                    yield _record(tool_turns.assistant_message(line, [draw_call]))
                     yield {"done": True}
                     return
 
@@ -282,14 +266,14 @@ class GeminiService:
                 print("[Agent] 🎬 开场收束，移交解读 Agent（星盘路线）")
                 provider = llm.get_provider("reading")
 
-                system2, history2, last_user2 = self._build_neutral(
-                    messages, user, session_type, system_prompt_override,
+                # 解读 Agent 看到的历史 = 落库的 + 本轮刚产生的（交单那一对在内），
+                # 和它下一次请求从库里读到的完全一样，不另造移交指令。
+                system2, history2, pending2 = self._build_neutral(
+                    messages + turns, user, session_type, system_prompt_override,
                     phase=phase, strategy=call.args,
                 )
-                # 解读 Agent 接手的就是用户那句还没人回的话：开场 Agent 这一轮只交了单，
-                # 没对用户开口。所以这里和普通一轮完全同形，不另造移交指令。
                 session = provider.open_session(system2, history2, _tool_specs(False), None)
-                pending = ("user", last_user2)
+                pending = pending2
                 continue
 
             # 将函数结果发送回 AI，准备下一轮 loop

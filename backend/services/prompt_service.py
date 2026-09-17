@@ -19,6 +19,8 @@ PROMPT_REGISTRY: Dict[str, str] = {
     "tarot_system.md": "塔罗对话系统提示词",
     "astrology_system.md": "占星对话系统提示词",
     "opening_system.md": "开场幕·前置占卜师提示词",
+    "opening_greeting.md": "开场幕·开场白那一轮的指令",
+    "opening_force_brief.md": "开场幕·追问预算用尽那一轮（强制交单指令 + 过渡语）",
     "reading_handoff.md": "开场→解读 接场约束",
     "notebook_system.md": "占卜笔记生成提示词",
     "daily_oracle_system.md": "每日一签系统提示词",

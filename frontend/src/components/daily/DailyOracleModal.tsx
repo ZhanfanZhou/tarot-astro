@@ -4,7 +4,7 @@ import { X, Sparkles, RefreshCw } from 'lucide-react';
 import TarotCardDrawer from '../TarotCardDrawer';
 import DailyCalendarStrip from './DailyCalendarStrip';
 import Markdown from '../Markdown';
-import { conversationApi, dailyApi, tarotApi } from '@/services/api';
+import { conversationApi, dailyApi } from '@/services/api';
 import { CARD_BACK_IMAGE, getCardInfo } from '@/config/tarotCards';
 import { getEffectiveDate, isEveningDraw } from '@/utils/dailyDate';
 import { toast } from '@/stores/useToastStore';
@@ -45,7 +45,6 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
   const [drawing, setDrawing] = useState(false);
   // conversation_id → 解读全文;undefined=未加载,null=对话已删除,''=尚无解读
   const [readings, setReadings] = useState<Record<string, string | null>>({});
-  const [isReading, setIsReading] = useState(false);
   // 印证表单(回顾态)
   const [verdict, setVerdict] = useState<'hit' | 'miss' | null>(null);
   const [note, setNote] = useState('');
@@ -93,45 +92,24 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate, overview, isOpen]);
 
-  const streamReading = async (conversationId: string) => {
-    setIsReading(true);
-    setReadings((prev) => ({ ...prev, [conversationId]: '' }));
-    try {
-      await tarotApi.sendMessage(
-        conversationId,
-        '请根据抽牌结果进行解读',
-        (chunk) =>
-          setReadings((prev) => ({
-            ...prev,
-            [conversationId]: ((prev[conversationId] as string) || '') + chunk,
-          })),
-        () => {} // daily 解读不会再触发抽牌
-      );
-      await onRefreshOverview(); // 刷新签语/横幅
-    } catch {
-      toast.error('解读生成中断,可点「重新生成解读」再试');
-    } finally {
-      setIsReading(false);
-    }
-  };
-
   const handleCardsDrawn = async () => {
-    // 选牌器仪式完成 → 调后端拿真实牌面 → 在弹窗里揭示并流式解读
+    // 选牌器仪式完成 → 后端抽出真牌并当场生成今日解读 → 在弹窗里揭示
     setShowDrawer(false);
     setDrawing(true);
     try {
       const eff = todayDate;
       const res = await dailyApi.draw(userId, eff);
+      setReadings((prev) => ({ ...prev, [res.conversation_id]: res.reading }));
       await onRefreshOverview();
       setSelectedDate(eff);
-      await streamReading(res.conversation_id);
     } catch (e) {
-      const status = (e as { response?: { status?: number } })?.response?.status;
+      const err = e as { response?: { status?: number; data?: { detail?: string } } };
+      const status = err?.response?.status;
       if (status === 409) {
         toast.error('这一日已抽过签');
         await onRefreshOverview();
       } else {
-        toast.error('抽牌失败,请重试');
+        toast.error(err?.response?.data?.detail || '抽牌失败,请重试');
       }
     } finally {
       setDrawing(false);
@@ -307,7 +285,7 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
                       </p>
                       <button
                         onClick={() => setShowDrawer(true)}
-                        disabled={drawing || isReading}
+                        disabled={drawing}
                         className="mt-4 px-7 py-2.5 rounded-xl font-display tracking-[0.15em] text-sm transition-all hover:brightness-110 disabled:opacity-50"
                         style={{
                           color: '#1a1407',
@@ -354,7 +332,7 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
 
                     {/* 解读区 */}
                     <div className="w-full mt-4 text-left">
-                      {reading === undefined && !isReading ? (
+                      {reading === undefined ? (
                         <p className="text-sm text-center" style={{ color: 'var(--ivory-dim)' }}>
                           正在取回解读……
                         </p>
@@ -362,21 +340,12 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
                         <p className="text-sm text-center italic" style={{ color: 'var(--ivory-dim)' }}>
                           这段对话已随风而逝
                         </p>
-                      ) : reading === '' && !isReading ? (
-                        <div className="text-center">
-                          <button
-                            onClick={() => streamReading(record.conversation_id)}
-                            className="text-sm font-display tracking-[0.1em] underline underline-offset-4"
-                            style={{ color: 'var(--gold)' }}
-                          >
-                            重新生成解读
-                          </button>
-                        </div>
+                      ) : reading === '' ? (
+                        <p className="text-sm text-center italic" style={{ color: 'var(--ivory-dim)' }}>
+                          这一日没有留下解读
+                        </p>
                       ) : (
-                        <Markdown content={(reading as string) || ''} />
-                      )}
-                      {isReading && (
-                        <span className="inline-block w-2 h-4 ml-0.5 align-text-bottom animate-pulse" style={{ background: 'var(--gold)' }} />
+                        <Markdown content={reading} />
                       )}
                     </div>
 
@@ -426,7 +395,7 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
                     )}
 
                     {/* 继续对话 */}
-                    {selectedView?.conversation_exists && !isReading && reading !== undefined && reading !== null && reading !== '' && (
+                    {selectedView?.conversation_exists && reading !== undefined && reading !== null && reading !== '' && (
                       <button
                         onClick={() => onContinueConversation(record.conversation_id)}
                         className="mt-5 px-7 py-2.5 rounded-xl font-display tracking-[0.15em] text-sm transition-all hover:brightness-110"

@@ -102,8 +102,6 @@ def make_conversation(messages: List[Message]) -> Conversation:
 class TestExtractTagline:
     def test_first_sentence_of_first_assistant_message(self):
         conv = make_conversation([
-            Message(role=MessageRole.SYSTEM, content="用户已完成抽牌"),
-            Message(role=MessageRole.USER, content="请根据抽牌结果进行解读"),
             Message(role=MessageRole.ASSISTANT, content="星星在今夜为你点灯。它提醒你保持希望。"),
         ])
         assert extract_tagline(conv) == "星星在今夜为你点灯"

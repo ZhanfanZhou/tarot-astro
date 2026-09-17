@@ -55,38 +55,38 @@ class ConversationService:
         return await StorageService.get_user_conversations(user_id)
     
     @staticmethod
-    async def add_message(
-        conversation_id: str, 
-        role: MessageRole, 
-        content: str,
-        tarot_cards: Optional[List[TarotCard]] = None,
-        draw_request: Optional[DrawCardsRequest] = None
-    ) -> Conversation:
-        """添加消息到对话"""
+    async def append_message(conversation_id: str, message: Message) -> Conversation:
+        """把一条记录追加到对话末尾（用户发言 / 模型的一轮 / 工具结果都走这里）。"""
         conversation = await StorageService.get_conversation(conversation_id)
         if not conversation:
             raise ValueError("对话不存在")
-        
-        message = Message(
-            role=role,
-            content=content,
-            tarot_cards=tarot_cards,
-            draw_request=draw_request
-        )
-        
+
         conversation.messages.append(message)
         conversation.updated_at = datetime.utcnow().isoformat()
-        
+
         # 如果是用户的第一条消息，根据内容更新标题（daily 对话标题固定为日期，不覆盖）
         if (
-            role == MessageRole.USER
+            message.role == MessageRole.USER
             and conversation.session_type != SessionType.DAILY
             and len([m for m in conversation.messages if m.role == MessageRole.USER]) == 1
         ):
-            conversation.title = ConversationService._generate_title_from_message(content)
-        
+            conversation.title = ConversationService._generate_title_from_message(message.content)
+
         await StorageService.save_conversation(conversation)
         return conversation
+
+    @staticmethod
+    async def add_message(
+        conversation_id: str,
+        role: MessageRole,
+        content: str,
+        tarot_cards: Optional[List[TarotCard]] = None,
+        draw_request: Optional[DrawCardsRequest] = None,
+    ) -> Conversation:
+        """追加一条纯文本记录（开场白、每日解读）。工具轮用 append_message 传完整 Message。"""
+        return await ConversationService.append_message(conversation_id, Message(
+            role=role, content=content, tarot_cards=tarot_cards, draw_request=draw_request,
+        ))
     
     @staticmethod
     def _generate_title_from_message(content: str) -> str:
@@ -136,18 +136,6 @@ class ConversationService:
         """删除对话"""
         await StorageService.delete_conversation(conversation_id)
     
-    @staticmethod
-    def get_latest_tarot_cards(conversation: Conversation) -> tuple[Optional[List[TarotCard]], Optional[DrawCardsRequest]]:
-        """
-        从对话历史中获取最近的抽牌结果
-        返回: (tarot_cards, draw_request) 元组
-        """
-        # 从后往前遍历消息，找到最近的包含抽牌结果的消息
-        for message in reversed(conversation.messages):
-            if message.tarot_cards and len(message.tarot_cards) > 0:
-                return (message.tarot_cards, message.draw_request)
-        
-        return (None, None)
 
 
 

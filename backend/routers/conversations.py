@@ -1,12 +1,14 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List
 from models import (
-    Conversation, CreateConversationRequest,
+    Conversation, CreateConversationRequest, MessageRole,
     UpdateConversationTitleRequest, User,
 )
 from services.conversation_service import ConversationService
 from services.notebook_service import notebook_service
+from services.rate_limit_service import RateLimitService
 from services.storage_service import StorageService
+from services import context_service, opening_service
 from dependencies import get_current_user, ensure_owner
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
@@ -17,15 +19,42 @@ async def create_conversation(
     request: CreateConversationRequest,
     current_user: User = Depends(get_current_user),
 ):
-    """创建新对话（归属当前登录身份）"""
+    """创建新对话（归属当前登录身份）。
+
+    有开场幕的会话类型（塔罗/占星）在这里就把开场白生成好、写成第一条消息随响应返回。
+    开场白是会话的一部分，由「创建」这个动作产生——客户端不需要为了让占卜师先开口
+    而反过来发一条消息。因此这个接口会阻塞在一次 LLM 调用上（OPENING_GREETING_
+    TIMEOUT_SECONDS 封顶）。
+    """
     try:
         conversation = await ConversationService.create_conversation(
             user_id=current_user.user_id,
             session_type=request.session_type
         )
-        return conversation
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+    if request.session_type not in context_service.OPENING_PHASE_SESSIONS:
+        return conversation
+
+    # 开场白是一次真实 LLM 调用，和其他触发模型的路径一样先扣额度
+    await RateLimitService.check_and_consume(current_user)
+
+    try:
+        greeting = await opening_service.build_greeting(
+            user=current_user,
+            conversation=conversation,
+            session_type=request.session_type,
+        )
+    except opening_service.GreetingUnavailable as e:
+        # 不发保底文案：让前端拿到明确失败并提示重试，而不是开一场注定在下一轮
+        # 撞同一个 provider 的会话。空会话留在库里无害（消息数 0，不计入来访）。
+        print(f"[Conversations] ⚠️ {e}")
+        raise HTTPException(status_code=503, detail="占卜师暂时联系不上，请重试")
+
+    return await ConversationService.add_message(
+        conversation.conversation_id, MessageRole.ASSISTANT, greeting
+    )
 
 
 @router.get("/{conversation_id}", response_model=Conversation)

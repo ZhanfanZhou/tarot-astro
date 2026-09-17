@@ -8,7 +8,8 @@
 
 锁住的契约：
   1. 开场相位工具集只有 submit_reading_brief；交单后同一次回复内换成解读工具集并抽牌
-  2. submit_reading_brief 是纯后台工具——SSE 里一个字节都不能外泄；draw_cards 必须推
+  2. submit_reading_brief 是纯后台工具——SSE 里一个字节都不能外泄；SSE 只有正文。
+     抽牌调用落库在会话末尾，前端据此显示抽牌按钮（不另开事件通道）
   3. 移交重建的 session 必须带上用户最后一句澄清回答（读人素材，丢了就白读）
   4. 抽牌参数的 wire 契约：positions 必须是 list，前端据此渲染槽位（个数=张数）
   5. 存量会话（phase=reading）行为不变：单 session、完整工具集、绝不移交
@@ -155,7 +156,6 @@ def _get_conversation(conversation_id: str) -> Conversation:
 def _install_gemini(monkeypatch, scripts):
     """装上 LLM provider 替身，并给交单落库挂钩子——两者共用一条 trace，得到真实的执行顺序。"""
     from services import llm
-    from services import gemini_service as gs
     from services import opening_service as op_mod
 
     trace = []
@@ -171,20 +171,6 @@ def _install_gemini(monkeypatch, scripts):
         return await original_save(conversation, strategy)
 
     monkeypatch.setattr(op_mod, "save_strategy", _spy_save_strategy)
-
-    # 录下 Agent Loop yield 出去的原始事件。router 对未知函数名是静默的（只认 draw_cards /
-    # need_profile），所以「交单不外泄」在 wire 上看不出来——必须在这一层验，否则
-    # gemini_service 哪天把 submit_reading_brief 推出去了，SSE 断言也照样绿。
-    original_stream = gs.GeminiService.stream_response
-    agent_events = []
-
-    async def _wrapped_stream(self, *args, **kwargs):
-        async for event in original_stream(self, *args, **kwargs):
-            agent_events.append(event)
-            yield event
-
-    monkeypatch.setattr(gs.GeminiService, "stream_response", _wrapped_stream)
-    prov.agent_events = agent_events
     return prov
 
 
@@ -270,35 +256,28 @@ def test_opening_submits_brief_then_draws_straight_from_it(
     assert tool_names(prov.sessions[0].tools) == [
         "submit_reading_brief", "request_user_profile"]
 
-    # —— 交单是纯后台工具：Agent Loop 根本不 yield 它的 function_call；抽牌才 yield ——
-    pushed = [e["function_call"]["name"] for e in prov.agent_events if "function_call" in e]
-    assert pushed == ["draw_tarot_cards"]
-
-    # —— 一路到 SSE 也一个字节都不外泄（连起手单内容也不能漏给前端） ——
+    # —— SSE 只有正文：交单、起手单内容、抽牌指令都不在流里 ——
+    assert all(set(e) == {"content"} for e in events)
     assert "submit_reading_brief" not in resp.text
     assert "他还会回头吗" not in resp.text
-    assert not any("function_call" in e for e in events)
 
-    # —— 抽牌必须推给前端，且 wire 契约成立（positions 是 list，个数即张数）——
-    draws = [e["draw_cards"] for e in events if "draw_cards" in e]
-    assert len(draws) == 1
-    assert draws[0]["spread_type"] == "three_card"
-    assert draws[0]["positions"] == ["过去", "现在", "未来"]
-    assert "card_count" not in draws[0]
-
-    # —— 过渡语正常流式输出，且先于抽牌事件到达 ——
-    assert TRANSITION in _sse_text(events)
+    # —— 过渡语正常流式输出 ——
+    assert _sse_text(events) == TRANSITION
     assert done
-    first_draw = next(i for i, e in enumerate(events) if "draw_cards" in e)
-    assert "content" in events[0] and first_draw > 0
 
-    # —— 落库：起手单 + 相位翻转 + 回复入库 ——
+    # —— 落库：起手单 + 相位翻转 + 这一轮的记录（话+交单 → 交单结果 → 抽牌调用） ——
     saved = _get_conversation(conv.conversation_id)
     assert saved.phase == "reading"
     assert saved.strategy["question"] == "他还会回头吗"
     assert saved.strategy["route"] == "tarot"
-    assert TRANSITION in saved.messages[-1].content
-    assert saved.messages[-1].role == MessageRole.ASSISTANT
+    tail = saved.messages[-3:]
+    assert [m.role for m in tail] == [MessageRole.ASSISTANT, MessageRole.TOOL, MessageRole.ASSISTANT]
+    assert tail[0].content == TRANSITION and tail[0].tool_calls[0].name == "submit_reading_brief"
+    assert tail[1].tool_call_id == tail[0].tool_calls[0].id
+    # 抽牌调用停在会话末尾，前端据此显示抽牌按钮；/draw 用同一个 id 写结果。
+    # 牌阵参数逐字取自起手单（positions 是 list，个数即张数）
+    assert tail[2].tool_calls[0].name == "draw_tarot_cards"
+    assert tail[2].tool_calls[0].args == {"spread_type": "three_card", "positions": ["过去", "现在", "未来"]}
 
 
 # ---------------------------------------------------------------------------
@@ -328,19 +307,21 @@ def test_silent_submit_pushes_the_drawer_without_inventing_a_line(
     assert done
     assert prov.trace == ["chat:1", "exec:submit_reading_brief"]
 
-    # 没有凭空冒出来的文案，抽牌器照常推给前端
+    # 没有凭空冒出来的文案
     assert _sse_text(events) == ""
-    assert len([e for e in events if "draw_cards" in e]) == 1
 
-    # 没话就不落库，绝不写一条空的助手消息
+    # 没话就没话：落库的两条 assistant 都只有调用、没有正文，没有替它编的台词；
+    # 抽牌调用照常停在末尾（前端据此显示抽牌按钮）
     saved = _get_conversation(conv.conversation_id)
     assert saved.phase == "reading"
-    assert saved.messages[-1].role == MessageRole.USER
+    assistants = [m for m in saved.messages if m.role == MessageRole.ASSISTANT and m.tool_calls]
+    assert [m.tool_calls[0].name for m in assistants] == ["submit_reading_brief", "draw_tarot_cards"]
+    assert all(m.content == "" for m in assistants)
 
 
 @pytest.mark.parametrize("session_type,endpoint", ROUTES)
 def test_model_line_streams_through_untouched(env, monkeypatch, session_type, endpoint):
-    """模型说了话 —— 原样流式输出，且先于抽牌事件到达。说话那一半的锁。"""
+    """模型说了话 —— 原样流式输出，并和交单调用落在同一条 assistant 上。说话那一半的锁。"""
     conv = _seed_conversation(
         "opening", _greeting_and_user("他上周开始冷淡了"), session_type=session_type
     )
@@ -354,8 +335,10 @@ def test_model_line_streams_through_untouched(env, monkeypatch, session_type, en
     })
     events, _ = _sse(resp.text)
     assert _sse_text(events) == TRANSITION
-    first_draw = next(i for i, e in enumerate(events) if "draw_cards" in e)
-    assert "content" in events[0] and first_draw > 0
+    saved = _get_conversation(conv.conversation_id)
+    said = next(m for m in saved.messages if m.tool_calls and m.tool_calls[0].name == "submit_reading_brief")
+    assert said.content == TRANSITION
+    assert saved.messages[-1].tool_calls[0].name == "draw_tarot_cards"
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +373,7 @@ def test_opening_clarifying_turn_stays_in_opening_and_persists_reply(env, monkey
 
     # —— 追问正常流式吐给用户，且没有任何工具事件外泄 ——
     assert _sse_text(events) == question
-    assert not any("draw_cards" in e or "function_call" in e for e in events)
+    assert all(set(e) == {"content"} for e in events)
     assert done
 
     # —— 相位/策略单纹丝不动，assistant 追问已落库 ——
@@ -451,8 +434,9 @@ def test_reading_phase_never_hands_off(env, monkeypatch):
     assert "draw_tarot_cards" in tools.READING_TOOL_NAMES
     assert prov.sessions[0].force_tool is None  # 解读相位绝不带强制交单守卫
 
-    assert [e for e in events if "draw_cards" in e]
     assert done
+    # 抽牌调用落在末尾，等用户抽
+    assert _get_conversation(conv.conversation_id).messages[-1].tool_calls[0].name == "draw_tarot_cards"
 
     # 相位/策略单不因一次普通解读而改变
     saved = _get_conversation(conv.conversation_id)
@@ -465,10 +449,10 @@ def test_reading_phase_never_hands_off(env, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_handoff_preserves_full_history_including_last_user_message(env, monkeypatch):
-    """用户最后一句必须原样发给解读 Agent —— 开场 Agent 这一轮没回他，那句话还悬着。
+    """用户最后一句必须原样进入解读 Agent 的历史 —— 开场 Agent 这一轮没回他，那句话还悬着。
 
-    移交后的 session 与普通一轮完全同形：history 是之前的对话，待发消息就是用户
-    最后那句。写错就是「占卜师听不见用户最后那句话」。
+    移交后的 session 看到的就是落库的历史：之前的对话、用户最后那句、开场 Agent 交单的
+    那一轮。待发的是交单的结果——和它下一次请求从库里读到的完全一样，不另造移交指令。
     """
     last_user_line = "上周三他突然不回我消息了，我是不是该主动一点？"
     conv = _seed_conversation("opening", _greeting_and_user("我想问事业"),
@@ -487,24 +471,28 @@ def test_handoff_preserves_full_history_including_last_user_message(env, monkeyp
     assert resp.status_code == 200
 
     handoff = prov.sessions[1]
-    flat = [(m["role"], m["content"]) for m in handoff.history]
-    history_text = "\n".join(c for _, c in flat)
+    history_text = "\n".join(m.get("content", "") for m in handoff.history)
 
-    # 之前的对话一句不少
+    # 之前的对话一句不少，用户最后那句也在
     assert "我想问事业" in history_text
     assert "坐吧，阿岚。今天想聊些什么？" in history_text
-    # 用户最后那句原样发给解读 Agent，不是塞进 history 再另发一条移交指令
-    assert handoff.sent[0] == ("user", last_user_line)
-    assert last_user_line not in history_text
+    assert last_user_line in history_text
+    # 历史以交单调用收尾，待发的是它的结果（id 对得上）
+    assert handoff.history[-1]["tool_calls"][0]["name"] == "submit_reading_brief"
+    assert handoff.sent[0][:3] == ("tool", "submit_reading_brief", {"success": True})
+    assert handoff.sent[0][3] == handoff.history[-1]["tool_calls"][0]["id"]
     # 策略单已注入解读 Agent 的系统提示词
     assert "本场起手" in handoff.system and "我这两年的事业格局" in handoff.system
 
+    # 落库：用户那句 → 交单调用 → 交单结果 → 解读 Agent 的回复
+    saved = _get_conversation(conv.conversation_id)
+    assert [m.role for m in saved.messages[-4:]] == [
+        MessageRole.USER, MessageRole.ASSISTANT, MessageRole.TOOL, MessageRole.ASSISTANT]
+    assert saved.messages[-1].content == TRANSITION
+
 
 def test_handoff_history_has_no_two_consecutive_user_turns(env, monkeypatch):
-    """移交后角色必须交替，且不靠任何补进去的占位发言。
-
-    history 以 assistant 收尾、待发的是用户最后那句（user），交替天然成立。
-    """
+    """移交后角色必须交替，且不靠任何补进去的占位发言。"""
     last_user_line = "上周三他突然不回我消息了"
     conv = _seed_conversation("opening", _greeting_and_user("我想问事业"),
                               session_type=SessionType.ASTROLOGY)
@@ -525,13 +513,11 @@ def test_handoff_history_has_no_two_consecutive_user_turns(env, monkeypatch):
 
     # 1) history 内部无连续两个 user
     assert not any(a == b == "user" for a, b in zip(roles, roles[1:])), roles
-    # 2) history 以 assistant 收尾 —— 紧接着发的用户那句接上去仍是交替
+    # 2) history 以 assistant（交单调用）收尾，紧接着发的是它的结果
     assert roles[-1] == "assistant", roles
-    # 3) 没有为了凑交替而补进去的占位发言
+    # 3) assistant 轮全是真实发生过的：两句追问 + 交单那一轮（无正文）
     assert [m["content"] for m in history if m["role"] == "assistant"] == [
-        "坐吧，阿岚。今天想聊些什么？", "嗯，再说说。"]
-    # 4) 紧随其后发出的就是用户最后那句
-    assert prov.sessions[1].sent[0] == ("user", last_user_line)
+        "坐吧，阿岚。今天想聊些什么？", "嗯，再说说。", ""]
 
 
 # ---------------------------------------------------------------------------
@@ -607,13 +593,12 @@ def test_forced_brief_speaks_for_the_model_before_the_drawer(env, monkeypatch):
     # 守卫确实上膛了（否则这个测试测的是别的东西）
     assert prov.sessions[0].force_tool == "submit_reading_brief"
 
-    # 代言的那句话先到，抽牌器后到，并作为正式发言落库
-    assert _sse_text(events) == context_service.FORCED_BRIEF_HANDOFF_LINE
-    first_draw = next(i for i, e in enumerate(events) if "draw_cards" in e)
-    assert "content" in events[0] and first_draw > 0
+    # 代言的那句话流式推给用户，并和抽牌调用落在同一条 assistant 上
+    assert _sse_text(events) == context_service.forced_brief_handoff_line()
     saved = _get_conversation(conv.conversation_id)
-    assert saved.messages[-1].content == context_service.FORCED_BRIEF_HANDOFF_LINE
     assert saved.messages[-1].role == MessageRole.ASSISTANT
+    assert saved.messages[-1].content == context_service.forced_brief_handoff_line()
+    assert saved.messages[-1].tool_calls[0].name == "draw_tarot_cards"
 
 
 # ---------------------------------------------------------------------------
@@ -684,15 +669,14 @@ def test_any_number_of_positions_survives_the_whole_round_trip(env, monkeypatch,
         "content": "上周三他突然不回我消息了",
     })
     assert resp.status_code == 200
-    events, _ = _sse(resp.text)
 
-    # 推给前端的槽位 = 起手单里的位置，逐字一致
-    draws = [e["draw_cards"] for e in events if "draw_cards" in e]
-    assert len(draws) == 1
-    assert draws[0]["positions"] == positions
+    # 落库的抽牌调用（前端据此画槽位）= 起手单里的位置，逐字一致
+    draw = _get_conversation(conv.conversation_id).messages[-1].tool_calls[0]
+    assert draw.name == "draw_tarot_cards"
+    assert draw.args["positions"] == positions
 
     # 真正抽牌时张数也随之而来，不需要任何地方再声明一次
-    cards = TarotService.draw_cards(DrawCardsRequest(**draws[0]))
+    cards = TarotService.draw_cards(DrawCardsRequest(**draw.args))
     assert len(cards) == len(positions)
 
     # 落库的起手单同样只有位置

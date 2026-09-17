@@ -5,6 +5,8 @@ import type { SessionType } from '@/types';
 interface SessionButtonsProps {
   onSelectSession: (sessionType: SessionType) => void;
   disabled?: boolean;
+  /** 正在创建的会话类型。建会话要等后端生成开场白（数秒），这期间该卡片给出可见反馈。 */
+  pendingType?: SessionType | null;
 }
 
 interface SessionDef {
@@ -20,6 +22,7 @@ interface SessionDef {
 const SessionButtons: React.FC<SessionButtonsProps> = ({
   onSelectSession,
   disabled = false,
+  pendingType = null,
 }) => {
   const buttons: SessionDef[] = [
     {
@@ -51,7 +54,9 @@ const SessionButtons: React.FC<SessionButtonsProps> = ({
 
   return (
     <div className="flex gap-6 justify-center flex-wrap px-4">
-      {buttons.map((button, index) => (
+      {buttons.map((button, index) => {
+        const isPending = pendingType === button.type;
+        return (
         <motion.div
           key={button.type}
           initial={{ opacity: 0, y: 32 }}
@@ -126,18 +131,21 @@ const SessionButtons: React.FC<SessionButtonsProps> = ({
               </span>
             )}
 
-            {/* enter cue */}
+            {/* enter cue / 落座中 */}
             {!button.comingSoon && (
               <motion.span
-                className="relative z-10 mt-1 text-xs tracking-[0.3em] font-display opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+                className={`relative z-10 mt-1 text-xs tracking-[0.3em] font-display transition-opacity duration-500 ${
+                  isPending ? 'opacity-100 animate-pulse' : 'opacity-0 group-hover:opacity-100'
+                }`}
                 style={{ color: button.accent }}
               >
-                进入 ›
+                {isPending ? '落座中…' : '进入 ›'}
               </motion.span>
             )}
           </motion.button>
         </motion.div>
-      ))}
+        );
+      })}
     </div>
   );
 };

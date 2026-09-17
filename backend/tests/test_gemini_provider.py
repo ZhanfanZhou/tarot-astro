@@ -106,11 +106,16 @@ def test_force_tool_sets_mode_any():
     assert tc["allowed_function_names"] == ["submit_reading_brief"]
 
 
-def test_history_maps_to_start_chat():
-    """系统提示词 → user+『我明白了。』；历史文本轮按角色映射（复刻今天格式）。"""
+def test_system_prompt_goes_to_system_instruction_not_history():
+    """系统提示词走 system_instruction；history 里只有真实发生过的轮。
+
+    回归防线：早先的写法把系统提示词塞成 user 首轮，再补一句伪造的 model 轮
+    「我明白了。」凑交替。模型不该读到一句自己没说过的话。
+    """
     from services.llm.gemini_provider import GeminiProvider
     captured = {}
     def fake_model(**kwargs):
+        captured.update(kwargs)
         chat = MagicMock()
         chat.send_message_async = AsyncMock(return_value=_resp([_text_part("ok")]))
         m = MagicMock()
@@ -120,11 +125,11 @@ def test_history_maps_to_start_chat():
         sess = GeminiProvider("gemini-x").open_session(
             "SYS", [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "yo"}], tools=None)
         asyncio.run(sess.send_user("next"))
+
+    assert captured["system_instruction"] == "SYS"
     hist = captured["history"]
-    assert hist[0]["role"] == "user" and "SYS" in hist[0]["parts"][0]["text"]
-    assert hist[1]["role"] == "model" and hist[1]["parts"][0]["text"] == "我明白了。"
-    assert hist[2] == {"role": "user", "parts": [{"text": "hi"}]}
-    assert hist[3] == {"role": "model", "parts": [{"text": "yo"}]}
+    assert [h["role"] for h in hist] == ["user", "model"]
+    assert [h["parts"][0].text for h in hist] == ["hi", "yo"]
 
 
 def test_send_tool_result_feeds_function_response():

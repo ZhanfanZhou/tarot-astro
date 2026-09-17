@@ -57,6 +57,9 @@ class UserRegister(BaseModel):
 class MessageRole(str, Enum):
     USER = "user"
     ASSISTANT = "assistant"
+    TOOL = "tool"       # 一次工具调用的结果（对应前一条 ASSISTANT 上的 tool_calls）
+    # 旧版本的记录才有：2026-09 之前抽牌/星盘结果套在这个壳里。新代码不再写它；
+    # 含有它的会话是旧格式，只能查看（见 services/tool_turns.is_legacy）。
     SYSTEM = "system"
 
 
@@ -81,10 +84,35 @@ class DrawCardsRequest(BaseModel):
     positions: Optional[List[str]] = None
 
 
+class ToolCallRecord(BaseModel):
+    """模型发起的一次工具调用。id 由 provider 给（OpenAI）或本地生成（Gemini 没有 id），
+    随后那条 TOOL 记录用 tool_call_id 对上它——OpenAI 的 tool_call_id、Gemini 的
+    functionResponse 都靠这一对还原。"""
+    id: str
+    name: str
+    args: dict = {}
+
+
 class Message(BaseModel):
+    """一轮记录，三种角色和官方 API 的消息形状一一对应：
+
+        USER       用户发言
+        ASSISTANT  模型的一轮：content 是它说的话，tool_calls 是它同时发起的调用
+        TOOL       某次调用的结果：tool_call_id 指向调用，content 是结果 JSON
+
+    重建历史时逐条映射即可（gemini_service._build_neutral），不做任何推断。
+
+    tarot_cards / draw_request 是给界面画牌用的展示数据：抽牌的 TOOL 记录上带着抽出的
+    牌；每日一签的解读（服务端直接生成，没有工具调用）把当日的牌挂在 ASSISTANT 上。
+    """
     role: MessageRole
     content: str
     timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    tool_calls: Optional[List[ToolCallRecord]] = None   # ASSISTANT
+    reasoning: Optional[str] = None                      # ASSISTANT：思考模型那一轮的推理内容，
+                                                         # 只在带 tool_calls 时记（喂回结果时 provider 要）
+    tool_call_id: Optional[str] = None                   # TOOL
+    tool_name: Optional[str] = None                      # TOOL（Gemini functionResponse 要名字）
     tarot_cards: Optional[List[TarotCard]] = None
     draw_request: Optional[DrawCardsRequest] = None
 
@@ -117,6 +145,11 @@ class Conversation(BaseModel):
 class SendMessageRequest(BaseModel):
     conversation_id: str
     content: str
+
+
+class ResumeRequest(BaseModel):
+    """「用户在界面上做完了动作（抽完牌 / 填完资料），请接着跑」。不带 content——它不是发言。"""
+    conversation_id: str
 
 
 class DrawCardsResponse(BaseModel):
@@ -182,4 +215,5 @@ class DailyOverviewResponse(BaseModel):
 class DailyDrawResponse(BaseModel):
     record: DailyDrawRecord
     conversation_id: str
+    reading: str    # 今日解读：抽签时服务端直接生成，随响应返回
 

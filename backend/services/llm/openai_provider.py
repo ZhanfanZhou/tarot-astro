@@ -22,7 +22,8 @@ def _parse(message) -> TurnResult:
         except json.JSONDecodeError:
             args = {}
         calls.append(ToolCall(name=tc.function.name, args=args, id=tc.id))
-    return TurnResult(text=message.content or "", tool_calls=calls)
+    return TurnResult(text=message.content or "", tool_calls=calls,
+                      reasoning=getattr(message, "reasoning_content", None) or "")
 
 
 # DeepSeek 的思考模型（deepseek-flash / deepseek-v4-pro）在思考态下不接受
@@ -35,18 +36,43 @@ _NO_THINKING = {"thinking": {"type": "disabled"}}
 
 
 class _OpenAISession:
-    def __init__(self, client, model, system_prompt, history, tools, force_tool, no_think=False):
+    def __init__(self, client, model, system_prompt, history, tools, force_tool, is_deepseek=False):
         self._client = client
         self._model = model
-        self._no_think = no_think
         self._tools = _to_openai_tools(tools)
+        self._is_deepseek = is_deepseek
         self._force = ({"type": "function", "function": {"name": force_tool}}
                        if force_tool else None)
         self._messages = [{"role": "system", "content": system_prompt}]
         for m in history:
-            self._messages.append({"role": m["role"], "content": m["content"]})
-        # 记住上一轮的 tool_call_id（send_tool_result 需要）
-        self._last_call_id = None
+            if m["role"] == "tool_result":
+                self._messages.append({
+                    "role": "tool",
+                    "tool_call_id": m["id"],
+                    "content": json.dumps(m["result"], ensure_ascii=False),
+                })
+                continue
+            msg = {"role": m["role"], "content": m["content"]}
+            if m.get("tool_calls"):
+                self._attach_reasoning(msg, m.get("reasoning") or "")
+            if m.get("tool_calls"):
+                msg["tool_calls"] = [{
+                    "id": c["id"], "type": "function",
+                    "function": {"name": c["name"],
+                                 "arguments": json.dumps(c["args"], ensure_ascii=False)},
+                } for c in m["tool_calls"]]
+            self._messages.append(msg)
+
+    def _attach_reasoning(self, msg: dict, reasoning: str) -> None:
+        """带 tool_calls 的 assistant 轮附上推理内容。
+
+        DeepSeek 思考模式：本轮（喂回结果之前）的每个 tool_calls 轮都必须带
+        reasoning_content 字段，缺了就 400「must be passed back」；空串它接受（harness
+        替解读 Agent 发起的抽牌调用没有推理），往轮的可带可不带（2026-09 对真 API 验证）。
+        其他 OpenAI 兼容端未必认这个字段，只在真有内容时才带。
+        """
+        if reasoning or self._is_deepseek:
+            msg["reasoning_content"] = reasoning
 
     async def _create(self):
         kwargs = {"model": self._model, "messages": self._messages}
@@ -54,7 +80,7 @@ class _OpenAISession:
             kwargs["tools"] = self._tools
             if self._force:
                 kwargs["tool_choice"] = self._force
-        if self._force and self._no_think:
+        if self._force and self._is_deepseek:
             kwargs["extra_body"] = dict(_NO_THINKING)
         resp = await self._client.chat.completions.create(**kwargs)
         msg = resp.choices[0].message
@@ -62,12 +88,12 @@ class _OpenAISession:
         # 把 assistant 轮写回 messages（只保留第一个 tool_call，保证后面只需一条 tool 响应）
         assistant = {"role": "assistant", "content": msg.content or ""}
         if result.tool_calls:
+            self._attach_reasoning(assistant, result.reasoning)
             c = result.tool_calls[0]
             assistant["tool_calls"] = [{
                 "id": c.id, "type": "function",
                 "function": {"name": c.name, "arguments": json.dumps(c.args, ensure_ascii=False)},
             }]
-            self._last_call_id = c.id
         self._messages.append(assistant)
         return result
 
@@ -76,9 +102,11 @@ class _OpenAISession:
         return await self._create()
 
     async def send_tool_result(self, name, result, call_id="") -> TurnResult:
+        # tool_call_id 必须和前一条 assistant.tool_calls[].id 对上——resume 时那条
+        # assistant 来自重建的历史，id 就是当初落库的那个
         self._messages.append({
             "role": "tool",
-            "tool_call_id": call_id or self._last_call_id or name,
+            "tool_call_id": call_id,
             "content": json.dumps(result, ensure_ascii=False),
         })
         return await self._create()

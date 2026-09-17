@@ -68,9 +68,10 @@ opening 相位:
              ↓ 按 route 分两条路
       ┌──────────────────────────────┴───────────────────────────┐
       ▼ route=tarot                                route≠tarot（星盘）▼
-  harness 照单直推抽牌器                      同轮移交解读 Agent（READING provider）
-  yield function_call(draw_tarot_cards)       用解读提示词+解读工具集重建 session
-  执行 → yield done → 收口等用户抽牌          重放同一句用户消息，由它自己取盘开口
+  harness 替解读 Agent 发起 draw_tarot_cards    同轮移交解读 Agent（READING provider）
+  记成一条 assistant(tool_calls) + 推抽牌器     用解读提示词+解读工具集重建 session，
+  yield done → 收口等用户抽牌                   历史 = 落库的 + 本轮刚产生的（交单那一对），
+  （/draw 写 TOOL 结果，/resume 继续）           待发的是交单结果，由它自己取盘开口
 
 reading 相位:
   用户消息 → 解读 Agent（READING provider）
@@ -83,9 +84,9 @@ reading 相位:
 
 - **任意时刻单一声音。** 每场会话最多一次相位切换，不存在每轮跑两个模型的导演层。
 - **塔罗路线零额外往返。** 牌阵参数已经在单子里，harness 直接推抽牌器。不叫解读 Agent 出来说一句过渡语——那是纯浪费的往返，而且它会自己另选一副牌阵，跟单子对不上。
-- **星盘路线同轮移交。** 不需要用户动手，换提示词和工具集后重放用户那句话。开场 Agent 交单那轮没对用户开口，所以解读 Agent 接手的就是一句还没人回的话，与普通一轮完全同形——**不另造移交指令**。
+- **星盘路线同轮移交。** 不需要用户动手，换提示词和工具集后接着跑。解读 Agent 看到的历史就是落库的历史（用户那句、开场 Agent 交单的那一轮），待发的是交单结果——和它下一次请求从库里读到的完全一样，**不另造移交指令**。历史里出现本次未声明的 `submit_reading_brief`，Gemini / OpenAI 都接受（2026-09 对真 Gemini 验证）。
 - **前置 Agent 只活在开场，不回场。** 解读工具集里没有 `submit_reading_brief`：起手单是开场定下的一次性记录，不是可改写的当前状态。用户中途换角度、补抽牌阵、中途引入星盘，全部由解读 Agent 自理（它工具齐全）。
-- **前端零改动**：SSE 契约、抽牌 function_call 事件、"空消息触发开场白"的约定全不变。
+- **开场白由「创建会话」产生。** `POST /api/conversations` 生成开场白、写成第一条消息随响应返回。开场白是会话的内容，不是某次发送的产物；客户端不需要为了让占卜师先开口而反过来发一条消息。
 
 ### 4.1 塔罗与星盘不是两条产品线
 
@@ -95,6 +96,18 @@ reading 相位:
 星盘需要出生信息，所以开场工具集里有 `request_user_profile`，且 `<用户资料>` 必须注入开场提示词：
 看不见资料，模型就没法判断星盘这条路走不走得通，只能盲调工具去撞。
 要资料的那一轮同样**只说话不交单**，等用户反应（填了走星盘，说抽牌走塔罗）。信息不全绝不卡人——塔罗永远是通的那条路。
+
+### 4.2 工具轮按官方形状落库
+
+`Message` 三种角色和两家 API 的消息一一对应：`user`、`assistant`（`content` + `tool_calls[{id,name,args}]`）、`tool`（`tool_call_id` + 结果 JSON）。Agent Loop 每一轮都 yield `{"message"}` 交给 `turn_service` 按序落库；重建历史时逐条映射（Gemini `functionCall`/`functionResponse` part，OpenAI `assistant.tool_calls`/`role=tool`），不推断、不伪造任何台词。
+
+**interrupt 式工具**（`llm/tools.INTERRUPT_TOOL_NAMES`：抽牌、补资料）的结果要等用户动手，跨一次 HTTP 请求：Loop 见到就收口（调用已落库，不喂假结果）；`/draw` 生成真牌写成那次调用的 TOOL 结果；补资料由 `/resume` 从用户当前 profile 写结果，模型自己接着调 `get_astrology_chart`（工具描述就是这么写的），前端不替它取盘。用户不做那一步直接发消息，`/message` 先把「没做」记成结果再记发言——两家 API 都要求每个调用后面跟着结果。`/resume` 不带 content：它不是发言。
+
+**界面状态从会话数据推导。** SSE 只有正文。要不要显示抽牌 / 补资料按钮、抽牌器用什么牌阵，前端看当前会话末尾那条 assistant 的 `tool_calls`；进行中的一轮按会话 id 记在 store 里。按钮和流式文本因此只属于它所在的那场会话，切换会话不会串台，刷新页面也不会丢。
+
+**每日一签 / 心灵奇旅**没有对话历史也没有用户发言要回，和开场白同理，服务端单次生成：抽签接口当场生成解读、落成第一条 assistant（当日的牌挂在它上面）随响应返回；心灵奇旅整段提示词一次生成。
+
+**旧会话**（2026-09 之前：抽牌结果套在 SYSTEM、触发语伪装成用户发言）没有记录调用，运行时判为只读（`tool_turns.is_legacy`，`/message` `/resume` 409）；`scripts/migrate_tool_turns.py` 可一次性改写成新形状。
 
 ## 5. 相位状态机与存储
 
@@ -173,13 +186,15 @@ WHERE user_id = ? AND conversation_id != ?
 
 ## 9. 开场白生成
 
-两个 router 的空消息分支由硬编码模板改为一次**无工具轻量 LLM 调用**（`opening_service.build_greeting()`，走 OPENING provider，opening 提示词 + 关系上下文，短输出）。开场白照旧存为 assistant 消息。
+硬编码模板改为一次**无工具轻量 LLM 调用**（`opening_service.build_greeting()`，走 OPENING provider，opening 提示词 + 关系上下文，短输出），在 `POST /api/conversations` 里完成，开场白作为第一条 assistant 消息随创建响应返回。
 
-- **超时 8 秒**（`config.OPENING_GREETING_TIMEOUT_SECONDS`）：降级只兜异常不兜挂起，而开场白是全 App 的第一印象，卡住 = 永久转圈。
-- 任何异常或空输出 → 降级回 `FALLBACK_GREETINGS` 模板（保底不坏）。模板口吻已按新开场规范重写，不再是客服体。
+**为什么在创建接口里做。** 早先的实现是前端建完会话再发一条 `content: ""` 的消息当暗号。那是拿数据的空值编码一个动作：接口签名说不出自己在干什么，得靠一条守卫去区分「请开场」和「真的发了空消息」，前端注释也跟着长期过期。开场白由创建产生之后，这些全部消失——少一次往返、少一条守卫、少一个暗号。代价是创建接口会阻塞在一次 LLM 调用上（超时封顶 8 秒），这是可接受的：用户点完卡片本来就在等占卜师落座。
 
-**额度**：开场白从"零成本本地模板"变成真实 LLM 调用后，原先"开场白不扣额度"的约定变成了一个无限免费调用的洞——`POST /api/conversations` 本身不限流，`建会话 → 发空消息拿开场白` 可无限循环，游客 token 即可跑。
-决策：`RateLimitService.check_and_consume()` 提到开场白分支之前（开场白是 LLM 调用，就该计费）；同时游客每日上限 **10 → 15**，补偿开场幕新增的开销（开场白 1 条 + 追问 0–1 条），保证一场完整占卜仍能跑完。注册用户上限本就宽松（50），不动。
+- **超时 8 秒**（`config.OPENING_GREETING_TIMEOUT_SECONDS`）：开场白是全 App 的第一印象，provider 卡住 = 永久转圈。
+- **任何异常或空输出 → 抛 `GreetingUnavailable`，创建接口返回 503，前端提示重试。不发保底文案。** 理由：开场白之后紧接着的那一轮 Agent Loop 用的是同一个 OPENING provider，provider 挂了就是挂了，一句假问候只会让用户认真打完一个问题再撞同一堵墙，还会把关系元数据 SQL 出错、提示词文件缺失这类真问题盖成"看起来正常"。有用的 fallback 是重试，不是假内容。
+- 流式：开场白不走 SSE。它是一次性短文本，此前的"逐字 yield"是假流式（先拿到完整文本再拆字符），没有保留价值。
+
+**额度**：开场白是真实 LLM 调用，`RateLimitService.check_and_consume()` 在 `POST /api/conversations` 里、生成之前扣一次——这个接口原先完全不限流，反复建会话即可白嫖。无开场幕的会话类型（每日一签 / 闲聊）不打 LLM、不扣额度。同时游客每日上限 **10 → 15**，补偿开场幕新增的开销（开场白 1 条 + 追问 0–1 条），保证一场完整占卜仍能跑完。注册用户上限本就宽松（50），不动。
 
 ## 10. 改动面清单
 
@@ -189,9 +204,11 @@ WHERE user_id = ? AND conversation_id != ?
 | `prompts/reading_handoff.md` | **新增**：开场→解读接场约束 |
 | `services/prompt_service.py` | `PROMPT_REGISTRY` 登记上述 2 个提示词（管理页自动多出可编辑条目） |
 | `services/context_service.py` | **新增**：相位判定、关系元数据、起手单渲染与归一、两相位提示词拼装、`first_action` |
-| `services/opening_service.py` | **新增**：开场白生成与降级、守卫计数、交单落库、硬退出 |
+| `services/opening_service.py` | **新增**：开场白生成（失败即抛 `GreetingUnavailable`）、守卫计数、交单落库、硬退出 |
 | `services/gemini_service.py` | Agent Loop 按相位取 provider / 提示词 / 工具集；交单后分两条路线 |
-| `routers/tarot.py` / `astrology.py` | 开场白分支改 LLM 生成 + 模板降级；`function_executor` 加交单分支；守卫接线 |
+| `routers/conversations.py` | 创建会话时生成开场白并落为第一条消息；扣额度；失败 503 |
+| `services/turn_service.py` | **新增**：一轮对话（校验 → 收口 interrupt → 扣额度 → Loop → 逐条落库 → SSE），塔罗占星共用 · `services/tool_turns.py` 工具轮落库形状 / interrupt 结果 / 旧会话判定 |
+| `routers/tarot.py` / `astrology.py` | 薄壳：`/message` `/resume` `/draw` 转 `turn_service` |
 | `routers/conversations.py` | 创建会话时按 session_type 写 phase 初值 |
 | `models.py` | Conversation 加 `phase` / `strategy` |
 | `config.py` | 守卫两个阈值 + 开场白超时 |
@@ -204,7 +221,7 @@ WHERE user_id = ? AND conversation_id != ?
 
 ## 11. 错误处理与降级
 
-- 开场白 LLM 失败或超时 → 模板兜底（§9）
+- 开场白 LLM 失败或超时 → 建会话返回 503，前端提示重试（§9）；不生成假问候
 - 星盘移交重建 session 失败 → 该轮以起手单已落库结束，下轮自然进 reading 相位（用户只感觉停顿了一下）
 - 模型不交单 → 三层守卫（§7）
 - 塔罗路线牌阵字段缺失 → `_DEFAULT_SPREAD` 三张阵兜底
@@ -212,7 +229,7 @@ WHERE user_id = ? AND conversation_id != ?
 
 ## 12. 测试与验证
 
-**单测**（mock provider / `TAROT_DB_FILE` 临时库，不碰 `data/`）：相位路由（含存量会话默认 reading、每日一签门控）、phase 初值写入、守卫 2/3 层触发、交单落库、开场白降级、关系元数据 SQL（空会话与每日一签排除）、塔罗直推抽牌、星盘同轮移交。
+**单测**（mock provider / `TAROT_DB_FILE` 临时库，不碰 `data/`）：相位路由（含存量会话默认 reading、每日一签门控）、phase 初值写入、守卫 2/3 层触发、交单落库、开场白失败即抛、建会话计费与 503、关系元数据 SQL（空会话与每日一签排除）、塔罗直推抽牌、星盘同轮移交。
 
 **联调重点（人工，未完成清单见总纲 §5.3）**：口吻一致性（星盘移交前后盲测无断裂感）、回头客不翻旧账、催抽牌路径（立即交单）、牌阵与起手单逐字一致、守卫第 2 层强制交单的字段质量（需临时把阈值调成 1 才触发得到）。
 
@@ -223,7 +240,7 @@ WHERE user_id = ? AND conversation_id != ?
 | 星盘路线移交前后口吻断裂 | 同人设段复写 + 联调盲测 |
 | 模型不交单 / 交单时机差 | 小提示词单一职责 + 三层守卫 |
 | 非 Gemini provider 不尊重强制交单（守卫第 2 层） | 见总纲缺口 7——`tool_choice` 支持度是该项的重点验证项 |
-| 开场白 LLM 延迟/失败 | 短输出 + 8s 超时 + 模板降级 |
+| 开场白 LLM 延迟/失败 | 短输出 + 8s 超时 + 503 让用户重试（卡片上有"落座中…"反馈） |
 | 提示词文案不达"无人机感"标准 | 管理页在线编辑热加载，联调快速迭代 |
 
 ## 14. 与总纲的衔接

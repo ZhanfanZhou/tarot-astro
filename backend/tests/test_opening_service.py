@@ -1,4 +1,4 @@
-"""开场白生成（含降级）与三层守卫的判定逻辑。"""
+"""开场白生成与三层守卫的判定逻辑。"""
 import asyncio
 import sys
 from pathlib import Path
@@ -157,21 +157,24 @@ def test_prepare_context_hard_exits_and_flips_phase(db_env):
     assert saved.strategy is None  # 兜底不伪造假策略单
 
 
-def test_greeting_falls_back_to_template_when_llm_fails(db_env):
-    """LLM 挂了不能开天窗——降级回硬编码模板（保底不坏）。"""
+def test_greeting_raises_when_llm_fails(db_env):
+    """LLM 挂了就是挂了——抛给调用方，不发假问候。
+
+    开场白之后那一轮 Agent Loop 用的是同一个 provider，保底文案只会让用户认真
+    打完一个问题再撞同一堵墙。
+    """
     from services import opening_service
 
     async def boom(*args, **kwargs):
         raise RuntimeError("gemini down")
 
     with patch.object(opening_service, "_generate_greeting_via_llm", side_effect=boom):
-        text = asyncio.run(
-            opening_service.build_greeting(
-                user=_user(), conversation=_conv(), session_type=SessionType.TAROT,
+        with pytest.raises(opening_service.GreetingUnavailable):
+            asyncio.run(
+                opening_service.build_greeting(
+                    user=_user(), conversation=_conv(), session_type=SessionType.TAROT,
+                )
             )
-        )
-    assert "小夏" in text
-    assert len(text) > 0
 
 
 def test_greeting_uses_llm_output_when_available(db_env):
@@ -209,8 +212,8 @@ def test_greeting_llm_call_sets_timeout(db_env):
     assert 0 < config.OPENING_GREETING_TIMEOUT_SECONDS <= 15  # 首屏等待，不能设成一分钟
 
 
-def test_greeting_falls_back_to_template_on_timeout(db_env):
-    """超时异常 → 现有 try/except 接住 → 降级模板（用户永远拿得到一句开场白）。"""
+def test_greeting_raises_on_timeout(db_env):
+    """超时同样抛错 —— 建会话接口据此返回 503，让用户重试。"""
     from google.api_core import exceptions as gexc
 
     from services import opening_service
@@ -219,28 +222,25 @@ def test_greeting_falls_back_to_template_on_timeout(db_env):
         raise gexc.DeadlineExceeded("504 Deadline Exceeded")
 
     with patch.object(opening_service, "_generate_greeting_via_llm", side_effect=timeout):
-        text = asyncio.run(
-            opening_service.build_greeting(
-                user=_user(), conversation=_conv(), session_type=SessionType.TAROT,
+        with pytest.raises(opening_service.GreetingUnavailable):
+            asyncio.run(
+                opening_service.build_greeting(
+                    user=_user(), conversation=_conv(), session_type=SessionType.TAROT,
+                )
             )
-        )
-
-    assert "小夏" in text
-    assert text in [t.format(nickname="小夏") for t in opening_service.FALLBACK_GREETINGS]
 
 
 def test_greeting_rejects_empty_llm_output(db_env):
-    """模型返回空串 → 视为失败，走模板。"""
+    """模型返回空串 → 视为失败，抛错（而不是拿模板顶上）。"""
     from services import opening_service
 
     with patch.object(
         opening_service, "_generate_greeting_via_llm",
         new=AsyncMock(return_value="   "),
     ):
-        text = asyncio.run(
-            opening_service.build_greeting(
-                user=_user(), conversation=_conv(), session_type=SessionType.TAROT,
+        with pytest.raises(opening_service.GreetingUnavailable):
+            asyncio.run(
+                opening_service.build_greeting(
+                    user=_user(), conversation=_conv(), session_type=SessionType.TAROT,
+                )
             )
-        )
-    assert text.strip() != ""
-    assert "小夏" in text

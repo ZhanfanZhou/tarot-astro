@@ -121,12 +121,6 @@ def render_brief_block(strategy: Optional[dict]) -> str:
     )
 
 
-_GUARD_INSTRUCTION = (
-    "\n\n# <本轮强制>\n"
-    "追问预算已用尽。本轮必须立刻调用 submit_reading_brief 交单，"
-    "不确定的字段按最可能的值填，不要再向用户提问。"
-)
-
 # 走塔罗但模型没给 positions 时的兜底——不为这个再花一次往返去问它
 _DEFAULT_SPREAD = {
     "spread_type": "three_card",
@@ -140,10 +134,13 @@ def build_opening_prompt(
     force_brief: bool = False,
     user_context: str = "",
 ) -> str:
-    """开场相位系统提示词 = opening_system.md + 用户资料 + 关系上下文 + 入口 [+ 守卫指令]。
+    """开场相位系统提示词 = opening_system.md + 入口 + 用户资料 + 关系上下文
+    [+ opening_force_brief.md]。
 
     用户资料必须注入：前置占卜师要自己判断「这个问题该不该走星盘」，而星盘要出生信息。
     看不见资料它就只能盲调 request_user_profile 去撞。
+
+    所有模型可见的文案都来自 .md（管理页可改）；这里只负责拼接顺序和数据。
     """
     parts = [prompt_service.get_prompt("opening_system.md")]
 
@@ -155,7 +152,7 @@ def build_opening_prompt(
     if relationship_block:
         parts.append(f"\n\n{relationship_block}")
     if force_brief:
-        parts.append(_GUARD_INSTRUCTION)
+        parts.append("\n\n" + _forced_brief_parts()[0])
 
     return "".join(parts)
 
@@ -175,11 +172,27 @@ def first_action(strategy: dict) -> tuple:
     return ("draw_tarot_cards", args)
 
 
-# 守卫第 2 层专用：强制交单走 mode=ANY，模型在解码层只被允许输出函数调用，
-# 一个字也说不出来——不是它选择沉默，是它没得选。这一条路上补这句，
-# 否则抽牌器会凭空弹到用户面前。
+# opening_force_brief.md 的两个小节标题。这一轮有两段文案，用途不同：
+#   <本轮强制> 注入系统提示词，是给模型的指令；
+#   <过渡语>   反过来是替模型说给用户听的——强制交单走 mode=ANY，模型在解码层
+#              只被允许输出函数调用，一个字也说不出来，不是它选择沉默，是它没得选。
+#              不补这句，抽牌器就凭空弹到用户面前。
 # 其余路径一律不补：模型想说就说（说了照常流式输出），不想说就沉默，两种都正常。
-FORCED_BRIEF_HANDOFF_LINE = "好，这件事我们抽牌看看。"
+#
+# 两段同属「预算用尽的那一轮」，放同一个文件同一个管理页条目里改；小节标题就是
+# 分隔符本身，编辑的人看得见，不是藏在正文里的隐形标记。
+_FORCED_BRIEF_LINE_HEADING = "# <过渡语>"
+
+
+def _forced_brief_parts() -> tuple:
+    text = prompt_service.get_prompt("opening_force_brief.md")
+    instruction, _, line = text.partition(_FORCED_BRIEF_LINE_HEADING)
+    return instruction.strip(), line.strip()
+
+
+def forced_brief_handoff_line() -> str:
+    """守卫第 2 层被迫沉默时，替模型说的那句过渡语。"""
+    return _forced_brief_parts()[1]
 
 
 # 接场约束：只在「开场幕真的跑过」（strategy 非空）时追加。

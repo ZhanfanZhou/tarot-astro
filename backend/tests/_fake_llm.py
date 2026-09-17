@@ -15,14 +15,14 @@ class FakeSession:
     def __init__(self, script):
         # script: list[TurnResult]，每次 send_* 弹一个
         self._script = list(script)
-        self.sent = []          # [("user", text)] / [("tool", name, result)]
+        self.sent = []          # [("user", text)] / [("tool", name, result, call_id)]
 
     async def send_user(self, text):
         self.sent.append(("user", text))
         return self._script.pop(0)
 
     async def send_tool_result(self, name, result, call_id=""):
-        self.sent.append(("tool", name, result))
+        self.sent.append(("tool", name, result, call_id))
         return self._script.pop(0)
 
 

@@ -163,92 +163,67 @@ export const conversationApi = {
   },
 };
 
-// 塔罗相关API
+/**
+ * 跑一轮并把正文流式交给 onChunk。body 只有两种形状：
+ *   {conversation_id, content}  —— 用户说了一句话（/message）
+ *   {conversation_id}           —— 用户在界面上做完了动作（抽完牌 / 填完资料），请接着跑（/resume）
+ * 流里只有正文。要不要显示抽牌/补资料按钮，看刷新后会话末尾那条记录的 tool_calls。
+ */
+async function streamTurn(url: string, body: object, onChunk: (chunk: string) => void): Promise<void> {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw await streamError(response);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error('无法读取响应流');
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6);
+      if (data === '[DONE]') return;
+      const parsed = JSON.parse(data);
+      if (parsed.content) onChunk(parsed.content);
+    }
+  }
+}
+
+async function drawCards(prefix: string, conversationId: string, drawRequest: DrawCardsRequest): Promise<TarotCard[]> {
+  const response = await api.post(`/api/${prefix}/draw`, drawRequest, {
+    params: { conversation_id: conversationId },
+  });
+  return response.data.cards;
+}
+
+// 塔罗相关API（/message 与 /resume 两条路径下，塔罗与占星的后端逻辑相同；会话类型由会话本身决定）
 export const tarotApi = {
-  sendMessage: async (
-    conversationId: string,
-    content: string,
-    onChunk: (chunk: string) => void,
-    onDrawCards: (instruction: DrawCardsRequest) => void,
-    onNeedProfile?: (instruction: any) => void,
-    onFetchChart?: (instruction: any) => void
-  ): Promise<void> => {
-    const response = await fetch(`${API_BASE_URL}/api/tarot/message`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...authHeaders(),
-      },
-      body: JSON.stringify({
-        conversation_id: conversationId,
-        content,
-      }),
-    });
+  sendMessage: (conversationId: string, content: string, onChunk: (chunk: string) => void): Promise<void> =>
+    streamTurn(`${API_BASE_URL}/api/tarot/message`, { conversation_id: conversationId, content }, onChunk),
 
-    if (!response.ok) {
-      throw await streamError(response);
-    }
+  /** 用户抽完牌/填完资料，请模型接着跑。不产生用户消息。 */
+  resume: (conversationId: string, onChunk: (chunk: string) => void): Promise<void> =>
+    streamTurn(`${API_BASE_URL}/api/tarot/resume`, { conversation_id: conversationId }, onChunk),
 
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error('无法读取响应流');
-    }
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]') {
-            return;
-          }
-
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.content) {
-              onChunk(parsed.content);
-            } else if (parsed.draw_cards) {
-              console.log('[Frontend SSE] 收到抽牌指令:', parsed.draw_cards);
-              console.log('[Frontend SSE] parsed.draw_cards.spread_type:', parsed.draw_cards.spread_type);
-              console.log('[Frontend SSE] parsed.draw_cards.positions:', parsed.draw_cards.positions);
-              onDrawCards(parsed.draw_cards);
-            } else if (parsed.need_profile && onNeedProfile) {
-              onNeedProfile(parsed.need_profile);
-            } else if (parsed.fetch_chart && onFetchChart) {
-              onFetchChart(parsed.fetch_chart);
-            }
-          } catch (e) {
-            console.error('解析SSE数据失败:', e);
-          }
-        }
-      }
-    }
-  },
-
-  drawCards: async (
-    conversationId: string,
-    drawRequest: DrawCardsRequest
-  ): Promise<TarotCard[]> => {
-    console.log('[Frontend API] 发送抽牌请求:');
-    console.log('[Frontend API] conversationId:', conversationId);
-    console.log('[Frontend API] drawRequest:', drawRequest);
-    console.log('[Frontend API] drawRequest.spread_type:', drawRequest.spread_type);
-    console.log('[Frontend API] drawRequest.positions:', drawRequest.positions);
-    
-    const response = await api.post('/api/tarot/draw', drawRequest, {
-      params: { conversation_id: conversationId },
-    });
-    return response.data.cards;
-  },
+  drawCards: (conversationId: string, drawRequest: DrawCardsRequest) =>
+    drawCards('tarot', conversationId, drawRequest),
 
   getAllCards: async (): Promise<string[]> => {
     const response = await api.get('/api/tarot/cards');
@@ -258,71 +233,14 @@ export const tarotApi = {
 
 // 星盘相关API
 export const astrologyApi = {
-  sendMessage: async (
-    conversationId: string,
-    content: string,
-    onChunk: (chunk: string) => void,
-    onNeedProfile?: (instruction: any) => void,
-    onFetchChart?: (instruction: any) => void,
-    onDrawCards?: (instruction: DrawCardsRequest) => void
-  ): Promise<void> => {
-    const response = await fetch(`${API_BASE_URL}/api/astrology/message`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...authHeaders(),
-      },
-      body: JSON.stringify({
-        conversation_id: conversationId,
-        content,
-      }),
-    });
+  sendMessage: (conversationId: string, content: string, onChunk: (chunk: string) => void): Promise<void> =>
+    streamTurn(`${API_BASE_URL}/api/astrology/message`, { conversation_id: conversationId, content }, onChunk),
 
-    if (!response.ok) {
-      throw await streamError(response);
-    }
+  resume: (conversationId: string, onChunk: (chunk: string) => void): Promise<void> =>
+    streamTurn(`${API_BASE_URL}/api/astrology/resume`, { conversation_id: conversationId }, onChunk),
 
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error('无法读取响应流');
-    }
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]') {
-            return;
-          }
-
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.content) {
-              onChunk(parsed.content);
-            } else if (parsed.need_profile && onNeedProfile) {
-              onNeedProfile(parsed.need_profile);
-            } else if (parsed.fetch_chart && onFetchChart) {
-              onFetchChart(parsed.fetch_chart);
-            } else if (parsed.draw_cards && onDrawCards) {
-              onDrawCards(parsed.draw_cards);
-            }
-          } catch (e) {
-            console.error('解析SSE数据失败:', e);
-          }
-        }
-      }
-    }
-  },
+  drawCards: (conversationId: string, drawRequest: DrawCardsRequest) =>
+    drawCards('astrology', conversationId, drawRequest),
 
   checkProfile: async (userId: string): Promise<{
     has_complete_profile: boolean;
@@ -333,36 +251,11 @@ export const astrologyApi = {
     return response.data;
   },
 
-  fetchChart: async (conversationId: string): Promise<{
-    success: boolean;
-    chart_text: string;
-  }> => {
-    const response = await api.post('/api/astrology/fetch-chart', null, {
-      params: { conversation_id: conversationId },
-    });
-    return response.data;
-  },
-
   getCurrentZodiac: async (): Promise<{ zodiac: string }> => {
     const response = await api.get('/api/astrology/current-zodiac');
     return response.data;
   },
 
-  drawCards: async (
-    conversationId: string,
-    drawRequest: DrawCardsRequest
-  ): Promise<TarotCard[]> => {
-    console.log('[Frontend API] 发送星座AI抽牌请求:');
-    console.log('[Frontend API] conversationId:', conversationId);
-    console.log('[Frontend API] drawRequest:', drawRequest);
-    console.log('[Frontend API] drawRequest.spread_type:', drawRequest.spread_type);
-    console.log('[Frontend API] drawRequest.positions:', drawRequest.positions);
-    
-    const response = await api.post('/api/astrology/draw', drawRequest, {
-      params: { conversation_id: conversationId },
-    });
-    return response.data.cards;
-  },
 };
 
 // ── 牌组商城 / 钱包 / 支付 ──────────────────────────────────────────────────────
@@ -476,7 +369,8 @@ export const dailyApi = {
   draw: async (
     userId: string,
     effectiveDate: string
-  ): Promise<{ record: DailyDrawRecord; conversation_id: string }> => {
+  ): Promise<{ record: DailyDrawRecord; conversation_id: string; reading: string }> => {
+    // 今日解读在抽签时由服务端直接生成，随响应返回
     const r = await api.post(`/api/daily/${userId}/draw`, { effective_date: effectiveDate });
     return r.data;
   },
