@@ -151,9 +151,11 @@ def test_user_context_ends_with_chart_status():
     assert status(_user()) == "本命星盘：未保存（出生资料齐全，可以排盘）"
     assert status(_user(profile=_profile(birth_minute=None, birth_city=None))) \
         == "本命星盘：无法排盘（缺出生时间、出生地点）"
-    assert build_user_context(_user(profile=UserProfile())).splitlines() == [
-        "", "# <用户资料>", "尚未完善", "本命星盘：无法排盘（缺出生日期、出生时间、出生地点）"]
-    assert build_user_context(User(user_id="u", user_type=UserType.GUEST)) == ""   # 没有资料对象：和以前一样不出这一块
+    empty = ["", "# <用户资料>", "尚未完善", "本命星盘：无法排盘（缺出生日期、出生时间、出生地点）"]
+    assert build_user_context(_user(profile=UserProfile())).splitlines() == empty
+    # 连 profile 对象都没有（注册/游客时一个字段都没填）也出这一块：模型要看得见「缺什么」，
+    # 而不是从一个不存在的小节去猜
+    assert build_user_context(User(user_id="u", user_type=UserType.GUEST)).splitlines() == empty
 
 
 def test_user_api_responses_do_not_carry_chart(tmp_path, monkeypatch):

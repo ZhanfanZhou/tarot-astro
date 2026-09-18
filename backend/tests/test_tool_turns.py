@@ -287,12 +287,40 @@ def test_pending_interrupt_is_the_unanswered_call_at_the_tail():
     assert tool_turns.pending_interrupt(_conv([tool_turns.assistant_message("", [chart])])) is None
 
 
-def test_profile_result_reports_what_the_user_filled():
+_ASK = ToolCallRecord(id="p1", name="request_user_profile", args={"required_fields": ["birth_time"]})
+
+
+def test_first_profile_fill_points_at_the_fixed_block_instead_of_copying_it():
+    """本场第一次补资料：不抄值。值的正本是每轮现算的 <用户资料>，抄进对话就是两份，
+    而对话里那份不会跟着用户后来的修改走。"""
     user = User(user_id="u", user_type=UserType.REGISTERED, profile=UserProfile(
         nickname="阿岚", birth_year=1995, birth_month=3, birth_day=8, birth_hour=7, birth_minute=30))
-    assert tool_turns.profile_result(user) == {"success": True, "profile": {
-        "nickname": "阿岚", "birth_date": "1995-03-08", "birth_time": "07:30"}}   # 没填城市就不出现
-    assert tool_turns.profile_result(None)["success"] is False
+    first = tool_turns.profile_result(user, _conv([tool_turns.assistant_message("出生时间？", [_ASK])]))
+    assert first == {"success": True, "message": "用户已经填好资料，最新的一份见 <用户资料>"}
+    assert tool_turns.profile_result(None, _conv([]))["success"] is False
+
+
+def test_second_profile_fill_inserts_the_new_values_and_leaves_the_old_record_alone():
+    """本场再补一次：带值往下插一条，上一条原样留着（它是当时真实发生的事，不回头改写）。"""
+    user = User(user_id="u", user_type=UserType.REGISTERED, profile=UserProfile(
+        nickname="阿岚", birth_year=1995, birth_month=3, birth_day=8, birth_hour=7, birth_minute=30))
+    done_once = [
+        tool_turns.assistant_message("出生时间？", [_ASK]),
+        tool_turns.tool_message(_ASK, {"success": True, "message": "用户已经填好资料，最新的一份见 <用户资料>"}),
+        tool_turns.assistant_message("好。", [_ASK]),
+    ]
+    again = tool_turns.profile_result(user, _conv(done_once))
+    assert again["profile"] == {                       # 没填城市就不出现
+        "nickname": "阿岚", "birth_date": "1995-03-08", "birth_time": "07:30"}
+    assert again["message"] == "用户又补了一次资料，这是最新的一份"
+
+    # 上一次用户没填（结果是 success=False）不算补过：下一次仍是「第一次」
+    declined = [
+        tool_turns.assistant_message("出生时间？", [_ASK]),
+        tool_turns.tool_message(_ASK, tool_turns.declined_result(_ASK)),
+        tool_turns.assistant_message("好，那先聊聊。", [_ASK]),
+    ]
+    assert "profile" not in tool_turns.profile_result(user, _conv(declined))
 
 
 def test_declined_result_states_the_fact():

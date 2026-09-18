@@ -56,7 +56,8 @@ async def stream_turn(
         appended.append(Message(role=MessageRole.USER, content=user_content))
     else:
         if pending and pending.name == "request_user_profile":
-            appended = [tool_turns.tool_message(pending, tool_turns.profile_result(user))]
+            appended = [tool_turns.tool_message(
+                pending, tool_turns.profile_result(user, conversation))]
         elif pending:
             raise HTTPException(status_code=400, detail="还没有抽牌，没有可以继续的内容")
         elif conversation.messages and conversation.messages[-1].role == MessageRole.TOOL:

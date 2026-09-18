@@ -191,7 +191,11 @@ def _tool_result(msg: Message) -> List[str]:
         line = "[用户抽了牌] " + "；".join(
             f"{c['position']}：{c['card']}（{c['orientation']}）" for c in rest.pop("cards"))
     elif name == "request_user_profile":
-        line = f"[用户填写了资料] {_fields(rest.pop('profile'))}"
+        # 本场第一次补资料的结果不带值（值在 <用户资料> 里，见 tool_turns.profile_result），
+        # 转写成一句「填了」；再补一次带的是那一次的值，照写。
+        filled = rest.pop("profile", None)
+        rest.pop("message", None)
+        line = "[用户填写了资料]" + (f" {_fields(filled)}" if filled else "")
     elif name == "get_astrology_chart":
         line = f"[后台·星盘数据]\n{rest.pop('data')}"
     elif name == "read_divination_notes":

@@ -6,7 +6,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from models import Conversation, SessionType, User
+from models import Conversation, SessionType, User, UserProfile
 from services import prompt_service
 from services.astrology_service import AstrologyService
 from services.db import get_db
@@ -79,11 +79,16 @@ _GENDER_LABEL = {"male": "男", "female": "女", "other": "其他", "prefer_not_
 
 
 def build_user_context(user: Optional[User]) -> str:
-    """用户资料块：两个相位的系统提示词都带。最后是本命星盘：基本星盘或它的状态。"""
-    if not user or not user.profile:
+    """用户资料块：两个相位的系统提示词都带。最后是本命星盘：基本星盘或它的状态。
+
+    一个字段都没填过（profile 为 None，注册/游客时没填任何东西就是这样）也照样出这一块，
+    写明「尚未完善」和星盘缺哪几项：两份提示词都写着「看 <用户资料> 里有没有完整的出生
+    日期」，块整个不出现的话，模型是去一个不存在的小节里找答案。
+    """
+    if not user:
         return ""
 
-    profile = user.profile
+    profile = user.profile or UserProfile()
     context_parts = []
 
     if profile.nickname:

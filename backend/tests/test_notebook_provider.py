@@ -239,6 +239,27 @@ def test_transcript_keeps_every_kind_of_record():
     ]
 
 
+def test_transcript_records_the_first_fill_as_an_event_without_values():
+    """本场第一次补资料的结果不带值（值在 <用户资料> 里）→ 转写成「填了」这件事本身。
+
+    资料是每场都一样的固定信息，笔记不该逐场再抄一遍；这一行要的是「他在这里补了资料」。
+    """
+    from models import ToolCallRecord
+    from services import tool_turns
+    from services.notebook_service import build_transcript
+
+    ask = ToolCallRecord(id="p1", name="request_user_profile", args={"reason": "要排盘"})
+    conv = Conversation(conversation_id="p", user_id="u", session_type=SessionType.ASTROLOGY, messages=[
+        tool_turns.assistant_message("先填一下出生信息。", [ask]),
+        tool_turns.tool_message(ask, {"success": True, "message": "用户已经填好资料，最新的一份见 <用户资料>"}),
+    ])
+    assert _content_lines(build_transcript(conv)) == [
+        "占卜师：先填一下出生信息。",
+        "[占卜师请用户填写资料] 原因：要排盘",
+        "[用户填写了资料]",
+    ]
+
+
 def test_transcript_writes_unrecognized_fields_instead_of_dropping_them():
     from models import ToolCallRecord
     from services import tool_turns

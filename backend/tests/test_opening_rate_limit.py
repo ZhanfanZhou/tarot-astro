@@ -271,8 +271,11 @@ def test_draw_without_a_pending_call_is_rejected(env):
 
 
 def test_resume_after_profile_writes_the_profile_as_the_result(env, monkeypatch):
-    """填完资料 → resume：服务端从用户当前 profile 写 request_user_profile 的结果，
-    模型接着自己调 get_astrology_chart（工具描述就是这么写的），前端不替它取盘。"""
+    """填完资料 → resume：服务端把这次补资料写成 request_user_profile 的结果，
+    模型接着自己调 get_astrology_chart（工具描述就是这么写的），前端不替它取盘。
+
+    本场第一次补，结果不抄值、指向 <用户资料>（那一块每轮从用户库现算）——
+    带值的第二次见 test_profile_lifecycle_e2e。"""
     _stub_stream(monkeypatch, "好，我看看你的盘。")
     ask = ToolCallRecord(id="p1", name="request_user_profile", args={"required_fields": ["birth_time"]})
     _save("conv_profile", [Message(role=MessageRole.USER, content="看看我的本命盘"),
@@ -288,7 +291,8 @@ def test_resume_after_profile_writes_the_profile_as_the_result(env, monkeypatch)
         MessageRole.USER, MessageRole.ASSISTANT, MessageRole.TOOL, MessageRole.ASSISTANT]
     result = conv.messages[2]
     assert result.tool_call_id == "p1"
-    assert json.loads(result.content) == {"success": True, "profile": {"nickname": "阿岚"}}
+    assert json.loads(result.content) == {
+        "success": True, "message": "用户已经填好资料，最新的一份见 <用户资料>"}
 
 
 def test_resume_with_undrawn_cards_is_rejected(env):

@@ -66,12 +66,22 @@ def cards_result(cards: List[TarotCard], draw_request: DrawCardsRequest) -> dict
     } for i, c in enumerate(cards)]}
 
 
-def profile_result(user: Optional[User]) -> dict:
-    """request_user_profile 的结果：用户现在填了什么就报什么。缺的字段不出现，
-    模型接着调 get_astrology_chart，缺什么由那个工具的结果说。"""
+def profile_result(user: Optional[User], conversation: Conversation) -> dict:
+    """request_user_profile 的结果。资料填到哪里去，分两种：
+
+    · 本场第一次补 → 只说一句「填好了，看 <用户资料>」，不抄值。资料的正本是系统提示词里
+      的 <用户资料> 块，每轮从用户库现算，用户一改那里就刷新；那一块本来写着「尚未完善」，
+      现在变成真资料了。对话里再抄一份，就是同样的东西存两处，而其中一处不会跟着更新。
+    · 本场之前已经补过（历史里那一条现在是旧的）→ 带上这一次的值，往下插一条。旧的不回头
+      改写（它是当时真实发生的事），模型顺着读，最后一条就是当下的。
+
+    两种都不列缺什么：模型接着调 get_astrology_chart，缺什么由那个工具的结果说。
+    """
     p = user.profile if user else None
     if not p:
         return {"success": False, "error": "用户没有填写任何资料"}
+    if not _profile_recorded(conversation):
+        return {"success": True, "message": "用户已经填好资料，最新的一份见 <用户资料>"}
     provided = {}
     if p.nickname:
         provided["nickname"] = p.nickname
@@ -83,7 +93,18 @@ def profile_result(user: Optional[User]) -> dict:
         provided["birth_time"] = f"{p.birth_hour:02d}:{p.birth_minute:02d}"
     if p.birth_city:
         provided["birth_city"] = p.birth_city
-    return {"success": True, "profile": provided}
+    return {"success": True, "profile": provided,
+            "message": "用户又补了一次资料，这是最新的一份"}
+
+
+def _profile_recorded(conversation: Conversation) -> bool:
+    """这场对话里，用户已经补过一次资料（有一条补成了的 request_user_profile 结果）。"""
+    return any(
+        m.role == MessageRole.TOOL
+        and m.tool_name == "request_user_profile"
+        and json.loads(m.content or "{}").get("success")
+        for m in conversation.messages
+    )
 
 
 _DECLINED = {
