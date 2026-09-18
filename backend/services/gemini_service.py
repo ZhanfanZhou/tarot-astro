@@ -48,8 +48,9 @@ class GeminiService:
 
         - system_prompt 按相位拼装（context_service 是相位的唯一权威）：
             · override(daily)：调用方完整渲染，原样透传
-            · opening: opening_system.md + 入口偏好 + 关系上下文 [+ 守卫指令]
-            · reading: 塔罗/占星提示词 + 用户资料 + 策略单块（策略单可空）
+            · opening: opening_system.md + 入口偏好 + 用户资料 + 用户画像 + 关系上下文 [+ 守卫指令]
+            · reading: 塔罗/占星提示词 + 用户资料 + 用户画像 + 策略单块（策略单可空）
+          用户画像每轮无条件带上（注册用户），不再指望模型自己去翻笔记本
         - history：除末尾那条外的全部记录，逐条映射成 NeutralMsg（见 llm.base）
         - pending：末尾那条，就是本轮要发给模型的东西：
             ("user", 文本)                 用户发言
@@ -64,6 +65,7 @@ class GeminiService:
                 session_type=session_type,
                 force_brief=force_brief,
                 user_context=context_service.build_user_context(user),
+                portrait_context=context_service.build_portrait_context(user),
             )
         else:
             # 每次请求实时读文件（默认+覆盖双层），管理页改完即生效
@@ -71,6 +73,7 @@ class GeminiService:
                 session_type=session_type,
                 user_context=context_service.build_user_context(user),
                 strategy=strategy,
+                portrait_context=context_service.build_portrait_context(user),
             )
 
         history: List[Dict[str, Any]] = []

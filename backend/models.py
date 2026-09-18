@@ -33,6 +33,10 @@ class User(BaseModel):
     username: Optional[str] = None  # For registered users
     password_hash: Optional[str] = None  # For registered users
     profile: Optional[UserProfile] = None
+    # 基本星盘：1 到 12 宫的落座和宫里的星体（AstrologyService.format_chart_houses），放进 <用户资料>。
+    # 第一次调 get_astrology_chart 时存下；出生资料一改就删掉（UserService.update_user_profile）。
+    # 详细星盘不存，解读时仍由 get_astrology_chart 调接口取。不回给前端。
+    natal_chart: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
 

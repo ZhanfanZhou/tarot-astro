@@ -170,7 +170,7 @@ async def generate_journey(
     user = await UserService.get_user(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
-    entries = notebook_service.get_notebook(user_id)
+    entries = notebook_service.get_notes(user_id)
     prompt = await DailyService.build_journey_prompt(user_id, date_param, user, entries)
     if prompt is None:
         raise HTTPException(status_code=400, detail="记录不足,再积累几天")

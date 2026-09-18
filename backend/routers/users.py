@@ -9,6 +9,10 @@ from dependencies import get_current_user, ensure_owner
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
+# 本命盘（User.natal_chart）只给后端 Agent 用，不出现在返回给前端的用户信息里
+_HIDE_CHART = {"natal_chart"}
+_AUTH_HIDE_CHART = {"user": _HIDE_CHART}
+
 
 def _auth_response(user: User) -> AuthResponse:
     """统一签发 token 并隐藏密码哈希。"""
@@ -17,7 +21,7 @@ def _auth_response(user: User) -> AuthResponse:
     return AuthResponse(user=user, access_token=token)
 
 
-@router.post("/guest", response_model=AuthResponse)
+@router.post("/guest", response_model=AuthResponse, response_model_exclude=_AUTH_HIDE_CHART)
 async def create_guest(profile: UserProfile = Body(default=None)):
     """创建游客用户并签发 token"""
     try:
@@ -27,7 +31,7 @@ async def create_guest(profile: UserProfile = Body(default=None)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/register", response_model=AuthResponse)
+@router.post("/register", response_model=AuthResponse, response_model_exclude=_AUTH_HIDE_CHART)
 async def register(register_data: UserRegister):
     """用户注册并签发 token"""
     try:
@@ -39,7 +43,7 @@ async def register(register_data: UserRegister):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/login", response_model=AuthResponse)
+@router.post("/login", response_model=AuthResponse, response_model_exclude=_AUTH_HIDE_CHART)
 async def login(login_data: UserLogin):
     """用户登录并签发 token"""
     try:
@@ -54,7 +58,7 @@ async def login(login_data: UserLogin):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/{user_id}/token", response_model=AuthResponse)
+@router.post("/{user_id}/token", response_model=AuthResponse, response_model_exclude=_AUTH_HIDE_CHART)
 async def issue_migration_token(user_id: str):
     """无密码签发 token（仅供首次部署 JWT 机制时迁移旧会话）。
     user_id 为 UUID，不可枚举，安全性足够个人应用。"""
@@ -65,7 +69,7 @@ async def issue_migration_token(user_id: str):
     return _auth_response(user)
 
 
-@router.get("/{user_id}", response_model=User)
+@router.get("/{user_id}", response_model=User, response_model_exclude=_HIDE_CHART)
 async def get_user(user_id: str, current_user: User = Depends(get_current_user)):
     """获取用户信息（仅本人）"""
     ensure_owner(current_user, user_id)
@@ -73,7 +77,7 @@ async def get_user(user_id: str, current_user: User = Depends(get_current_user))
     return current_user
 
 
-@router.put("/{user_id}/profile", response_model=User)
+@router.put("/{user_id}/profile", response_model=User, response_model_exclude=_HIDE_CHART)
 async def update_profile(
     user_id: str,
     profile: UserProfile,
@@ -91,7 +95,7 @@ async def update_profile(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/convert-guest", response_model=AuthResponse)
+@router.post("/convert-guest", response_model=AuthResponse, response_model_exclude=_AUTH_HIDE_CHART)
 async def convert_guest_to_registered(
     request: ConvertGuestToRegisteredRequest,
     current_user: User = Depends(get_current_user),

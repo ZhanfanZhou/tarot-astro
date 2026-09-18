@@ -192,7 +192,7 @@ class NotebookTaskScheduler:
             # 获取对话和用户信息
             from services.conversation_service import ConversationService
             from services.storage_service import StorageService
-            from services.notebook_service import notebook_service
+            from services.notebook_service import notebook_enabled, notebook_service
             
             conversation = await ConversationService.get_conversation(task.conversation_id)
             if not conversation:
@@ -201,9 +201,13 @@ class NotebookTaskScheduler:
                 return
             
             user = await StorageService.get_user(task.user_id)
+            if not notebook_enabled(user):
+                # 笔记本只对注册用户开放；限制上线前给游客排下的任务到点也不生成
+                print(f"[TaskScheduler] 非注册用户，不写笔记本: {task.user_id}")
+                return
             
             # 调用笔记生成服务（不再检查时间条件）
-            result = await notebook_service.generate_and_save_entry(
+            result = await notebook_service.generate_and_save(
                 user_id=task.user_id,
                 conversation=conversation,
                 user=user

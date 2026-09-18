@@ -146,6 +146,7 @@
   color: #8d8799; border: 1px solid #3a3548; border-radius: 4px; padding: 0 5px;
   font-size: 11px; line-height: 1.6; white-space: nowrap;
 }
+.cs-sample { color: #cfa94a; border-color: #6b5a2a; }
 .cs-label { color: #d8d4c8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .cs-when { color: #d9b86c; }
 .admin-main button.cs-link {

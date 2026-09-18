@@ -24,7 +24,8 @@ PROMPT_REGISTRY: Dict[str, str] = {
     "opening_greeting.md": "开场幕·开场白那一轮的指令",
     "opening_force_brief.md": "开场幕·追问预算用尽那一轮（强制交单指令 + 过渡语）",
     "reading_handoff.md": "开场→解读 接场约束",
-    "notebook_system.md": "占卜笔记生成提示词",
+    "portrait_usage.md": "用户画像块怎么用（开场与解读都带）",
+    "notebook_system.md": "笔记本生成提示词（占卜笔记 + 用户画像）",
     "daily_oracle_system.md": "每日一签系统提示词",
     "daily_journey.md": "心灵奇旅提示词",
 }

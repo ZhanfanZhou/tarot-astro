@@ -232,24 +232,24 @@ mark_cards_drawn → get_conversation → set flag → save_conversation
    4. 用户填写/跳过 → 清除按钮状态
    ```
 
-4. **read_divination_notebook** - 读取占卜笔记本工具
+4. **read_divination_notes** - 翻用户以前的占卜记录（一场一条的占卜笔记）
    ```python
    参数:
-   - reason: 读取笔记本的原因说明
-   
+   - reason: 这次要翻记录的原因
+
    适用场景：
-   - 塔罗AI：回顾用户的历史占卜记录，发现重复模式，提供连续性解读
-   - 星座AI：结合用户过往的占卜经历，提供更深入的星盘分析
-   
+   - 用户提起「上次」「以前问过」，要那几场的细节
+   - 想知道以前那件事后来怎么样了、哪张牌哪个问题反复出现
+
    返回内容：
-   - 笔记本记录数量
-   - 格式化的笔记内容（包含时间、问题、抽到的牌、占卜摘要等）
-   
+   - note_count: 记录条数
+   - notes: 格式化的记录正文（每条含日期、问题与背景、抽到的牌、解读记录、用户反馈）
+
    工作机制：
-   - 调用 notebook_service.get_notebook(user_id) 获取用户笔记本
-   - 笔记本为空时返回提示信息，告知用户笔记生成规则
-   - 笔记本有内容时返回格式化的历史记录
-   - AI收到笔记内容后，可以发现用户关注的主题、重复的问题模式等
+   - 调用 notebook_service.get_notes(user_id) 取这位用户的占卜笔记
+   - 没有记录时返回一句说明（笔记在每场占卜结束、用户离开对话后生成）
+   - 游客没有笔记本，返回 success=False
+   - 「这个人是谁」由每轮注入的 <用户画像> 承担，这个工具只出以前那几场的原文
    ```
 
 **系统提示词（TAROT_SYSTEM_PROMPT）：**
@@ -373,12 +373,12 @@ continue_with_function_result → format messages with function result
 **功能：** 为每个用户管理独立的占卜笔记本，自动记录占卜历史
 
 **核心方法：**
-- `generate_summary(conversation, user)` - 使用 AI 生成对话摘要
-- `generate_and_save_entry(user_id, conversation, user)` - 直接生成并保存笔记（供定时任务调用，不检查时间条件）
+- `generate_update(conversation, portrait)` - 记忆 Agent 一次调用产出这场的笔记 + 画像补丁（JSON 不合格就重摇，最多 `NOTE_ATTEMPTS` 次）
+- `generate_and_save(user_id, conversation, user)` - 直接生成并保存这场的笔记，顺带并入画像改动（供定时任务调用，不检查时间条件）
 - `update_entry(user_id, conversation, user)` - 检查是否需要创建定时任务（不再直接生成笔记）
-- `delete_notebook(user_id)` - 删除用户笔记本
-- `migrate_notebook(old_user_id, new_user_id)` - 迁移笔记本（已废弃，因为游客转注册时 user_id 保持不变）
-- `get_notebook(user_id)` - 获取用户笔记本
+- `delete_notebook(user_id)` - 删除用户的笔记和画像（游客登出时使用）
+- `get_notes(user_id)` - 获取用户的占卜笔记
+- `get_portrait(user_id)` - 获取用户画像（`context_service.build_portrait_context` 每轮读它，注册用户的开场与解读提示词都带）
 
 #### 1.10 占卜笔记定时任务调度器 (services/notebook_task_scheduler.py)
 
@@ -409,7 +409,7 @@ continue_with_function_result → format messages with function result
 
 **数据结构：**
 ```python
-NotebookEntry:
+NoteEntry:
   - conversation_id: 对话ID
   - start_time: 对话开始时间
   - end_time: 对话结束时间（对应 conversation.updated_at）

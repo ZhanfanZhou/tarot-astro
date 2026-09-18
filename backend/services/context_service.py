@@ -8,7 +8,9 @@ from typing import List, Optional
 
 from models import Conversation, SessionType, User
 from services import prompt_service
+from services.astrology_service import AstrologyService
 from services.db import get_db
+from services.notebook_service import notebook_enabled, notebook_service as notebook
 from services.prompt_service import Part
 
 PHASE_OPENING = "opening"
@@ -77,7 +79,7 @@ _GENDER_LABEL = {"male": "男", "female": "女", "other": "其他", "prefer_not_
 
 
 def build_user_context(user: Optional[User]) -> str:
-    """用户资料块：两个相位的系统提示词都带。"""
+    """用户资料块：两个相位的系统提示词都带。最后是本命星盘：基本星盘或它的状态。"""
     if not user or not user.profile:
         return ""
 
@@ -96,12 +98,66 @@ def build_user_context(user: Optional[User]) -> str:
     if profile.birth_city:
         context_parts.append(f"出生地点：{profile.birth_city}")
 
-    if context_parts:
-        return "\n# <用户资料>\n" + "\n".join(context_parts)
     # 只报状态，不带指令：「资料不全就去调 request_user_profile」这条规则
     # tarot_system.md / astrology_system.md / opening_system.md 都已写明，
     # 代码里再写一遍就是第四份，改提示词时必然漏掉这一份。
-    return "\n# <用户资料>\n尚未完善"
+    lines = context_parts or ["尚未完善"]
+    return "\n# <用户资料>\n" + "\n".join(lines + [_chart_status(user)])
+
+
+def _chart_status(user: User) -> str:
+    """本命星盘三种情况：存了基本星盘就直接列出来 / 出生资料齐全但还没排过 / 排不了（缺哪几项）。"""
+    missing = AstrologyService.missing_birth_fields(user.profile)
+    if missing:
+        labels = "、".join(AstrologyService.BIRTH_FIELD_LABELS[f] for f in missing)
+        return f"本命星盘：无法排盘（缺{labels}）"
+    if user.natal_chart:
+        return f"本命星盘：\n{user.natal_chart}"
+    return "本命星盘：未保存（出生资料齐全，可以排盘）"
+
+
+_PORTRAIT_LABELS = {
+    "recent": "生活近况",
+    "people_and_events": "近期的人与事",
+    "understanding": "累积认识",
+    "preferences": "交流偏好",
+}
+
+_PORTRAIT_EMPTY = "还没有形成印象。"
+
+# 画像块只有注册用户有，两个相位都带
+_PORTRAIT_ONLY = "注册用户才有（游客没有笔记本）"
+
+
+def render_portrait_block(portrait: Optional[dict]) -> str:
+    """用户画像块：只列写过的项，每项带它最后一次被记下的日期。
+
+    空项一行都不占——把完整骨架（四个空字段）摆给模型看，除了占篇幅没有别的作用。
+    一项都没写过也照样出这一块，写明还没有印象：模型要知道「这个人还没有画像」是正常
+    状态，而不是从这一块的消失去猜。
+
+    「这是过去的印象、该怎么用」写在 portrait_usage.md（管理页可改），跟着这个块一起发。
+    """
+    if portrait is None:
+        return ""
+    lines = []
+    for name, label in _PORTRAIT_LABELS.items():
+        item = portrait.get(name) or {}
+        text = (item.get("text") or "").strip()
+        if not text:
+            continue
+        day = (item.get("confirmed_at") or "").split("T")[0]
+        head = f"{label}（{day} 记）" if day else label
+        # 分条写的项（人与事常是几行）另起一行，免得第二条起顶格、看不出还属于这一项
+        lines.append(f"{head}：\n{text}" if "\n" in text else f"{head}：{text}")
+    return "# <用户画像>\n" + ("\n".join(lines) if lines else _PORTRAIT_EMPTY)
+
+
+def build_portrait_context(user: Optional[User]) -> str:
+    """这位用户的画像块。游客没有笔记本，也就没有画像，整块不出现。"""
+    if not notebook_enabled(user):
+        return ""
+    return render_portrait_block(notebook.get_portrait(user.user_id))
 
 
 def render_relationship_block(meta: dict) -> str:
@@ -167,13 +223,25 @@ _BRIEF_ONLY = "开场幕交过单才有（旧会话、守卫兜底进来的没�
 _FORCED_ONLY = "追问预算用尽的那一轮才有"
 
 
+def _portrait_parts(portrait_context: str) -> List[Part]:
+    """画像块 + 它的使用须知。两个相位接法一样，接在用户资料后面。"""
+    if not portrait_context:
+        return []
+    return [
+        Part(f"\n\n{portrait_context}", label="用户画像", when=_PORTRAIT_ONLY),
+        Part("\n\n"),
+        prompt_service.prompt_part("portrait_usage.md", when=_PORTRAIT_ONLY),
+    ]
+
+
 def opening_prompt_parts(
     relationship_block: str,
     session_type: SessionType,
     force_brief: bool = False,
     user_context: str = "",
+    portrait_context: str = "",
 ) -> List[Part]:
-    """开场相位系统提示词 = opening_system.md + 入口 + 用户资料 + 关系上下文
+    """开场相位系统提示词 = opening_system.md + 入口 + 用户资料 + 用户画像 + 关系上下文
     [+ opening_force_brief.md 的 <本轮强制> 小节]。
 
     用户资料必须注入：前置占卜师要自己判断「这个问题该不该走星盘」，而星盘要出生信息。
@@ -189,6 +257,7 @@ def opening_prompt_parts(
 
     if user_context:
         parts.append(Part(f"\n{user_context}", label="用户资料"))
+    parts += _portrait_parts(portrait_context)
     if relationship_block:
         parts.append(Part(f"\n\n{relationship_block}", label="关系上下文"))
     if force_brief:
@@ -203,9 +272,10 @@ def build_opening_prompt(
     session_type: SessionType,
     force_brief: bool = False,
     user_context: str = "",
+    portrait_context: str = "",
 ) -> str:
     return prompt_service.join(opening_prompt_parts(
-        relationship_block, session_type, force_brief, user_context))
+        relationship_block, session_type, force_brief, user_context, portrait_context))
 
 
 def greeting_prompt_parts(relationship_block: str, session_type: SessionType) -> List[Part]:
@@ -274,14 +344,16 @@ def reading_prompt_parts(
     session_type: SessionType,
     user_context: str,
     strategy: Optional[dict],
+    portrait_context: str = "",
 ) -> List[Part]:
-    """解读相位系统提示词 = 塔罗/占星提示词 + 用户资料 + 起手单块 [+ 接场约束]。
+    """解读相位系统提示词 = 塔罗/占星提示词 + 用户资料 + 用户画像 + 起手单块 [+ 接场约束]。
 
     strategy 为空（存量会话 / 守卫兜底）→ 不追加接场约束，表现与开场幕上线前一致。
     """
     parts = [prompt_service.prompt_part(reading_base_prompt_name(session_type))]
     if user_context:
         parts.append(Part(f"\n\n{user_context}", label="用户资料"))
+    parts += _portrait_parts(portrait_context)
 
     brief_block = render_brief_block(strategy)
     if brief_block:
@@ -295,5 +367,7 @@ def build_reading_prompt(
     session_type: SessionType,
     user_context: str,
     strategy: Optional[dict],
+    portrait_context: str = "",
 ) -> str:
-    return prompt_service.join(reading_prompt_parts(session_type, user_context, strategy))
+    return prompt_service.join(
+        reading_prompt_parts(session_type, user_context, strategy, portrait_context))

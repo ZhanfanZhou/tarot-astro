@@ -9,7 +9,7 @@ def test_tool_specs_cover_all_five_tools():
     names = {t["name"] for t in tools.ALL_TOOL_SPECS}
     assert names == {
         "draw_tarot_cards", "get_astrology_chart",
-        "request_user_profile", "read_divination_notebook",
+        "request_user_profile", "read_divination_notes",
         "submit_reading_brief",
     }
 

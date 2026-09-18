@@ -42,7 +42,12 @@ export default function PromptComposition({ sites, current, stale, onOpen }: Pro
       <p className="models-intro">
         这个文件用在下面 {sites.length} 次模型调用里。每处按实际发送顺序列出各段：
         <strong>文件</strong>是可以在这里编辑的提示词，其中高亮的是<strong>模板变量</strong>填进去的值；
-        <strong>代码拼接</strong>由程序生成。变量和代码段填的是示例数据，只能看不能改。
+        <strong>代码拼接</strong>由程序生成。
+      </p>
+      <p className="models-warn">
+        标着<strong>示例</strong>的内容（用户资料、关系上下文、起手单、牌、笔记正文等）是固定的假数据，
+        用的是示例用户「小夏」，不是任何真实用户的资料——只为看清这一段在提示词里的位置和格式。
+        线上每次对话由代码按当时的用户和会话现填。
       </p>
       <div className="admin-toolbar">
         <button className="admin-mini" onClick={() => setExpandAll(true)}>展开全部文件</button>
@@ -106,6 +111,7 @@ function CodePart({ part }: { part: PromptPart }) {
     <li className="cs-part cs-code">
       <div className="cs-part-head">
         <span className="cs-kind">代码拼接</span>
+        <span className="cs-kind cs-sample">示例</span>
         <span className="cs-label">{part.label}</span>
         {part.when && <span className="cs-when">{part.when}</span>}
       </div>
@@ -137,7 +143,7 @@ function FileBlock({ block, current, onOpen, expandAll }: {
           <button className="cs-link" onClick={() => onOpen(block.prompt)}>{block.prompt}</button>
         )}
         {first.label && !first.variable && <span className="cs-label">{first.label}</span>}
-        {variables > 0 && <span className="cs-when">填入 {variables} 个模板变量</span>}
+        {variables > 0 && <span className="cs-when">填入 {variables} 个模板变量（示例值）</span>}
         {first.when && <span className="cs-when">{first.when}</span>}
         <button className="cs-toggle" onClick={() => setOpen(!open)}>
           {open ? '收起' : `展开 · ${chars} 字`}
@@ -151,7 +157,7 @@ function FileBlock({ block, current, onOpen, expandAll }: {
             if (i === lastIndex) text = text.replace(/\n+$/, '');
             return p.variable ? (
               <mark key={i} className="cs-var">
-                <span className="cs-var-name">{p.label}</span>
+                <span className="cs-var-name">{p.label} · 示例</span>
                 {text}
               </mark>
             ) : (

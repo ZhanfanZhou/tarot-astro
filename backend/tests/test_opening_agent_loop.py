@@ -89,7 +89,7 @@ def test_daily_tools_exclude_submit_reading_brief():
     assert "submit_reading_brief" not in names
     assert names == {
         "draw_tarot_cards", "get_astrology_chart",
-        "request_user_profile", "read_divination_notebook",
+        "request_user_profile", "read_divination_notes",
     }
 
 
@@ -252,6 +252,42 @@ def test_reading_phase_without_strategy_is_unchanged():
         strategy=None,
     )
     assert "本场起手" not in system
+
+
+def test_both_phases_inject_the_users_portrait(tmp_path, monkeypatch):
+    """画像每轮无条件进系统提示词，开场和解读都进——不再指望模型自己去翻笔记本。"""
+    from models import User, UserType
+    from services.gemini_service import GeminiService
+    from services.notebook_service import empty_portrait, merge_portrait, notebook_service
+
+    monkeypatch.setattr(notebook_service, "NOTEBOOK_DIR", tmp_path)
+    notebook_service._save_portrait("u1", merge_portrait(
+        empty_portrait(), {"preferences": "希望话说直一点"}, "2026-09-10T14:20:00"))
+    user = User(user_id="u1", user_type=UserType.REGISTERED)
+
+    for phase in ("opening", "reading"):
+        system, _history, _last = GeminiService()._build_neutral(
+            messages=[Message(role=MessageRole.USER, content="他上周冷淡了")],
+            user=user, session_type=SessionType.TAROT, phase=phase,
+        )
+        assert "# <用户画像>" in system, phase
+        assert "希望话说直一点" in system, phase
+        assert "不是这个人此刻的事实" in system, phase   # portrait_usage.md 跟着一起进来
+
+
+def test_guest_gets_no_portrait_block(tmp_path, monkeypatch):
+    """游客没有笔记本：画像块和它的使用规则整个不出现。"""
+    from models import User, UserType
+    from services.gemini_service import GeminiService
+    from services.notebook_service import notebook_service
+
+    monkeypatch.setattr(notebook_service, "NOTEBOOK_DIR", tmp_path)
+    system, _history, _last = GeminiService()._build_neutral(
+        messages=[Message(role=MessageRole.USER, content="他上周冷淡了")],
+        user=User(user_id="g1", user_type=UserType.GUEST),
+        session_type=SessionType.TAROT, phase="reading",
+    )
+    assert "用户画像" not in system
 
 
 def test_build_neutral_splits_last_user_from_history():
@@ -429,7 +465,7 @@ def test_done_is_emitted_exactly_once_when_last_iteration_is_plain_text(monkeypa
     max_iterations = svc.MAX_AGENT_ITERATIONS
 
     responses = [
-        _call("read_divination_notebook", {"reason": f"第{i}次"})
+        _call("read_divination_notes", {"reason": f"第{i}次"})
         for i in range(max_iterations - 1)
     ]
     responses.append(_text("就这样，牌已经说清楚了。"))
@@ -455,7 +491,7 @@ def test_done_is_emitted_once_when_iterations_are_exhausted(monkeypatch):
 
     svc = GeminiService()
     responses = [
-        _call("read_divination_notebook", {"reason": f"第{i}次"})
+        _call("read_divination_notes", {"reason": f"第{i}次"})
         for i in range(svc.MAX_AGENT_ITERATIONS)
     ]
     _install(monkeypatch, [responses])

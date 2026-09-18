@@ -23,7 +23,7 @@ _STORE = Path(os.getenv("TAROT_LLM_CONFIG_FILE", str(config.DATA_DIR / "llm_agen
 AGENT_LABELS = {
     "opening": "前置（开场定义占卜、交单）",
     "reading": "解读（抽牌/取盘、解读对话）",
-    "memory":  "记忆（会话结束生成笔记，只出 JSON）",
+    "memory":  "记忆（会话结束写笔记本：占卜笔记 + 用户画像，只出 JSON）",
 }
 
 # Agent → (provider 配置项, model 配置项)

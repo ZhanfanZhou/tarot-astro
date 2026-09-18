@@ -6,6 +6,13 @@ from services.notebook_service import notebook_service
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+_BIRTH_FIELDS = ("birth_year", "birth_month", "birth_day", "birth_hour", "birth_minute", "birth_city")
+
+
+def _birth_info(profile) -> tuple:
+    """排盘用到的出生资料；profile 为 None 时各项都是 None。"""
+    return tuple(getattr(profile, field, None) for field in _BIRTH_FIELDS)
+
 
 class UserService:
     """用户管理服务"""
@@ -68,6 +75,8 @@ class UserService:
         if not user:
             raise ValueError("用户不存在")
         
+        if _birth_info(user.profile) != _birth_info(profile):
+            user.natal_chart = None   # 出生资料变了，旧盘作废；下次取盘按新资料重排
         user.profile = profile
         await StorageService.save_user(user)
         return user

@@ -24,11 +24,11 @@
   - prompt_service.py 提示词统一热加载(默认 prompts/*.md + 覆盖 data/prompts/,白名单见 PROMPT_REGISTRY,原子写+bak);拼装函数产出带出处的 `Part` 再 join
   - `prompt_assembly.py` 管理页「组成」视图:用示例数据调运行时拼装函数,列出每个 prompt 用在哪些调用、前后接了什么;新增 prompt/调用点在 `_call_sites()` 登记(测试会检查)
   - `user_service.py` 用户/密码 · `auth_service.py` JWT · `rate_limit_service.py` 限流
-  - `daily_service.py` 每日一签逻辑 · `astrology_service.py` 星盘 API · `tarot_service.py` 抽牌
-  - `notebook_service.py` 占卜笔记本 · `notebook_task_scheduler.py` 定时生成笔记
+  - `daily_service.py` 每日一签逻辑 · `astrology_service.py` 星盘 API（阿卡比特宫位制；基本星盘=12 宫落座存 `User.natal_chart` 放进用户资料，改出生资料即删；详细星盘仍由工具调接口）· `tarot_service.py` 抽牌
+  - `notebook_service.py` 笔记本（仅注册用户）= 一场一条的占卜笔记 + 一人一份的用户画像；一次调用出两样，笔记追加、画像按字段打补丁（模型只回要改的字段，每项的 `confirmed_at` 由代码写）；`build_transcript` 把会话记录逐条转写，只换格式不丢内容；画像由 `context_service` 每轮注入开场/解读提示词（空画像也出这一块，写明还没有印象；使用规则在 `prompts/portrait_usage.md`）；机制与待办见 `docs/superpowers/specs/2026-09-18-notebook-design.md` · `notebook_task_scheduler.py` 定时生成
   - `wallet_service.py` / `payment_service.py` / `store_storage.py` 商城支付
 - prompts/*.md 全部系统提示词默认版(塔罗/占星/笔记本/每日×2;热加载;管理页可在线覆盖到 data/prompts/) · `data/` 运行时数据：`app.db`(用户+会话, SQLite/WAL) + 其余 `*.json`(日运/钱包/支付/笔记)
-- `scripts/migrate_json_to_sqlite.py` 一次性迁移 users/conversations JSON→app.db · `scripts/migrate_tool_turns.py` 一次性把旧格式会话改成工具轮形状（可选；不跑则旧会话只读）· `scripts/check_providers.py` 真 key 联通自检
+- `scripts/migrate_json_to_sqlite.py` 一次性迁移 users/conversations JSON→app.db · `scripts/migrate_tool_turns.py` 一次性把旧格式会话改成工具轮形状（可选；不跑则旧会话只读）· `scripts/check_providers.py` 真 key 联通自检 · `scripts/cleanup_guest_notebooks.py` 一次性删游客笔记本（默认只列出，`--apply` 才删）
 - `tests/` 单元+集成测试（mock StorageService 或指向临时 DB，不碰 `data/`）
 
 ## frontend/src/

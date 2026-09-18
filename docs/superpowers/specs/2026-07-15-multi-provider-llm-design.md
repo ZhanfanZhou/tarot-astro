@@ -1,7 +1,7 @@
 # 三 Agent 多 Provider（Gemini / DeepSeek / Kimi）· 设计文档
 
-创建：2026-07-15（原为实施计划）｜ 改写为设计文档：2026-09-15
-状态：**代码完成，真 key 验证未完成**。对应总纲缺口 7。
+创建：2026-07-15（原为实施计划）｜ 改写为设计文档：2026-09-15 ｜ 真 key 验证完成：2026-09-17
+状态：**代码完成，真 key 验证已完成**。对应总纲缺口 7。
 
 关系：[多 Agent 架构与占卜工作流重构 · 现状总纲](2026-07-14-multi-agent-redesign-design.md) 第 7 项的详细设计。
 探索期未识别，实现期临时插入，无独立评审——本文即该项的设计记录。
@@ -122,11 +122,12 @@ MEMORY_MODEL=
 
 **测试全程 mock provider，绝不发真实请求，绝不碰 `backend/data/`。**
 
-## 6. 未完成：真 key 验证
+## 6. 真 key 验证
 
-这是本项唯一的未完成部分，也是**唯一的风险所在**——真实 DeepSeek/Kimi 的 tool_call 参数格式、`tool_choice` 支持度在 mock 下完全看不见。
+真实 provider 的 tool_call 参数格式、`tool_choice` 支持度在 mock 下完全看不见，
+所以补了一道 mock 之外的实跑检查。
 
-`backend/scripts/check_providers.py` 覆盖四个 mock 看不见的点，按当前 `.env` 配置实跑：
+`backend/scripts/check_providers.py` 覆盖四个 mock 看不见的点，已于 2026-09-17 按当前 `.env` 配置实跑通过：
 
 | 检查 | 验什么 | 风险 |
 |---|---|---|

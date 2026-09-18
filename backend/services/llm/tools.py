@@ -82,21 +82,20 @@ REQUEST_USER_PROFILE = {
     },
 }
 
-READ_DIVINATION_NOTEBOOK = {
-    "name": "read_divination_notebook",
+READ_DIVINATION_NOTES = {
+    "name": "read_divination_notes",
     "description": (
-        "读取用户的占卜笔记本，获取用户之前的占卜记录。"
-        "当用户想要回顾之前的占卜、查看历史记录、或者想了解过去的占卜内容时调用此工具。"
-        "你也可以主动使用此工具，在解读时结合用户的历史占卜记录，提供更有连续性和深度的解读。"
-        "笔记本中记录了用户之前的问题、抽到的牌、以及AI生成的占卜摘要。"
-        "通过回顾历史记录，你可以发现用户关注的主题、重复出现的模式、以及问题的演变。"
+        "翻出这位用户以前每一场占卜的记录，一场一条，按时间排列，每条含占卜日期、"
+        "当时的问题与背景、抽到的牌、解读记录、用户当时的反馈。"
+        "用户提起「上次」「之前问过」，或者你想知道某件事后来怎么样了、"
+        "他以前问过什么、哪张牌哪个问题反复出现，调这个工具。"
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "reason": {
                 "type": "string",
-                "description": "读取笔记本的原因，说明为什么需要查看历史记录"
+                "description": "这次要翻记录的原因，说明你想从以前的占卜里看什么"
             }
         },
         "required": ["reason"]
@@ -143,11 +142,11 @@ SUBMIT_READING_BRIEF = {
 }
 
 ALL_TOOL_SPECS = [DRAW_TAROT_CARDS, GET_ASTROLOGY_CHART, REQUEST_USER_PROFILE,
-                  READ_DIVINATION_NOTEBOOK, SUBMIT_READING_BRIEF]
+                  READ_DIVINATION_NOTES, SUBMIT_READING_BRIEF]
 
 # 与 gemini_service._select_tools 现有语义一一对应
 DAILY_TOOL_NAMES = ["draw_tarot_cards", "get_astrology_chart",
-                    "request_user_profile", "read_divination_notebook"]
+                    "request_user_profile", "read_divination_notes"]
 # 解读相位不再持有 submit_reading_brief：起手单是「这场怎么开的」的一次性记录，
 # 不是可改写的当前状态。解读中要换牌阵/补抽，直接调 draw_tarot_cards 即可。
 READING_TOOL_NAMES = list(DAILY_TOOL_NAMES)

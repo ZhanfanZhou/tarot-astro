@@ -5,7 +5,7 @@ from models import (
     UpdateConversationTitleRequest, User,
 )
 from services.conversation_service import ConversationService
-from services.notebook_service import notebook_service
+from services.notebook_service import notebook_enabled, notebook_service
 from services.rate_limit_service import RateLimitService
 from services.storage_service import StorageService
 from services import context_service, opening_service
@@ -133,6 +133,7 @@ async def exit_conversation(
     检查是否需要创建定时任务生成占卜笔记
     
     触发条件：
+    0. 注册用户（笔记本不对游客开放）
     1. 对话内容有新增（消息数 > 1）
     2. 对话中抽过塔罗牌
     3. 对话内容有变化（end_time != updated_at）
@@ -145,6 +146,8 @@ async def exit_conversation(
         if not conversation:
             raise HTTPException(status_code=404, detail="对话不存在")
         ensure_owner(current_user, conversation.user_id)
+        if not notebook_enabled(current_user):
+            return {"message": "游客没有占卜笔记本，不生成笔记", "task_scheduled": False}
 
         # 检查是否满足生成笔记的基本条件
         # 条件1: 消息数 > 1（至少有用户消息和助手回复）
@@ -179,8 +182,8 @@ async def exit_conversation(
             print(f"  - 对话是否有变化: {result['conversation_changed']}")
             if result['existing_entry']:
                 # 尝试获取旧的 end_time 显示
-                notebook_entries = notebook_service._load_notebook(conversation.user_id)
-                for entry in notebook_entries:
+                notes = notebook_service._load_notes(conversation.user_id)
+                for entry in notes:
                     if entry.conversation_id == conversation_id:
                         print(f"    * 上次记录的 end_time: {entry.end_time}")
                         print(f"    * 当前对话 updated_at: {conversation.updated_at}")

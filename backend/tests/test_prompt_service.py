@@ -136,6 +136,26 @@ def test_daily_prompt_reads_prompt_service(ps):
     assert ps.join(parts) == "DAILY:朋友"
 
 
+def test_prompts_only_name_tools_that_exist():
+    """提示词里写的工具名必须真有其工具——默认版和当前生效版都查。
+
+    改工具名时最容易漏的就是这里：代码改完、测试全绿，模型却照着提示词去调一个不存在的
+    函数，而且两份提示词（仓库默认版 + backend/data/prompts/ 的在线覆盖版）要各改各的，
+    只改一份线上就还是旧名字。工具名的前缀就那几个动词，照着扫。
+    """
+    import re
+    from services import prompt_service
+    from services.llm import tools as toolspecs
+
+    known = {spec["name"] for spec in toolspecs.ALL_TOOL_SPECS}
+    pattern = re.compile(r"\b(?:read|draw|get|submit|request)_[a-z_]+\b")
+    for name in prompt_service.PROMPT_REGISTRY:
+        for label, text in (("默认版", prompt_service.get_default(name)),
+                            ("生效版", prompt_service.get_prompt(name))):
+            unknown = {t for t in pattern.findall(text) if t not in known}
+            assert not unknown, f"{name}（{label}）写了不存在的工具：{sorted(unknown)}"
+
+
 def test_opening_system_prompt_registered_and_loadable():
     """前置占卜师提示词已登记白名单且默认文件存在（缺失会静默降级成空 prompt，必须挡住）。"""
     from services import prompt_service

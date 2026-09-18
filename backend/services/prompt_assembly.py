@@ -20,7 +20,7 @@ from services.daily_service import daily_oracle_prompt_parts, journey_prompt_par
 from services.gemini_service import FORCED_BRIEF_TOOL, tool_names
 from services.llm import agent_config, catalog
 from services.llm import tools as toolspecs
-from services.notebook_service import notebook_prompt_parts
+from services.notebook_service import empty_portrait, merge_portrait, notebook_prompt_parts
 from services.prompt_service import Part
 
 _SYSTEM = "系统提示词（system），由下面几段按顺序拼成"
@@ -58,6 +58,17 @@ def _daily_record(today: date, days_ago: int, card: TarotCard, verdict=None, not
         conversation_id=f"sample-daily-{days_ago}",
         feedback=DailyFeedback(verdict=verdict, note=note),
     )
+
+
+def _sample_portrait() -> dict:
+    """一份记过几场的画像：记忆 Agent 每次都会先看到它，再决定这场要改哪几个字段。"""
+    return merge_portrait(empty_portrait(), {
+        "recent": "在上海做设计，和男友异地一年多，最近在看杭州的工作机会。",
+        "people_and_events": "- 男友在杭州，聊过同城的打算\n- 现在的团队年后有调整",
+        "understanding": "做决定前习惯把每种可能都想一遍，问的常是「该不该」而不是「会怎样」。"
+                         "说到家里人时会绕开。认可具体的下一步，不喜欢被安慰。",
+        "preferences": "希望话说直一点，别兜圈子。不想被劝。",
+    }, "2026-09-10T14:20:00")
 
 
 def _sample_conversation() -> Conversation:
@@ -110,6 +121,7 @@ def _site(title, agent, delivery, parts: List[Part], *, tools=(), force_when="",
 def _call_sites() -> List[dict]:
     today = date.today()
     user_context = context_service.build_user_context(_USER)
+    portrait_context = context_service.render_portrait_block(_sample_portrait())
     relationship = context_service.render_relationship_block(_RELATIONSHIP)
 
     own = _daily_record(today, 0, _card(17))
@@ -119,13 +131,14 @@ def _call_sites() -> List[dict]:
         _daily_record(today, 1, _card(41)),
     ]
     daily_parts = daily_oracle_prompt_parts(_USER, own, history, today)
-    notebook_entries = [{"conversation_id": "sample-daily-1", "summary": "聊到想给自己放个假，[圣杯六（正位）]像在提醒她回头看看老朋友。"}]
+    notes = [{"conversation_id": "sample-daily-1", "summary": "聊到想给自己放个假，[圣杯六（正位）]像在提醒她回头看看老朋友。"}]
 
     reading_tools = tool_names(SessionType.TAROT, opening=False, has_override=False)
     return [
         _site("开场 · 每一轮对话", "opening", _SYSTEM,
               context_service.opening_prompt_parts(relationship, SessionType.TAROT,
-                                                   force_brief=True, user_context=user_context),
+                                                   force_brief=True, user_context=user_context,
+                                                   portrait_context=portrait_context),
               tools=tool_names(SessionType.TAROT, opening=True, has_override=False),
               force_when="追问预算用尽的那一轮", after=_HISTORY),
         _site("开场白（创建会话时）", "opening", _SINGLE,
@@ -136,18 +149,20 @@ def _call_sites() -> List[dict]:
               [Part(context_service.forced_brief_handoff_line(),
                     prompt="opening_force_brief.md", label="<过渡语> 小节")]),
         _site("塔罗解读 · 每一轮对话", "reading", _SYSTEM,
-              context_service.reading_prompt_parts(SessionType.TAROT, user_context, _TAROT_BRIEF),
+              context_service.reading_prompt_parts(SessionType.TAROT, user_context, _TAROT_BRIEF,
+                                                   portrait_context),
               tools=reading_tools, after=_HISTORY),
         _site("占星解读 · 每一轮对话", "reading", _SYSTEM,
-              context_service.reading_prompt_parts(SessionType.ASTROLOGY, user_context, _ASTRO_BRIEF),
+              context_service.reading_prompt_parts(SessionType.ASTROLOGY, user_context, _ASTRO_BRIEF,
+                                                   portrait_context),
               tools=reading_tools, after=_HISTORY),
         _site("每日一签 · 抽签当场生成解读", "reading", _SINGLE, daily_parts),
         _site("每日一签 · 之后接着聊", "reading", _SYSTEM, daily_parts,
               tools=tool_names(SessionType.DAILY, opening=False, has_override=True), after=_HISTORY),
         _site("心灵奇旅", "reading", _SINGLE,
-              journey_prompt_parts(_USER, history + [own], notebook_entries)),
-        _site("占卜笔记（会话结束后生成，要求输出 JSON）", "memory", _SINGLE,
-              notebook_prompt_parts(_sample_conversation())),
+              journey_prompt_parts(_USER, history + [own], notes)),
+        _site("笔记本（会话结束后生成这场的占卜笔记 + 用户画像的改动，要求输出 JSON）", "memory", _SINGLE,
+              notebook_prompt_parts(_sample_conversation(), _sample_portrait())),
     ]
 
 

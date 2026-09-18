@@ -1,6 +1,6 @@
 import httpx
 import json
-from typing import Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 from config import ASTROLOGY_API_URL, ASTROLOGY_ACCESS_TOKEN
 
@@ -41,6 +41,20 @@ class AstrologyService:
     # 小行星ID列表（暂时不使用，API的小行星格式比较特殊）
     ASTEROIDS = []
     
+    BIRTH_FIELD_LABELS = {"birth_date": "出生日期", "birth_time": "出生时间", "birth_city": "出生地点"}
+
+    @staticmethod
+    def missing_birth_fields(profile) -> List[str]:
+        """排盘还缺哪几项（birth_date / birth_time / birth_city）。profile 可为 None。"""
+        missing = []
+        if not (profile and profile.birth_year and profile.birth_month and profile.birth_day):
+            missing.append("birth_date")
+        if not profile or profile.birth_hour is None or profile.birth_minute is None:
+            missing.append("birth_time")
+        if not (profile and profile.birth_city):
+            missing.append("birth_city")
+        return missing
+
     @staticmethod
     def get_city_coordinates(city: str) -> Optional[Dict[str, str]]:
         """获取城市经纬度"""
@@ -84,7 +98,7 @@ class AstrologyService:
             "planets": AstrologyService.STANDARD_PLANETS,
             "planet_xs": AstrologyService.ASTEROIDS,  # 小行星
             "virtual": AstrologyService.VIRTUAL_POINTS,  # 虚星（南交点等）
-            "h_sys": "A",  # 使用 阿卡比特 宫位系统
+            "h_sys": "B",  # 阿卡比特宫位制
             "longitude": coordinates["longitude"],
             "latitude": coordinates["latitude"],
             "tz": coordinates["tz"],
@@ -244,6 +258,26 @@ class AstrologyService:
                 )
         
         return "\n".join(text_parts)
+
+    # 星盘文字的第一行：说明这种写法。宫的星座和宫里星体自己的星座常常不同，不写明会被读成同一个。
+    HOUSES_LEGEND = "第几宫：这一宫落在的星座｜落在这一宫里的星体（括号里是星体自己所在的星座，可能和这一宫的星座不同）"
+
+    @staticmethod
+    def format_chart_houses(chart_data: Dict[str, Any]) -> str:
+        """本命盘整理成 1 到 12 宫各一行：这一宫落在的星座，和落在这一宫里的星体（带它自己的星座）。
+
+        这是基本星盘：存在 User.natal_chart，放进 <用户资料>。不写度数、不写出生信息。
+        详细星盘仍由 get_astrology_chart 调接口取（format_chart_data_to_text），两者互不替代。
+        """
+        lines = [AstrologyService.HOUSES_LEGEND]
+        for house in sorted(chart_data["house"], key=lambda h: h["house_id"]):
+            line = f"第{house['house_id']}宫：{house['sign']['sign_chinese']}座"
+            bodies = [f"{p['planet_chinese']}（{p['sign']['sign_chinese']}座）"
+                      for p in chart_data["planet"] if p["house_id"] == house["house_id"]]
+            if bodies:
+                line += "｜" + "、".join(bodies)
+            lines.append(line)
+        return "\n".join(lines)
     
     @staticmethod
     def get_current_zodiac_sign() -> str:

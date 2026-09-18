@@ -132,13 +132,13 @@ def daily_oracle_prompt_parts(
 
 
 def journey_prompt_parts(
-    user: Optional[User], recent: List[DailyDrawRecord], notebook_entries: List[dict],
+    user: Optional[User], recent: List[DailyDrawRecord], notes: List[dict],
 ) -> List[Part]:
     """心灵奇旅提示词：recent 升序且非空；只摘这些日子对应对话的笔记。"""
     conv_ids = {r.conversation_id for r in recent}
     nb_lines = [
         f"- {e.get('summary')}"
-        for e in notebook_entries
+        for e in notes
         if e.get("conversation_id") in conv_ids and e.get("summary")
     ]
     return prompt_service.render_prompt_parts("daily_journey.md", {
@@ -246,9 +246,9 @@ class DailyService:
     @staticmethod
     async def build_journey_prompt(
         user_id: str, anchor_date: str,
-        user: Optional[User], notebook_entries: List[dict],
+        user: Optional[User], notes: List[dict],
     ) -> Optional[str]:
-        """心灵奇旅:近 14 天全量记录 + 对应 daily 对话的 notebook 笔记。
+        """心灵奇旅:近 14 天全量记录 + 对应 daily 对话的占卜笔记。
         素材 < JOURNEY_MIN_RECORDS 时返回 None。"""
         records = await DailyService.get_user_records(user_id)
         anchor = date.fromisoformat(anchor_date)
@@ -259,4 +259,4 @@ class DailyService:
         ]
         if len(recent) < JOURNEY_MIN_RECORDS:
             return None
-        return prompt_service.join(journey_prompt_parts(user, recent, notebook_entries))
+        return prompt_service.join(journey_prompt_parts(user, recent, notes))

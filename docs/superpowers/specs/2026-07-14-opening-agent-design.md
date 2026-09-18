@@ -77,7 +77,7 @@ reading 相位:
   用户消息 → 解读 Agent（READING provider）
              提示词: tarot/astrology_system.md + <用户资料> + <本场起手> + reading_handoff.md
              工具:   draw_tarot_cards / get_astrology_chart /
-                     request_user_profile / read_divination_notebook
+                     request_user_profile / read_divination_notes
 ```
 
 要点：

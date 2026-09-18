@@ -230,6 +230,65 @@ def test_render_brief_block_skips_missing_fields():
     assert "None" not in block
 
 
+# ---------- 用户画像块 ----------
+
+def _portrait(**fields):
+    from services.notebook_service import empty_portrait, merge_portrait
+
+    return merge_portrait(empty_portrait(), fields, "2026-09-10T14:20:00")
+
+
+def test_render_portrait_block_lists_only_the_items_that_have_been_written():
+    """写过的项带日期列出来；空项一行都不占——空骨架对模型没有用处，只占篇幅。"""
+    from services import context_service
+
+    block = context_service.render_portrait_block(_portrait(preferences="希望话说直一点。"))
+    assert block == "# <用户画像>\n交流偏好（2026-09-10 记）：希望话说直一点。"
+    assert "生活近况" not in block
+    assert "confirmed_at" not in block and "text" not in block   # 不是把 JSON 倒进去
+
+
+def test_render_portrait_block_puts_multiline_items_on_their_own_lines():
+    """人与事常是分条写的：第二条起顶格就看不出还属于这一项。"""
+    from services import context_service
+
+    block = context_service.render_portrait_block(
+        _portrait(people_and_events="- 男友在杭州\n- 团队年后有调整"))
+    assert "近期的人与事（2026-09-10 记）：\n- 男友在杭州\n- 团队年后有调整" in block
+
+
+def test_render_portrait_block_empty_portrait_says_so_in_one_line():
+    """一项都没写过也照样出这一块：模型要知道「还没有画像」是正常状态，不是这块没渲染。"""
+    from services.notebook_service import empty_portrait
+    from services import context_service
+
+    block = context_service.render_portrait_block(empty_portrait())
+    assert block.splitlines() == ["# <用户画像>", "还没有形成印象。"]
+
+
+def test_build_portrait_context_guest_has_no_portrait():
+    """游客没有笔记本，画像块整个不出现（连同它的使用须知）。"""
+    from models import User, UserType
+    from services import context_service
+
+    assert context_service.build_portrait_context(
+        User(user_id="g", user_type=UserType.GUEST)) == ""
+    assert context_service.build_portrait_context(None) == ""
+
+
+def test_build_portrait_context_reads_the_saved_portrait(tmp_path, monkeypatch):
+    from models import User, UserType
+    from services import context_service
+    from services.notebook_service import notebook_service
+
+    monkeypatch.setattr(notebook_service, "NOTEBOOK_DIR", tmp_path)
+    notebook_service._save_portrait("u1", _portrait(recent="在上海做设计"))
+
+    block = context_service.build_portrait_context(
+        User(user_id="u1", user_type=UserType.REGISTERED))
+    assert "生活近况（2026-09-10 记）：在上海做设计" in block
+
+
 # ---------- 提示词拼装 ----------
 
 def test_build_opening_prompt_contains_prompt_relationship_and_entry():
@@ -322,3 +381,42 @@ def test_build_reading_prompt_legacy_conversation_has_no_handoff_constraints(bas
     assert "不要再欢迎用户" not in prompt
     assert "submit_reading_brief" not in prompt
     assert prompt == "BASE:astrology_system.md\n\n<用户资料>昵称：小夏"
+
+
+def test_both_phases_carry_the_portrait_and_its_usage_rules(base_prompt):
+    """画像每轮无条件注入，开场和解读都有：接在用户资料后面，后面跟它的使用须知。"""
+    from services import context_service
+
+    portrait = context_service.render_portrait_block(_portrait(recent="在上海做设计"))
+    prompts = [
+        context_service.build_opening_prompt(
+            relationship_block="<关系上下文>\n第 4 次", session_type=SessionType.TAROT,
+            user_context="\n# <用户资料>\n昵称：小夏", portrait_context=portrait,
+        ),
+        context_service.build_reading_prompt(
+            session_type=SessionType.TAROT, user_context="\n# <用户资料>\n昵称：小夏",
+            strategy=None, portrait_context=portrait,
+        ),
+    ]
+    for prompt in prompts:
+        assert prompt.index("# <用户资料>") < prompt.index("# <用户画像>")
+        usage = prompt.split("# <用户画像>", 1)[1]
+        assert "在上海做设计" in usage
+        assert "不是这个人此刻的事实" in usage      # portrait_usage.md：这些是过去的印象
+        assert "不要拿它给人下定义" in usage
+
+
+def test_no_portrait_leaves_both_phases_byte_identical(base_prompt):
+    """游客（没有画像块）拼出来的提示词和加这块之前一字不差。"""
+    from services import context_service
+
+    assert context_service.build_reading_prompt(
+        session_type=SessionType.TAROT, user_context="<用户资料>昵称：小夏",
+        strategy=None, portrait_context="",
+    ) == "BASE:tarot_system.md\n\n<用户资料>昵称：小夏"
+
+    opening = context_service.build_opening_prompt(
+        relationship_block="<关系上下文>\n首次来访", session_type=SessionType.TAROT,
+        user_context="\n# <用户资料>\n昵称：小夏", portrait_context="",
+    )
+    assert "用户画像" not in opening and "画像怎么用" not in opening

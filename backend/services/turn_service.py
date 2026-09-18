@@ -18,8 +18,9 @@ from services.astrology_service import AstrologyService
 from services.conversation_service import ConversationService
 from services.daily_service import DailyService
 from services.gemini_service import GeminiService
-from services.notebook_service import notebook_service
+from services.notebook_service import notebook_enabled, notebook_service
 from services.rate_limit_service import RateLimitService
+from services.storage_service import StorageService
 from services.tarot_service import TarotService
 from dependencies import ensure_owner
 
@@ -80,8 +81,8 @@ async def stream_turn(
             return {"success": True}
         if func_name == "get_astrology_chart":
             return await _fetch_chart(user)
-        if func_name == "read_divination_notebook":
-            return _read_notebook(conversation.user_id)
+        if func_name == "read_divination_notes":
+            return _read_notes(user)
         return {"success": False, "error": f"未知的函数: {func_name}"}
 
     # daily 对话：每次请求实时渲染日运系统提示词（模板热加载 + 近日旅程始终最新）
@@ -137,17 +138,14 @@ async def record_draw(
 
 async def _fetch_chart(user: Optional[User]) -> dict:
     """get_astrology_chart：只报事实。「失败了就去调 request_user_profile」是常驻规则，
-    写在工具描述里（llm/tools.py），不在结果里重发。"""
+    写在工具描述里（llm/tools.py），不在结果里重发。
+
+    每次都调接口取详细星盘。用户还没存基本星盘（12 宫落座，放进 <用户资料>）就顺手存下；
+    出生资料一改，存的会被删掉（UserService.update_user_profile），下次取盘再存新的。"""
     if not user or not user.profile:
         return {"success": False, "error": "用户尚未提供任何个人信息"}
     p = user.profile
-    missing = []
-    if not (p.birth_year and p.birth_month and p.birth_day):
-        missing.append("birth_date")
-    if p.birth_hour is None or p.birth_minute is None:
-        missing.append("birth_time")
-    if not p.birth_city:
-        missing.append("birth_city")
+    missing = AstrologyService.missing_birth_fields(p)
     if missing:
         # 缺哪几项是这次调用才知道的事实，模型拿它填 request_user_profile 的 required_fields
         return {"success": False, "error": "用户的出生信息不完整", "missing_fields": missing}
@@ -162,28 +160,40 @@ async def _fetch_chart(user: Optional[User]) -> dict:
         "birth_year": p.birth_year, "birth_month": p.birth_month, "birth_day": p.birth_day,
         "birth_hour": p.birth_hour, "birth_minute": p.birth_minute, "city": p.birth_city,
     })
+    if not user.natal_chart:
+        await _save_basic_chart(user, AstrologyService.format_chart_houses(chart_data))
     return {"success": True, "data": chart_text}
 
 
-def _read_notebook(user_id: str) -> dict:
-    entries = notebook_service.get_notebook(user_id)
+async def _save_basic_chart(user: User, houses_text: str) -> None:
+    """存到最新的用户记录上，不拿请求开头读到的旧对象整存，免得盖掉这期间写进去的资料。"""
+    latest = await StorageService.get_user(user.user_id)
+    latest.natal_chart = houses_text
+    await StorageService.save_user(latest)
+    user.natal_chart = houses_text
+
+
+def _read_notes(user: User) -> dict:
+    if not notebook_enabled(user):
+        return {"success": False, "error": "占卜记录只对注册用户开放，这位用户是游客，没有记录"}
+    entries = notebook_service.get_notes(user.user_id)
     if not entries:
         return {
-            "success": True, "notebook_count": 0,
-            "message": "笔记本中暂时还没有记录。当你完成占卜并退出对话后，系统会自动生成占卜记录保存在笔记本中。",
+            "success": True, "note_count": 0,
+            "message": "这位用户还没有以前的占卜记录。每场占卜结束、用户离开对话后，系统会为那一场写下一条。",
         }
-    text = f"用户的占卜笔记本（共 {len(entries)} 条记录）：\n\n"
+    text = f"这位用户以前的占卜记录（共 {len(entries)} 条）：\n\n"
     for i, entry in enumerate(entries, 1):
         try:
             start_time = datetime.fromisoformat(entry["start_time"]).strftime("%Y年%m月%d日")
         except (KeyError, ValueError, TypeError):
             start_time = entry.get("start_time", "未知时间")
         cards = "、".join(entry.get("cards_drawn") or []) or "无"
-        text += (
-            f"【记录 {i}】\n时间：{start_time}\n问题：{entry.get('question', '无')}\n"
-            f"抽到的牌：{cards}\n记录：{entry.get('summary', '无')}\n"
-        )
+        text += f"【记录 {i}】\n时间：{start_time}\n"
+        if entry.get("question"):
+            text += f"问题与背景：{entry['question']}\n"
+        text += f"抽到的牌：{cards}\n记录：{entry.get('summary', '无')}\n"
         if entry.get("user_feedback"):
             text += f"用户反馈：{entry['user_feedback']}\n"
         text += "\n"
-    return {"success": True, "notebook_count": len(entries), "notebook_content": text}
+    return {"success": True, "note_count": len(entries), "notes": text}
