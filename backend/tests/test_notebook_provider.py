@@ -256,7 +256,7 @@ def test_transcript_records_the_first_fill_as_an_event_without_values():
     assert _content_lines(build_transcript(conv)) == [
         "占卜师：先填一下出生信息。",
         "[占卜师请用户填写资料] 原因：要排盘",
-        "[用户填写了资料]",
+        "[用户填写了资料] 说明：用户已经填好资料，最新的一份见 <用户资料>",
     ]
 
 

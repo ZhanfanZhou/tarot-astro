@@ -137,7 +137,7 @@ _LABELS = {
     "question": "问题", "context": "背景", "route": "起手", "spread_type": "牌阵",
     "positions": "位置", "reason": "原因", "required_fields": "需要的资料",
     "missing_fields": "缺", "nickname": "昵称", "gender": "性别", "birth_date": "出生日期",
-    "birth_time": "出生时间", "birth_city": "出生地",
+    "birth_time": "出生时间", "birth_city": "出生地", "message": "说明",
 }
 _FIELD_LISTS = {"required_fields", "missing_fields"}   # 值是资料字段名，一并换成中文
 
@@ -192,9 +192,8 @@ def _tool_result(msg: Message) -> List[str]:
             f"{c['position']}：{c['card']}（{c['orientation']}）" for c in rest.pop("cards"))
     elif name == "request_user_profile":
         # 本场第一次补资料的结果不带值（值在 <用户资料> 里，见 tool_turns.profile_result），
-        # 转写成一句「填了」；再补一次带的是那一次的值，照写。
+        # 只剩 message 那一句；再补一次带的是那一次的值。两样都照写，由下面的 rest 兜住。
         filled = rest.pop("profile", None)
-        rest.pop("message", None)
         line = "[用户填写了资料]" + (f" {_fields(filled)}" if filled else "")
     elif name == "get_astrology_chart":
         line = f"[后台·星盘数据]\n{rest.pop('data')}"
