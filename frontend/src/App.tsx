@@ -36,6 +36,9 @@ function pendingInterrupt(conv: Conversation): ToolCallRecord | undefined {
   return call && INTERRUPT_TOOLS.has(call.name) ? call : undefined;
 }
 
+/** 有开场幕的会话类型：建完会话要去取一句开场白。和后端 context_service.OPENING_PHASE_SESSIONS 同一份名单。 */
+const OPENING_PHASE_SESSIONS: SessionType[] = ['tarot' as SessionType, 'astrology' as SessionType];
+
 const App: React.FC = () => {
   const { user, setUser, setAuth, logout } = useAuthStore();
   const {
@@ -211,19 +214,28 @@ const App: React.FC = () => {
     isCreatingSessionRef.current = true;
     setCreatingSessionType(sessionType);
 
+    let newConv: Conversation;
     try {
-      // 塔罗/占星的开场白由后端在建会话时生成，随响应一起回来（会阻塞几秒）——
-      // 前端不需要再发一条消息去把占卜师叫醒。
-      const newConv = await conversationApi.create(user.user_id, sessionType);
+      newConv = await conversationApi.create(user.user_id, sessionType);
       addConversation(newConv);
       setCurrentConversation(newConv);
     } catch (error: any) {
       console.error('创建对话失败:', error);
       toast.error(error?.response?.data?.detail || '创建对话失败，请重试');
+      return;
     } finally {
       setCreatingSessionType(null);
       isCreatingSessionRef.current = false;
     }
+
+    // 建会话是一次很快的写库；真正要等的是开场白那次 LLM 调用。这时用户已经在对话里了，
+    // 于是这段等待和等一轮回复走同一条路：思考气泡 → 正文逐块出来。
+    if (!OPENING_PHASE_SESSIONS.includes(sessionType)) return;
+    await runTurn(
+      newConv,
+      (onChunk) => conversationApi.greeting(newConv.conversation_id, onChunk),
+      '占卜师暂时联系不上，请重试'
+    );
   };
 
   // 处理对话退出（保存笔记）

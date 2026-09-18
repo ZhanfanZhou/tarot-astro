@@ -8,7 +8,7 @@ from services.conversation_service import ConversationService
 from services.notebook_service import notebook_enabled, notebook_service
 from services.rate_limit_service import RateLimitService
 from services.storage_service import StorageService
-from services import context_service, opening_service
+from services import context_service, opening_service, turn_service
 from dependencies import get_current_user, ensure_owner
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
@@ -19,42 +19,60 @@ async def create_conversation(
     request: CreateConversationRequest,
     current_user: User = Depends(get_current_user),
 ):
-    """创建新对话（归属当前登录身份）。
+    """创建新对话（归属当前登录身份）。只建，不说话。
 
-    有开场幕的会话类型（塔罗/占星）在这里就把开场白生成好、写成第一条消息随响应返回。
-    开场白是会话的一部分，由「创建」这个动作产生——客户端不需要为了让占卜师先开口
-    而反过来发一条消息。因此这个接口会阻塞在一次 LLM 调用上（OPENING_GREETING_
-    TIMEOUT_SECONDS 封顶）。
+    开场白是一次真实 LLM 调用，几秒起步（思考模型更久），所以不压在这个接口里——
+    它一返回，前端就能进对话页，再单独去取开场白（见 /{id}/greeting）。等待因此
+    发生在对话里、和等一轮回复长得一模一样，而不是卡在首页那个按钮上。
     """
     try:
-        conversation = await ConversationService.create_conversation(
+        return await ConversationService.create_conversation(
             user_id=current_user.user_id,
             session_type=request.session_type
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    if request.session_type not in context_service.OPENING_PHASE_SESSIONS:
-        return conversation
 
-    # 开场白是一次真实 LLM 调用，和其他触发模型的路径一样先扣额度
+@router.post("/{conversation_id}/greeting")
+async def stream_greeting(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """开场白：建完会话由前端单独取，SSE 形状与 /message 一致。
+
+    生成在进流之前做完——provider 挂了还能以 503 返回让前端提示重试；一旦进了流，
+    就只剩正文可推、没法再表达失败。开场白也是一次真实 LLM 调用，额度在这里扣。
+    """
+    conversation = await ConversationService.get_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    ensure_owner(current_user, conversation.user_id)
+
+    if conversation.session_type not in context_service.OPENING_PHASE_SESSIONS:
+        raise HTTPException(status_code=400, detail="这类对话没有开场白")
+    if conversation.messages:
+        # 已经有开场白、或者已经聊起来了：再生成一次就是凭空多一句台词
+        raise HTTPException(status_code=409, detail="这场对话已经开始了")
+
     await RateLimitService.check_and_consume(current_user)
 
     try:
         greeting = await opening_service.build_greeting(
             user=current_user,
             conversation=conversation,
-            session_type=request.session_type,
+            session_type=conversation.session_type,
         )
     except opening_service.GreetingUnavailable as e:
-        # 不发保底文案：让前端拿到明确失败并提示重试，而不是开一场注定在下一轮
-        # 撞同一个 provider 的会话。空会话留在库里无害（消息数 0，不计入来访）。
+        # 不发保底文案：让前端拿到明确失败并提示重试。空会话留在库里无害（消息数 0，
+        # 不计入来访），用户想接着说话也行——占卜师从他那句话接起。
         print(f"[Conversations] ⚠️ {e}")
         raise HTTPException(status_code=503, detail="占卜师暂时联系不上，请重试")
 
-    return await ConversationService.add_message(
-        conversation.conversation_id, MessageRole.ASSISTANT, greeting
+    await ConversationService.add_message(
+        conversation_id, MessageRole.ASSISTANT, greeting
     )
+    return turn_service.stream_text(greeting)
 
 
 @router.get("/{conversation_id}", response_model=Conversation)

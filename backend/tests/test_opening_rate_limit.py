@@ -1,13 +1,14 @@
 """开场白也是一次真实 LLM 调用 —— 必须计入每日额度。
 
-开场白在 POST /api/conversations 里生成，所以计费也在那里。这个接口曾经完全不限流
-（那时开场白还挂在 /message 的空 content 分支上），现在它会打 LLM，必须扣额度，
-否则「反复建会话」就是无限白嫖。
+开场白在 POST /api/conversations/{id}/greeting 里生成（建会话本身不打 LLM，只写库，
+好让前端立刻进对话页、把等待放在对话里），所以计费也跟着挪到了那里。少了这道，
+「反复取开场白」就是无限白嫖。
 
-锁住三条：
-  1. 建塔罗/占星会话会消耗一次额度，且开场白落成第一条消息
-  2. 额度耗尽时建会话被 429 拒绝，且一个 LLM 调用都不发出去
-  3. 无开场幕的会话类型（每日一签/闲聊）不打 LLM、不扣额度
+锁住四条：
+  1. 建会话不打 LLM、不扣额度；开场白接口才打、才扣，且落成第一条消息
+  2. 额度耗尽时开场白被 429 拒绝，且一个 LLM 调用都不发出去
+  3. 无开场幕的会话类型（每日一签/闲聊）没有开场白可取
+  4. 同一场会话的开场白只生成一次，第二次拒绝（不重复扣费、不多一句台词）
 """
 import asyncio
 import json
@@ -98,49 +99,100 @@ def _usage(env_client) -> int:
 # 1. 开场白计费
 # ---------------------------------------------------------------------------
 
+def _sse_content(resp) -> str:
+    """把 SSE 流里的正文块拼回整段（和前端 streamTurn 的取法一致）。"""
+    out = []
+    for line in resp.text.splitlines():
+        if not line.startswith("data: "):
+            continue
+        payload = line[6:]
+        if payload == "[DONE]":
+            break
+        out.append(json.loads(payload)["content"])
+    return "".join(out)
+
+
+def _create(env, session_type) -> str:
+    resp = env.post("/api/conversations", json={"session_type": session_type})
+    assert resp.status_code == 200
+    return resp.json()["conversation_id"]
+
+
 @pytest.mark.parametrize("session_type", [SessionType.TAROT, SessionType.ASTROLOGY])
-def test_create_conversation_generates_greeting_and_consumes_one_quota(
-    env, monkeypatch, session_type
-):
+def test_create_is_free_and_silent(env, monkeypatch, session_type):
+    """建会话只写库：不打 LLM、不扣额度、一句话都不说。
+
+    开场白挪走之后，这个接口才能立刻返回——用户进了对话页再看着占卜师开口。
+    """
     calls = _stub_greeting_llm(monkeypatch)
 
     resp = env.post("/api/conversations", json={"session_type": session_type.value})
 
     assert resp.status_code == 200
-    body = resp.json()
-    # 开场白随创建响应一起回来，客户端不必再发一条消息去换它
-    assert [m["role"] for m in body["messages"]] == ["assistant"]
-    assert body["messages"][0]["content"] == "坐吧，阿岚。今天想聊些什么？"
+    assert resp.json()["messages"] == []
+    assert calls == []
+    assert _usage(env) == 0
+
+
+@pytest.mark.parametrize("session_type", [SessionType.TAROT, SessionType.ASTROLOGY])
+def test_greeting_streams_the_line_saves_it_and_consumes_one_quota(
+    env, monkeypatch, session_type
+):
+    calls = _stub_greeting_llm(monkeypatch)
+    conv_id = _create(env, session_type.value)
+
+    resp = env.post(f"/api/conversations/{conv_id}/greeting")
+
+    assert resp.status_code == 200
+    # 和一轮普通回复同一个流形状：正文分块推，末尾 [DONE]
+    assert _sse_content(resp) == "坐吧，阿岚。今天想聊些什么？"
+    assert resp.text.rstrip().endswith("data: [DONE]")
     assert len(calls) == 1                 # 确实发生了 LLM 调用
     assert _usage(env) == 1                # 且被计费
 
+    # 落库：开场白就是这场会话的第一条消息
+    body = env.get(f"/api/conversations/{conv_id}").json()
+    assert [m["role"] for m in body["messages"]] == ["assistant"]
+    assert body["messages"][0]["content"] == "坐吧，阿岚。今天想聊些什么？"
 
-def test_create_conversation_rejected_when_quota_exhausted_without_llm_call(env, monkeypatch):
+
+def test_greeting_rejected_when_quota_exhausted_without_llm_call(env, monkeypatch):
     """额度耗尽 → 429，且一次 LLM 调用都不发（这才是堵住白嫖的关键）。"""
     import services.rate_limit_service as rl_mod
 
     monkeypatch.setattr(rl_mod, "USER_DAILY_MESSAGE_LIMIT", 1)
     calls = _stub_greeting_llm(monkeypatch)
 
-    first = env.post("/api/conversations", json={"session_type": "tarot"})
+    first = env.post(f"/api/conversations/{_create(env, 'tarot')}/greeting")
     assert first.status_code == 200
     assert len(calls) == 1
 
-    second = env.post("/api/conversations", json={"session_type": "tarot"})
+    second = env.post(f"/api/conversations/{_create(env, 'tarot')}/greeting")
     assert second.status_code == 429
     assert len(calls) == 1                 # 没有第二次 LLM 调用
     assert _usage(env) == 1                # 被拒的请求不计费
 
 
-@pytest.mark.parametrize("session_type", ["daily", "chat"])
-def test_create_conversation_without_opening_phase_is_free(env, monkeypatch, session_type):
-    """每日一签/闲聊没有开场幕：不打 LLM，也就不该扣额度。"""
+def test_greeting_is_generated_only_once_per_conversation(env, monkeypatch):
+    """第二次取开场白 → 409：既不重复扣费，也不给会话凭空多一句台词。"""
     calls = _stub_greeting_llm(monkeypatch)
+    conv_id = _create(env, "tarot")
 
-    resp = env.post("/api/conversations", json={"session_type": session_type})
+    assert env.post(f"/api/conversations/{conv_id}/greeting").status_code == 200
+    assert env.post(f"/api/conversations/{conv_id}/greeting").status_code == 409
+    assert len(calls) == 1
+    assert _usage(env) == 1
 
-    assert resp.status_code == 200
-    assert resp.json()["messages"] == []
+
+@pytest.mark.parametrize("session_type", ["daily", "chat"])
+def test_conversation_without_opening_phase_has_no_greeting(env, monkeypatch, session_type):
+    """每日一签/闲聊没有开场幕：取开场白是一次不成立的请求，不打 LLM、不扣额度。"""
+    calls = _stub_greeting_llm(monkeypatch)
+    conv_id = _create(env, session_type)
+
+    resp = env.post(f"/api/conversations/{conv_id}/greeting")
+
+    assert resp.status_code == 400
     assert calls == []
     assert _usage(env) == 0
 
@@ -153,9 +205,12 @@ def test_greeting_failure_returns_503_not_a_canned_line(env, monkeypatch):
         raise RuntimeError("gemini down")
 
     monkeypatch.setattr(op_mod, "_generate_greeting_via_llm", _boom)
+    conv_id = _create(env, "tarot")
 
-    resp = env.post("/api/conversations", json={"session_type": "tarot"})
+    resp = env.post(f"/api/conversations/{conv_id}/greeting")
     assert resp.status_code == 503
+    # 会话留着，但一句话都没有——用户直接开口说话就能接着聊
+    assert env.get(f"/api/conversations/{conv_id}").json()["messages"] == []
 
 
 # ---------------------------------------------------------------------------

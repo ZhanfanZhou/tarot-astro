@@ -157,6 +157,13 @@ export const conversationApi = {
     await api.delete(`/api/conversations/${conversationId}`);
   },
 
+  /**
+   * 开场白：建完会话单独取。后端整段生成好才进流，所以这里的等待就是模型在想——
+   * 和跑一轮回复用同一套流式管线（思考气泡 → 逐块出字）。
+   */
+  greeting: (conversationId: string, onChunk: (chunk: string) => void): Promise<void> =>
+    streamTurn(`${API_BASE_URL}/api/conversations/${conversationId}/greeting`, {}, onChunk),
+
   exit: async (conversationId: string): Promise<{ notebook_updated: boolean }> => {
     const response = await api.post(`/api/conversations/${conversationId}/exit`);
     return response.data;

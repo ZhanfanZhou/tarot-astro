@@ -17,7 +17,7 @@ from services import opening_service, tool_turns
 from services.astrology_service import AstrologyService
 from services.conversation_service import ConversationService
 from services.daily_service import DailyService
-from services.gemini_service import GeminiService
+from services.gemini_service import GeminiService, chunk_text
 from services.notebook_service import notebook_enabled, notebook_service
 from services.rate_limit_service import RateLimitService
 from services.storage_service import StorageService
@@ -109,6 +109,21 @@ async def stream_turn(
                 # 模型的一轮 / 一个工具结果，按发生顺序落库。抽牌、补资料这类 interrupt 调用
                 # 也在这里落库；前端刷新会话后看末尾那条的 tool_calls 决定显示哪个按钮。
                 await ConversationService.append_message(conversation_id, event["message"])
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+def stream_text(text: str) -> StreamingResponse:
+    """把一段已经生成好的正文按 SSE 推出去，形状与跑一轮完全一致（开场白走这里）。
+
+    开场白不经过 Agent Loop（没有工具，只要一两句迎接语），但前端不该为它另写一套
+    等待与渲染 —— 同一个流、同一个思考气泡、同样的逐块出字。生成在进流之前完成，
+    所以失败还能以 HTTP 状态码返回；一旦进了流，就只剩正文可推。
+    """
+    async def generate():
+        for piece in chunk_text(text):
+            yield f"data: {json.dumps({'content': piece})}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")

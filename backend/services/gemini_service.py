@@ -8,6 +8,16 @@ from services import context_service, tool_turns
 FORCED_BRIEF_TOOL = "submit_reading_brief"
 
 
+# 正文推给前端的分块大小。模型是整段回完才到这里的，切块纯粹是让前端逐块渲染出
+# 「一句一句写出来」的样子 —— 开场白那次调用也按同一个尺寸推（见 turn_service.stream_text）。
+CLIENT_CHUNK_SIZE = 50
+
+
+def chunk_text(text: str):
+    for i in range(0, len(text), CLIENT_CHUNK_SIZE):
+        yield text[i:i + CLIENT_CHUNK_SIZE]
+
+
 def tool_names(session_type: SessionType, *, opening: bool, has_override: bool) -> List[str]:
     """选工具集。优先级与 _build_neutral 的提示词优先级一字不差：
     override > 相位 > 会话类型。override / daily / chat 用 daily 工具集
@@ -186,8 +196,8 @@ class GeminiService:
 
             # 有文本内容 → 立即分块流式输出
             if result.text:
-                for i in range(0, len(result.text), 50):
-                    yield {"content": result.text[i:i+50]}
+                for piece in chunk_text(result.text):
+                    yield {"content": piece}
 
             # 只处理第一个调用（provider 层也只回写第一个，保证一次调用对一条结果）
             calls = [ToolCallRecord(name=c.name, args=c.args, id=c.id or tool_turns.new_call_id(c.name))

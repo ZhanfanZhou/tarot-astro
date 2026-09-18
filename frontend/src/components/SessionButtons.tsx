@@ -5,7 +5,7 @@ import type { SessionType } from '@/types';
 interface SessionButtonsProps {
   onSelectSession: (sessionType: SessionType) => void;
   disabled?: boolean;
-  /** 正在创建的会话类型。建会话要等后端生成开场白（数秒），这期间该卡片给出可见反馈。 */
+  /** 正在创建的会话类型。建会话只是一次写库、很快，开场白是进对话之后才等的。 */
   pendingType?: SessionType | null;
 }
 
