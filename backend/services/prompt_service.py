@@ -20,6 +20,7 @@ from config import PROMPTS_DIR, PROMPT_OVERRIDES_DIR
 PROMPT_REGISTRY: Dict[str, str] = {
     "tarot_system.md": "塔罗对话系统提示词",
     "astrology_system.md": "占星对话系统提示词",
+    "opening_persona.md": "开场幕·人设与迎接（开场白那一次只发这份）",
     "opening_system.md": "开场幕·前置占卜师提示词",
     "opening_greeting.md": "开场幕·开场白那一轮的指令",
     "opening_force_brief.md": "开场幕·追问预算用尽那一轮（强制交单指令 + 过渡语）",

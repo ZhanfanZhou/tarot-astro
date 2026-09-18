@@ -6,7 +6,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from models import Conversation, SessionType, User, UserProfile
+from models import GENDER_LABELS, Conversation, SessionType, User, UserProfile
 from services import prompt_service
 from services.astrology_service import AstrologyService
 from services.db import get_db
@@ -75,9 +75,6 @@ async def build_relationship_meta(user_id: str, current_conversation_id: str) ->
     }
 
 
-_GENDER_LABEL = {"male": "男", "female": "女", "other": "其他", "prefer_not_say": "保密"}
-
-
 def build_user_context(user: Optional[User]) -> str:
     """用户资料块：两个相位的系统提示词都带。最后是本命星盘：基本星盘或它的状态。
 
@@ -94,7 +91,7 @@ def build_user_context(user: Optional[User]) -> str:
     if profile.nickname:
         context_parts.append(f"昵称：{profile.nickname}")
     if profile.gender:
-        context_parts.append(f"性别：{_GENDER_LABEL.get(profile.gender, '未知')}")
+        context_parts.append(f"性别：{GENDER_LABELS.get(profile.gender, '未知')}")
     if all([profile.birth_year, profile.birth_month, profile.birth_day]):
         birth_str = f"{profile.birth_year}年{profile.birth_month}月{profile.birth_day}日"
         if profile.birth_hour is not None and profile.birth_minute is not None:
@@ -168,8 +165,8 @@ def build_portrait_context(user: Optional[User]) -> str:
 def render_relationship_block(meta: dict) -> str:
     """关系上下文块：只注入事实（称呼/第几次/距上次多久）。
 
-    「新客要安静、回头客要熟人语气、禁止翻旧账」这类语气指令已搬进 opening_system.md
-    （管理页可在线改）。这里留纯数据，代码里不再藏文案。
+    「新客要安静、回头客要熟人语气、禁止翻旧账」这类语气指令写在 opening_persona.md 的
+    <迎接> 一节（管理页可在线改）。这里留纯数据，代码里不再藏文案。
     """
     nickname = meta.get("nickname") or "朋友"
     visit_count = meta.get("visit_count", 1)
@@ -239,6 +236,12 @@ def _portrait_parts(portrait_context: str) -> List[Part]:
     ]
 
 
+def _entry_part(session_type: SessionType) -> Part:
+    entry = _ENTRY_LABEL.get(session_type, "塔罗")
+    return Part(f"\n\n# <入口>\n{entry}", label="入口",
+                when="按会话入口：" + " / ".join(_ENTRY_LABEL.values()))
+
+
 def opening_prompt_parts(
     relationship_block: str,
     session_type: SessionType,
@@ -246,19 +249,21 @@ def opening_prompt_parts(
     user_context: str = "",
     portrait_context: str = "",
 ) -> List[Part]:
-    """开场相位系统提示词 = opening_system.md + 入口 + 用户资料 + 用户画像 + 关系上下文
-    [+ opening_force_brief.md 的 <本轮强制> 小节]。
+    """开场相位系统提示词 = opening_persona.md + opening_system.md + 入口 + 用户资料
+    + 用户画像 + 关系上下文 [+ opening_force_brief.md 的 <本轮强制> 小节]。
+
+    人设与迎接单独一份（opening_persona.md）：开场白那一次调用只发得着这一份，见
+    greeting_prompt_parts。开场的活（问清楚 / 选路线 / 牌阵 / 交单）留在 opening_system.md。
 
     用户资料必须注入：前置占卜师要自己判断「这个问题该不该走星盘」，而星盘要出生信息。
     看不见资料它就只能盲调 request_user_profile 去撞。
 
     所有模型可见的文案都来自 .md（管理页可改）；这里只负责拼接顺序和数据。
     """
-    parts = [prompt_service.prompt_part("opening_system.md")]
-
-    entry = _ENTRY_LABEL.get(session_type, "塔罗")
-    parts.append(Part(f"\n\n# <入口>\n{entry}", label="入口",
-                      when="按会话入口：" + " / ".join(_ENTRY_LABEL.values())))
+    parts = [prompt_service.prompt_part("opening_persona.md"),
+             Part("\n\n"),
+             prompt_service.prompt_part("opening_system.md"),
+             _entry_part(session_type)]
 
     if user_context:
         parts.append(Part(f"\n{user_context}", label="用户资料"))
@@ -284,12 +289,19 @@ def build_opening_prompt(
 
 
 def greeting_prompt_parts(relationship_block: str, session_type: SessionType) -> List[Part]:
-    """开场白那一次调用 = 开场相位系统提示词（不带用户资料、不强制）+ opening_greeting.md。
+    """开场白那一次调用 = opening_persona.md + 入口 + 关系上下文 + opening_greeting.md。
 
-    这一轮的指令不能并进 opening_system.md：那份提示词开场相位每一轮都在用，
+    只发人设与迎接。开场的活那几节（问清楚 / 选塔罗还是星盘 / 牌阵表 / 交单 / 边界）这一次
+    一件也做不了——用户还没开口，这次调用也没有工具——发过去只是让一句问候语挤在两千字后面。
+    用户资料和画像同理不发：迎接语不该提到它们。
+
+    这一轮的指令不能并进 opening_persona.md：那份提示词开场相位每一轮都在用，
     而「用户刚刚坐下、还没开口」只在第一轮成立，写进去会让后续每轮都想再迎接一次。
     """
-    return opening_prompt_parts(relationship_block, session_type) + [
+    parts = [prompt_service.prompt_part("opening_persona.md"), _entry_part(session_type)]
+    if relationship_block:
+        parts.append(Part(f"\n\n{relationship_block}", label="关系上下文"))
+    return parts + [
         Part("\n\n"),
         prompt_service.prompt_part("opening_greeting.md"),
     ]

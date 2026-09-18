@@ -16,6 +16,14 @@ class Gender(str, Enum):
     PREFER_NOT_SAY = "prefer_not_say"
 
 
+# 发给模型的写法。只有这一份：资料块、工具结果、笔记转写都取这里，
+# 免得同一个人一处写「女」、一处写「female」。
+GENDER_LABELS = {
+    Gender.MALE: "男", Gender.FEMALE: "女",
+    Gender.OTHER: "其他", Gender.PREFER_NOT_SAY: "保密",
+}
+
+
 class UserProfile(BaseModel):
     nickname: Optional[str] = None
     gender: Optional[Gender] = None

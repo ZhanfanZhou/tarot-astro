@@ -13,7 +13,8 @@ import uuid
 from typing import List, Optional
 
 from models import (
-    Conversation, DrawCardsRequest, Message, MessageRole, TarotCard, ToolCallRecord, User,
+    GENDER_LABELS, Conversation, DrawCardsRequest, Message, MessageRole, TarotCard,
+    ToolCallRecord, User,
 )
 from services.llm import tools as toolspecs
 
@@ -86,7 +87,7 @@ def profile_result(user: Optional[User], conversation: Conversation) -> dict:
     if p.nickname:
         provided["nickname"] = p.nickname
     if p.gender:
-        provided["gender"] = getattr(p.gender, "value", p.gender)
+        provided["gender"] = GENDER_LABELS.get(p.gender, p.gender)
     if all([p.birth_year, p.birth_month, p.birth_day]):
         provided["birth_date"] = f"{p.birth_year}-{p.birth_month:02d}-{p.birth_day:02d}"
     if p.birth_hour is not None and p.birth_minute is not None:

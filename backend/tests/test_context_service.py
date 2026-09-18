@@ -305,6 +305,29 @@ def test_build_opening_prompt_contains_prompt_relationship_and_entry():
     assert "预算已用尽" not in prompt              # 未触发守卫
 
 
+def test_greeting_prompt_carries_the_persona_but_not_the_opening_work():
+    """开场白那一次只发人设与迎接。
+
+    这次调用没有工具、用户还没开口——「把问题问清楚 / 选塔罗还是星盘 / 牌阵表 / 交单」
+    它一件也做不了，发过去只是让一句问候语挤在两千字后面。
+    """
+    from services import context_service, prompt_service
+
+    parts = context_service.greeting_prompt_parts("<关系上下文>\n称呼：阿岚 ｜ 来访：第 2 次",
+                                                  SessionType.TAROT)
+    assert [p.prompt for p in parts if p.prompt] == ["opening_persona.md", "opening_greeting.md"]
+
+    prompt = prompt_service.join(parts)
+    assert "职业占卜师" in prompt and "说话像人，不像客服" in prompt   # 人设 + 迎接
+    assert "第 2 次" in prompt and "塔罗" in prompt                    # 关系上下文 + 入口
+    for work in ("submit_reading_brief", "凯尔特十字", "把问题问清楚", "不要填表"):
+        assert work not in prompt
+
+    # 开场的对话轮两份都要：人设在前，活在后
+    full = context_service.build_opening_prompt("", SessionType.TAROT)
+    assert full.index("职业占卜师") < full.index("submit_reading_brief")
+
+
 def test_build_opening_prompt_with_force_brief_appends_guard_instruction():
     from services import context_service
 
