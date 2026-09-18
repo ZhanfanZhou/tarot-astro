@@ -33,6 +33,13 @@ AGENT_ENV_ATTRS = {
     "memory":  ("MEMORY_PROVIDER", "MEMORY_MODEL"),
 }
 
+# Agent → 思考强度配置项。只有 .env 这一层，管理页不覆盖（覆盖层只管 provider/model）。
+AGENT_EFFORT_ATTRS = {
+    "opening": "OPENING_REASONING_EFFORT",
+    "reading": "READING_REASONING_EFFORT",
+    "memory":  "MEMORY_REASONING_EFFORT",
+}
+
 
 def _read_overrides() -> dict:
     """读覆盖层。文件不存在或坏了都当「没有覆盖」——配置读不出来不该让整个应用起不来。"""
@@ -61,6 +68,11 @@ def resolve(agent: str) -> tuple:
     if isinstance(entry, dict) and entry.get("provider") and entry.get("model"):
         return entry["provider"].lower().strip(), entry["model"].strip(), "override"
     return getattr(config, prov_attr).lower().strip(), getattr(config, model_attr), "env"
+
+
+def reasoning_effort(agent: str) -> str:
+    """该 Agent 的思考强度档位（""=不指定）。取值合法性在 config 读环境变量时就校验过。"""
+    return getattr(config, AGENT_EFFORT_ATTRS[agent], "")
 
 
 def validate(provider: str, model: str) -> None:

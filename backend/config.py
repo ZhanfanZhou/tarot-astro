@@ -74,6 +74,21 @@ READING_MODEL = os.getenv("READING_MODEL", "gemini-3.1-flash-lite")
 MEMORY_PROVIDER = os.getenv("MEMORY_PROVIDER", "gemini")
 MEMORY_MODEL = os.getenv("MEMORY_MODEL", "gemini-2.5-flash")
 
+
+# 思考强度：目前只有 Kimi 认（顶层参数 reasoning_effort ∈ low / high / max）。
+# K3 的思考关不掉，而默认档就是 max —— 一句问候语它也要想两百多个 token、十几秒才回。
+# 留空 = 不发这个参数，用模型自己的默认值；provider 不是 kimi 时这一项不起作用。
+def _reasoning_effort(name: str) -> str:
+    value = os.getenv(name, "").strip().lower()
+    if value not in ("", "low", "high", "max"):
+        raise ValueError(f"{name} 只能填 low / high / max（留空=用模型默认），现在是 {value!r}")
+    return value
+
+
+OPENING_REASONING_EFFORT = _reasoning_effort("OPENING_REASONING_EFFORT")
+READING_REASONING_EFFORT = _reasoning_effort("READING_REASONING_EFFORT")
+MEMORY_REASONING_EFFORT = _reasoning_effort("MEMORY_REASONING_EFFORT")
+
 # 星盘API配置 https://api.xingpan.vip/astrology/Apiinterface.html
 # https://docs.qq.com/doc/DQUxhSUpjdkpqYmhH
 ASTROLOGY_API_URL = "http://www.xingpan.vip/astrology/chart/natal"

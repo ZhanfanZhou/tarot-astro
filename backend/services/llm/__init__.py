@@ -34,9 +34,13 @@ def get_provider(agent: str) -> LLMProvider:
 
     if provider == "gemini":
         return GeminiProvider(model, supports_forced_tool=forced_tool)
+
+    # 思考强度只有 Kimi 有（reasoning_effort ∈ low/high/max，默认 max）。DeepSeek 用的是
+    # 另一套字段（见 openai_provider._NO_THINKING），发过去只会多一个它不认识的参数，不发。
+    effort = agent_config.reasoning_effort(agent) if provider == "kimi" else ""
     return OpenAICompatProvider(
         model, getattr(config, meta["base_url_attr"]), api_key, provider,
-        supports_forced_tool=forced_tool,
+        supports_forced_tool=forced_tool, reasoning_effort=effort,
     )
 
 

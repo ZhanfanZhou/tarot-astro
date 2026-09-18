@@ -96,3 +96,37 @@ def test_generate_json_uses_json_response_format():
     assert out == '{"summary":"s"}'
     _, kwargs = create.call_args
     assert kwargs["response_format"] == {"type": "json_object"}
+
+
+# --- 思考强度（Kimi 的 reasoning_effort）------------------------------------
+
+def test_reasoning_effort_is_sent_on_every_call():
+    """配了档位就每次都带上：对话轮和无工具的单次生成（开场白走这条）都要带。
+
+    K3 的思考关不掉，默认又是最费的 max 档——漏带一处，那条路径就慢十几秒。
+    """
+    from services.llm.openai_provider import OpenAICompatProvider
+    create = AsyncMock(return_value=_completion(_msg(content="坐吧。")))
+    with patch("services.llm.openai_provider.AsyncOpenAI", return_value=_patched_client(create)):
+        prov = OpenAICompatProvider("kimi-k3", "http://x", "k", "kimi", reasoning_effort="low")
+        asyncio.run(prov.open_session("SYS", [], None).send_user("在吗"))
+        assert create.call_args.kwargs["reasoning_effort"] == "low"
+
+        asyncio.run(prov.generate_text("说一句迎接语"))
+        assert create.call_args.kwargs["reasoning_effort"] == "low"
+
+        asyncio.run(prov.generate_json("出个 JSON"))
+        assert create.call_args.kwargs["reasoning_effort"] == "low"
+
+
+def test_no_reasoning_effort_means_the_field_is_absent():
+    """没配就一个字段都不发——别的家（DeepSeek）不认这个参数。"""
+    from services.llm.openai_provider import OpenAICompatProvider
+    create = AsyncMock(return_value=_completion(_msg(content="好")))
+    with patch("services.llm.openai_provider.AsyncOpenAI", return_value=_patched_client(create)):
+        prov = OpenAICompatProvider("deepseek-flash", "http://x", "k", "deepseek")
+        asyncio.run(prov.open_session("SYS", [], None).send_user("在吗"))
+        assert "reasoning_effort" not in create.call_args.kwargs
+
+        asyncio.run(prov.generate_text("说一句"))
+        assert "reasoning_effort" not in create.call_args.kwargs

@@ -164,3 +164,22 @@ def test_get_provider_honours_the_override(store):
         provider = llm.get_provider("memory")
     assert isinstance(provider, OpenAICompatProvider)
     assert provider.model == "deepseek-v4-pro"
+
+
+def test_reasoning_effort_rejects_an_unknown_level(monkeypatch):
+    """档位写错要在读配置时就炸：留到请求时才 400，看到的会是一条 provider 的报错。"""
+    import config
+    import pytest as _pytest
+
+    monkeypatch.setenv("OPENING_REASONING_EFFORT", "turbo")
+    with _pytest.raises(ValueError):
+        config._reasoning_effort("OPENING_REASONING_EFFORT")
+
+
+def test_reasoning_effort_reads_the_agent_env_value(monkeypatch):
+    import config
+    from services.llm import agent_config
+
+    monkeypatch.setattr(config, "MEMORY_REASONING_EFFORT", "max")
+    assert agent_config.reasoning_effort("memory") == "max"
+    assert agent_config.reasoning_effort("opening") == config.OPENING_REASONING_EFFORT
