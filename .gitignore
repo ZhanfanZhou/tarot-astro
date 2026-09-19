@@ -73,3 +73,8 @@ frontend/public/tarot-images/decks/
 
 
 
+
+# 私有文件：含线上服务器地址/登录方式与本机约定，不进 git
+AWS_EC2_DEPLOY.md
+CLAUDE.md
+sync-assets.sh
