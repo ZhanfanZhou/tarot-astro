@@ -78,3 +78,6 @@ frontend/public/tarot-images/decks/
 AWS_EC2_DEPLOY.md
 CLAUDE.md
 sync-assets.sh
+Makefile
+tools/
+.claude/
