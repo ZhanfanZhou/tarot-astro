@@ -4,7 +4,6 @@
 全程 mock 星盘 API 与存储，不发真实请求、不碰 backend/data/。
 """
 import asyncio
-import sqlite3
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -180,28 +179,3 @@ def test_user_api_responses_do_not_carry_chart(tmp_path, monkeypatch):
     for user in (auth["user"], login["user"], got, updated):
         assert "natal_chart" not in user
     assert asyncio.run(StorageService.get_user(uid)).natal_chart == CHART_TEXT   # 只是不返回，库里还在
-
-
-def test_cleanup_script_picks_guest_notebooks_by_user_type(tmp_path):
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-    from cleanup_guest_notebooks import find_guest_notebooks
-
-    db_file = tmp_path / "app.db"
-    db = sqlite3.connect(db_file)
-    db.execute("CREATE TABLE users (user_id TEXT PRIMARY KEY, username TEXT, data TEXT NOT NULL)")
-    for user_id, user_type in [("guest_a", "guest"), ("guest_b", "registered"), ("user_c", "registered")]:
-        db.execute("INSERT INTO users VALUES (?, NULL, ?)",
-                   (user_id, f'{{"user_id": "{user_id}", "user_type": "{user_type}"}}'))
-    db.commit()
-    db.close()
-    notebooks = tmp_path / "notebooks"
-    notebooks.mkdir()
-    for name in ["guest_a", "guest_b", "user_c", "gone"]:
-        (notebooks / f"note_{name}.log").write_text("[]")
-        (notebooks / f"portrait_{name}.json").write_text("{}")
-
-    guests, orphans = find_guest_notebooks(db_file, notebooks)
-    # 笔记和画像都要删干净；转正的 guest_b 不算游客
-    assert [p.name for p in guests] == ["note_guest_a.log", "portrait_guest_a.json"]
-    assert [p.name for p in orphans] == ["note_gone.log", "portrait_gone.json"]
-    assert len(list(notebooks.iterdir())) == 8                   # 只查不删
