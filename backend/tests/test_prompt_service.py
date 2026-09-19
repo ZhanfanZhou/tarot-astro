@@ -129,11 +129,15 @@ def test_notebook_hardcoded_prompt_removed(ps):
 
 
 def test_daily_prompt_reads_prompt_service(ps):
+    """每日一签也走热加载；用户资料是塔罗/占星那一份，只是不带本命星盘。"""
     from datetime import date
+    from models import User, UserProfile, UserType
     from services import daily_service
-    ps.save_override("daily_oracle_system.md", "DAILY:{nickname}")
-    parts = daily_service.daily_oracle_prompt_parts(None, None, [], date.today())
-    assert ps.join(parts) == "DAILY:朋友"
+    user = User(user_id="u", user_type=UserType.REGISTERED,
+                profile=UserProfile(nickname="小x", birth_year=1996, birth_month=3, birth_day=12))
+    ps.save_override("daily_oracle_system.md", "DAILY:{user_context}")
+    parts = daily_service.daily_oracle_prompt_parts(user, None, [], date.today())
+    assert ps.join(parts) == "DAILY:\n# <用户资料>\n昵称：小x\n生日：1996年3月12日"
 
 
 def test_prompts_only_name_tools_that_exist():

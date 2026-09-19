@@ -8,6 +8,7 @@ from services.daily_service import (
     build_history_block,
     compute_streak,
     extract_tagline,
+    note_summaries,
     select_history_records,
 )
 
@@ -42,11 +43,11 @@ class TestComputeStreak:
 
 
 class TestSelectHistoryRecords:
-    def test_caps_at_seven_draws(self):
+    def test_caps_at_five_draws(self):
         records = {f"2026-06-{d:02d}": make_record(f"2026-06-{d:02d}") for d in range(1, 11)}  # 6/1..6/10
         picked = select_history_records(records, date(2026, 6, 11))
-        assert len(picked) == 7
-        assert picked[0].effective_date == "2026-06-04"   # 升序,最近 7 次
+        assert len(picked) == 5
+        assert picked[0].effective_date == "2026-06-06"   # 升序,最近 5 次
         assert picked[-1].effective_date == "2026-06-10"
 
     def test_fourteen_day_cutoff(self):
@@ -67,7 +68,7 @@ class TestSelectHistoryRecords:
         picked = select_history_records(records, date(2026, 6, 11))
         assert [r.effective_date for r in picked] == ["2026-06-10", "2026-06-11"]
 
-    def test_fewer_than_seven_uses_actual(self):
+    def test_fewer_than_five_uses_actual(self):
         records = {"2026-06-10": make_record("2026-06-10")}
         assert len(select_history_records(records, date(2026, 6, 11))) == 1
 
@@ -89,6 +90,32 @@ class TestBuildHistoryBlock:
         assert "未印证" in lines[0]
         assert "印证:没感觉" in lines[1]
         assert "附言" not in block
+
+    def test_note_summary_follows_its_day(self):
+        """那天聊下去过、已经写成笔记的,牌那行下面紧跟一行笔记;没笔记的日子只有牌那行。"""
+        chatted = make_record("2026-06-09", conversation_id="conv_a")
+        silent = make_record("2026-06-10", conversation_id="conv_b")
+        block = build_history_block([chatted, silent], {"conv_a": "聊到想给自己放个假。"})
+        assert block.split("\n") == [
+            "6月9日 | 星星 (The Star)·正位 | 未印证",
+            "  笔记:聊到想给自己放个假。",
+            "6月10日 | 星星 (The Star)·正位 | 未印证",
+        ]
+
+
+class TestNoteSummaries:
+    def test_only_these_days_and_only_summary(self):
+        """只认这几天日签对话自己的笔记,别的会话不进来;取到的就只有 summary。"""
+        history = [make_record("2026-06-10", conversation_id="conv_a")]
+        notes = [
+            {"conversation_id": "conv_a", "summary": "这一场", "question": "问题", "cards_drawn": ["星星"]},
+            {"conversation_id": "conv_other", "summary": "别的会话"},
+        ]
+        assert note_summaries(notes, history) == {"conv_a": "这一场"}
+
+    def test_skips_empty_summary(self):
+        history = [make_record("2026-06-10", conversation_id="conv_a")]
+        assert note_summaries([{"conversation_id": "conv_a", "summary": ""}], history) == {}
 
 
 def make_conversation(messages: List[Message]) -> Conversation:

@@ -10,6 +10,8 @@ import SessionButtons from './components/SessionButtons';
 import GalleryBanner from './components/GalleryBanner';
 import DailyOracleBanner from './components/daily/DailyOracleBanner';
 import DailyOracleModal from './components/daily/DailyOracleModal';
+import JourneyBanner from './components/daily/JourneyBanner';
+import JourneyChronicle from './components/daily/JourneyChronicle';
 import WalletChip from './components/wallet/WalletChip';
 import { useDeckWallet } from './stores/useDeckWallet';
 import TarotCardDrawer from './components/TarotCardDrawer';
@@ -25,7 +27,7 @@ import { useAuthStore } from './stores/useAuthStore';
 import { useConversationStore } from './stores/useConversationStore';
 import { userApi, conversationApi, tarotApi, astrologyApi, dailyApi } from './services/api';
 import { getEffectiveDate } from './utils/dailyDate';
-import { MessageRole } from './types';
+import { MessageRole, UserType } from './types';
 import type { Conversation, SessionType, DrawCardsRequest, Message, ToolCallRecord, UserProfile, DailyOverview } from './types';
 
 /** 会话末尾是一次还在等用户动手的调用（抽牌 / 补资料）→ 返回它。和后端 tool_turns.pending_interrupt 同一个判据。 */
@@ -71,6 +73,7 @@ const App: React.FC = () => {
   // 每日一签:概览(横幅+弹窗共用)
   const [dailyOverview, setDailyOverview] = useState<DailyOverview | null>(null);
   const [showDailyModal, setShowDailyModal] = useState(false);
+  const [showJourney, setShowJourney] = useState(false);
 
   const refreshDailyOverview = React.useCallback(async () => {
     const uid = useAuthStore.getState().user?.user_id;
@@ -646,6 +649,11 @@ const App: React.FC = () => {
             <div className="w-full max-w-2xl mt-12 space-y-6">
               <GalleryBanner />
               <DailyOracleBanner overview={dailyOverview} onOpen={() => setShowDailyModal(true)} />
+              <JourneyBanner
+                overview={dailyOverview}
+                isGuest={user?.user_type === UserType.GUEST}
+                onOpen={() => setShowJourney(true)}
+              />
             </div>
             </div>
           </motion.div>
@@ -776,6 +784,22 @@ const App: React.FC = () => {
             onClose={() => setShowDailyModal(false)}
             onRefreshOverview={refreshDailyOverview}
             onContinueConversation={handleContinueDailyConversation}
+            onOpenJourney={() => {
+              setShowDailyModal(false);
+              setShowJourney(true);
+            }}
+          />
+        )}
+
+        {user && (
+          <JourneyChronicle
+            isOpen={showJourney}
+            userId={user.user_id}
+            todayDate={dailyOverview?.today_effective_date ?? getEffectiveDate()}
+            onClose={() => {
+              setShowJourney(false);
+              refreshDailyOverview();
+            }}
           />
         )}
 

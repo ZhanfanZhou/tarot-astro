@@ -215,6 +215,22 @@ class DailyOverviewResponse(BaseModel):
     today_record: Optional[DailyDrawRecord] = None
     streak: int = 0
     history: List[DailyDayView] = []       # 升序 14 天,最后一项为今日
+    journey_ready: bool = False            # 素材够不够写新的一篇心灵奇旅
+    journey_count: int = 0                 # 已经写下几卷
+
+
+class JourneyEntry(BaseModel):
+    """一篇写过的心灵奇旅。一天一篇,只读,不可续写。"""
+    generated_on: str                      # 生成那天(= 篇目的锚点日)
+    date_range: str                        # 这一篇回望的日子
+    text: str
+    generated_at: str
+
+
+class JourneyListResponse(BaseModel):
+    entries: List[JourneyEntry] = []       # 新→旧
+    ready: bool = False                    # 素材够不够写新的一篇
+    pending_today: bool = False            # 今天聊过但笔记还没归档,这一篇里看不到
 
 
 class DailyDrawResponse(BaseModel):

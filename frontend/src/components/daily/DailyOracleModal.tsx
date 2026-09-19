@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Sparkles, RefreshCw } from 'lucide-react';
+import { X, Sparkles } from 'lucide-react';
 import TarotCardDrawer from '../TarotCardDrawer';
 import DailyCalendarStrip from './DailyCalendarStrip';
 import Markdown from '../Markdown';
@@ -15,9 +15,6 @@ const DAILY_DRAW_REQUEST: DrawCardsRequest = {
   spread_type: 'single',
   positions: ['今日指引'],
 };
-// 与后端 services/daily_service.py 的 JOURNEY_MIN_RECORDS 保持一致
-const JOURNEY_MIN_RECORDS = 3;
-
 interface DailyOracleModalProps {
   isOpen: boolean;
   userId: string;
@@ -25,10 +22,12 @@ interface DailyOracleModalProps {
   onClose: () => void;
   onRefreshOverview: () => Promise<void>;
   onContinueConversation: (conversationId: string) => void;
+  onOpenJourney: () => void;
 }
 
 /**
- * 每日一签弹窗:顶部两周日历带 + 今日舞台(抽牌/解读)+ 回顾态(印证)+ 心灵奇旅。
+ * 每日一签弹窗:顶部两周日历带 + 今日舞台(抽牌/解读)+ 回顾态(印证)。
+ * 心灵奇旅是独立的卷宗(JourneyChronicle),这里只留一个入口。
  * 选牌器是纯仪式——真实牌面来自 POST /api/daily/draw 的响应,在本弹窗内翻面揭示。
  */
 const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
@@ -38,6 +37,7 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
   onClose,
   onRefreshOverview,
   onContinueConversation,
+  onOpenJourney,
 }) => {
   const todayDate = overview?.today_effective_date ?? getEffectiveDate();
   const [selectedDate, setSelectedDate] = useState<string>(todayDate);
@@ -49,26 +49,17 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
   const [verdict, setVerdict] = useState<'hit' | 'miss' | null>(null);
   const [note, setNote] = useState('');
   const [savingFeedback, setSavingFeedback] = useState(false);
-  // 心灵奇旅
-  const [journeyOpen, setJourneyOpen] = useState(false);
-  const [journeyText, setJourneyText] = useState('');
-  const [journeyLoading, setJourneyLoading] = useState(false);
 
   const selectedView: DailyDayView | undefined = overview?.history.find(
     (h) => h.effective_date === selectedDate
   );
   const record = selectedView?.record ?? null;
   const isToday = selectedDate === todayDate;
-  const drawnCount = overview?.history.filter((h) => h.record).length ?? 0;
   const reading = record ? readings[record.conversation_id] : undefined;
 
-  // 打开时重置到今日、收起旅程
+  // 打开时重置到今日
   useEffect(() => {
-    if (isOpen) {
-      setSelectedDate(todayDate);
-      setJourneyOpen(false);
-      setJourneyText('');
-    }
+    if (isOpen) setSelectedDate(todayDate);
   }, [isOpen, todayDate]);
 
   // 选中某天:同步印证表单 + 懒取该日解读全文
@@ -130,23 +121,6 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
     }
   };
 
-  const handleJourney = async (force: boolean) => {
-    setJourneyOpen(true);
-    setJourneyText('');
-    setJourneyLoading(true);
-    try {
-      await dailyApi.journey(userId, todayDate, force, (chunk) =>
-        setJourneyText((prev) => prev + chunk)
-      );
-    } catch (e) {
-      const status = (e as { status?: number })?.status;
-      toast.error(status === 400 ? '再积累几天,旅程自会显形' : '旅程生成失败');
-      setJourneyOpen(false);
-    } finally {
-      setJourneyLoading(false);
-    }
-  };
-
   const cardInfo = record ? getCardInfo(record.card.card_id) : undefined;
 
   return (
@@ -192,14 +166,13 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => (journeyOpen ? setJourneyOpen(false) : handleJourney(false))}
-                    disabled={drawnCount < JOURNEY_MIN_RECORDS}
-                    className="hidden sm:inline-flex items-center gap-1.5 text-xs tracking-[0.12em] font-display px-2.5 py-1.5 rounded-lg transition-colors hover:bg-white/[0.05] disabled:opacity-40 disabled:cursor-not-allowed"
+                    onClick={onOpenJourney}
+                    className="hidden sm:inline-flex items-center gap-1.5 text-xs tracking-[0.12em] font-display px-2.5 py-1.5 rounded-lg transition-colors hover:bg-white/[0.05]"
                     style={{ color: 'var(--gold)' }}
-                    title={drawnCount < JOURNEY_MIN_RECORDS ? '再积累几天,旅程自会显形' : '回望这段旅程'}
+                    title="打开心灵奇旅的卷宗"
                   >
                     <Sparkles size={13} />
-                    {journeyOpen ? '回到今日' : '回望这段旅程 ✦'}
+                    回望这段旅程 ✦
                   </button>
                   <button
                     onClick={onClose}
@@ -218,50 +191,21 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
                   history={overview.history}
                   todayDate={todayDate}
                   selectedDate={selectedDate}
-                  onSelect={(d) => {
-                    setJourneyOpen(false);
-                    setSelectedDate(d);
-                  }}
+                  onSelect={setSelectedDate}
                 />
               )}
               {/* 移动端旅程入口 */}
               <button
-                onClick={() => (journeyOpen ? setJourneyOpen(false) : handleJourney(false))}
-                disabled={drawnCount < JOURNEY_MIN_RECORDS}
-                className="sm:hidden mt-1 mb-1 text-xs tracking-[0.12em] font-display disabled:opacity-40"
+                onClick={onOpenJourney}
+                className="sm:hidden mt-1 mb-1 text-xs tracking-[0.12em] font-display"
                 style={{ color: 'var(--gold)' }}
               >
-                {journeyOpen ? '回到今日' : '回望这段旅程 ✦'}
+                回望这段旅程 ✦
               </button>
 
               {/* 舞台区 */}
               <div className="mt-5 min-h-[260px]">
-                {journeyOpen ? (
-                  /* ── 心灵奇旅面板 ── */
-                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.8 }}>
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="eyebrow" style={{ letterSpacing: '0.28em', color: 'var(--gold)' }}>
-                        JOURNEY · 心灵奇旅
-                      </span>
-                      <button
-                        onClick={() => handleJourney(true)}
-                        disabled={journeyLoading}
-                        className="inline-flex items-center gap-1 text-[11px] transition-colors hover:text-white disabled:opacity-40"
-                        style={{ color: 'var(--ivory-dim)' }}
-                      >
-                        <RefreshCw size={11} />
-                        重新生成
-                      </button>
-                    </div>
-                    {journeyText ? (
-                      <Markdown content={journeyText} />
-                    ) : (
-                      <p className="text-sm" style={{ color: 'var(--ivory-dim)' }}>
-                        正在回望这段旅程……
-                      </p>
-                    )}
-                  </motion.div>
-                ) : !record ? (
+                {!record ? (
                   isToday ? (
                     /* ── 今日未抽 ── */
                     <div className="flex flex-col items-center text-center py-4">

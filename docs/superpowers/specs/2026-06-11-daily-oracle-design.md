@@ -11,7 +11,7 @@ Style: 遵循 "Astral Atelier" 设计体系(近黑 `#06060f` + 古金 `#C9A96E` 
 | 抽牌频次 | 每"生效日"仅一次,不可重抽 |
 | 生效日规则 | 按浏览器本地时间:18:00 前抽算今天,18:00 后算明天("晚上为明日求签") |
 | 牌阵 | 单张牌 |
-| 解读上下文 | 最近 7 次日运记录(最远回溯 14 天,不足 7 次按实际次数)+ 用户资料,**不读对话正文** |
+| 解读上下文 | 最近 5 次日运记录(最远回溯 14 天,不足 5 次按实际次数;那几天聊下去过的附上那场笔记的 `summary`)+ 用户资料(不含本命星盘),**不读对话正文** |
 | 反馈机制 | 双轨:日历回访"印证"控件(应验/没感觉+一句话)+ 继续聊天经 notebook 沉淀 |
 | 对话建模 | 每日一个独立对话,新增 `SessionType.DAILY` |
 | 入口形态 | 独立仪式横幅,与牌廊横幅同宽,叠放在牌廊**下方** |
@@ -64,12 +64,13 @@ class DailyDrawRecord(BaseModel):
 {
   "<user_id>": {
     "records": { "<effective_date>": { ...DailyDrawRecord } },
-    "journey_cache": { "generated_on": "YYYY-MM-DD", "text": "..." }
+    "journeys": [ { "generated_on": "YYYY-MM-DD", "date_range": "…~…", "text": "...", "generated_at": "..." } ]
   }
 }
 ```
 
 - 一日一条,以 effective_date 为键天然去重。
+- `journeys` 是写过的心灵奇旅,一天最多一篇(同日重写就地覆盖),按 generated_on 升序;只读,供卷宗回顾。
 - **streak 不落库**,读取时从 records 倒推:从"今日生效日"(若今日未抽则从昨日)起连续有记录的天数。
 
 ### 新路由 `backend/routers/daily.py` + 新服务 `backend/services/daily_service.py`
@@ -79,16 +80,17 @@ class DailyDrawRecord(BaseModel):
 | `GET /api/daily/{user_id}/overview?date=YYYY-MM-DD` | `date` 为前端算出的今日生效日。返回 `{today_record\|null, streak, history: [近14天逐日 {effective_date, record?, tagline?, conversation_exists}]}`。tagline(签语)从对应对话首条 assistant 消息懒取首句(~30 字),不冗余存储;对话已删则 `conversation_exists=false`、tagline 为空 |
 | `POST /api/daily/{user_id}/draw` body `{effective_date}` | ① 校验该日无记录(有则 409)且与服务器日期偏差 ≤1 天(否则 422);② 创建 `session_type=daily` 对话,标题「M月D日 · 每日一签」;③ 服务端随机抽 1 张(复用 `TarotService.draw_cards`,single 牌阵,position「今日指引」),以 SYSTEM 消息「用户已完成抽牌」+ tarot_cards 写入对话(与现有 `/api/tarot/draw` 一致);④ 落 DailyDrawRecord;⑤ 返回 `{record, conversation_id}`。**不在此生成解读**——前端随后走现有 `/api/tarot/message` SSE |
 | `POST /api/daily/{user_id}/feedback` body `{effective_date, verdict, note}` | 更新该日 feedback;近 14 天内任意有记录的日期均可印证/修改 |
-| `POST /api/daily/{user_id}/journey?force=false` | 流式(SSE)生成心灵奇旅叙事。上下文 = 近 14 天记录+反馈 + 这些 daily 对话的 notebook 笔记(有则带)。`journey_cache.generated_on == 今日` 且非 force 时直接回放缓存文本(不花 token);生成成功后更新缓存 |
+| `POST /api/daily/{user_id}/journey?force=false` | 流式(SSE)生成心灵奇旅叙事。上下文 = 近 14 天记录+反馈 + 这些 daily 对话的 notebook 笔记(有则带)。当天那一篇已经写过且非 force 时直接回放它(不花 token);生成成功后落进 `journeys`,同日重写就地覆盖 |
+| `GET /api/daily/{user_id}/journeys?date=YYYY-MM-DD` | 卷宗:`{entries: 写过的每一篇(新→旧), ready: 素材够不够再写一篇, pending_today: 今天聊过但笔记还没归档}`。前端据此摊开卷目并说明今天的记录为什么还没进旅程 |
 
 main.py 注册路由。对话的 get / exit / delete、notebook 退出沉淀调度均零改动(daily 对话天然享受)。
 
 ### 提示词模板机制(新目录 `backend/prompts/`)
 
-- `daily_oracle_system.md` — 每日解读系统提示词。占位符:`{nickname}` `{birth_info}` `{today_date}` `{today_card}` `{history_block}`。
+- `daily_oracle_system.md` — 每日解读系统提示词。占位符:`{user_context}` `{today_date}` `{today_card}` `{history_block}`。`{user_context}` 就是塔罗/占星那份用户资料块(`context_service.build_user_context(user, include_chart=False)`):日运不看盘,只要昵称、性别、生日、出生地。
 - `daily_journey.md` — 心灵奇旅叙事提示词。占位符:`{nickname}` `{history_block}` `{notebook_block}` `{date_range}`。
 - **每次请求时实时读文件并渲染**(个人应用 IO 可忽略),编辑模板保存后下一次请求立即生效,无需重启——这就是调试方式。文件缺失时抛出明确错误(启动时校验存在性)。
-- `{history_block}` 由 daily_service 从 `daily_draws.json` 生成。窗口规则:取**最近 7 次**日运记录,最远回溯 14 天(14 天内不足 7 次则按实际次数;0 次时该块为「这是旅程的第一签」)。每条记录一行:`6月10日 | 宝剑三·逆位 | 印证:应验了 | 附言:确实和同事起了争执`;未反馈显示「未印证」;附言存全文、不截断。**只读日运记录,不读对话正文**(聊天细节由 notebook 沉淀,仅 journey 使用)。journey 的 `{history_block}` 不受此窗口限制,仍用近 14 天全量记录。
+- `{history_block}` 由 daily_service 从 `daily_draws.json` 生成。窗口规则:取**最近 5 次**日运记录,最远回溯 14 天(14 天内不足 5 次则按实际次数;0 次时该块为「这是旅程的第一签」)。每条记录一行:`6月10日 | 宝剑三·逆位 | 印证:应验了 | 附言:确实和同事起了争执`;未反馈显示「未印证」;附言存全文、不截断。那天签后聊下去、并已写成笔记的(注册用户才有),牌那行下面紧跟一行 `  笔记:<summary>`——按 `conversation_id` 只认这几天日签对话自己的笔记,且只取 `summary` 一个字段(牌和用户资料提示词里已经有了)。**不读对话正文**,聊天细节一律经 notebook 沉淀后再回来。journey 的 `{history_block}` 不受此窗口限制,仍用近 14 天全量记录,笔记走它自己的 `{notebook_block}`。
 - 模板内容首版给出可用底稿:日运人设(简短温暖、有连续感,主动呼应近日牌面与用户印证,结尾留一个开放问题引导继续聊),journey 为第二人称旅程叙事。
 
 ### gemini_service 适配

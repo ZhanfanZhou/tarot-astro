@@ -8,7 +8,7 @@
 """
 import json
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional
 
 import aiofiles
@@ -16,8 +16,8 @@ import aiofiles
 from config import DAILY_DRAWS_FILE
 from models import Conversation, DailyDrawRecord, MessageRole, User
 
-# 解读上下文:最近至多 7 次,最远回溯 14 天(spec 决策)
-HISTORY_MAX_DRAWS = 7
+# 解读上下文:最近至多 5 次,最远回溯 14 天
+HISTORY_MAX_DRAWS = 5
 HISTORY_MAX_DAYS = 14
 # 弹窗日历带与 journey 素材窗口:14 天
 CALENDAR_DAYS = 14
@@ -59,10 +59,27 @@ def select_history_records(
     return list(reversed(picked))
 
 
-def build_history_block(history: List[DailyDrawRecord]) -> str:
-    """渲染 {history_block}:每条记录一行,附言存全文不截断"""
+def note_summaries(notes: List[dict], history: List[DailyDrawRecord]) -> Dict[str, str]:
+    """history 这几天的日签对话各自的笔记,只取 summary,按 conversation_id 索引。
+
+    那天抽了什么牌、用户是谁,{history_block} 和 <用户资料> 里已经有了,笔记里只有
+    「聊下去之后发生了什么」是新的——那就是 summary 这一个字段。"""
+    conv_ids = {r.conversation_id for r in history}
+    return {
+        e["conversation_id"]: e["summary"]
+        for e in notes
+        if e.get("conversation_id") in conv_ids and e.get("summary")
+    }
+
+
+def build_history_block(
+    history: List[DailyDrawRecord], summaries: Optional[Dict[str, str]] = None,
+) -> str:
+    """渲染 {history_block}:每条记录一行,附言存全文不截断。
+    那天聊下去过、并且已经写成笔记的,紧跟一行笔记(只有注册用户有)。"""
     if not history:
         return "(这是旅程的第一签,还没有过往记录。)"
+    summaries = summaries or {}
     lines = []
     for r in history:
         d = date.fromisoformat(r.effective_date)
@@ -77,6 +94,9 @@ def build_history_block(history: List[DailyDrawRecord]) -> str:
         if r.feedback and r.feedback.note:
             line += f" | 附言:{r.feedback.note}"
         lines.append(line)
+        summary = summaries.get(r.conversation_id)
+        if summary:
+            lines.append(f"  笔记:{summary}")
     return "\n".join(lines)
 
 
@@ -92,7 +112,8 @@ def extract_tagline(conversation: Optional[Conversation]) -> Optional[str]:
     return sentence[:40]
 
 
-from services import prompt_service
+from services import context_service, prompt_service
+from services.notebook_service import notebook_enabled, notebook_service
 from services.prompt_service import Part
 
 
@@ -102,19 +123,13 @@ def _nickname(user: Optional[User]) -> str:
     return "朋友"
 
 
-def _birth_info(user: Optional[User]) -> str:
-    if user and user.profile:
-        p = user.profile
-        if all([p.birth_year, p.birth_month, p.birth_day]):
-            return f"生日:{p.birth_year}年{p.birth_month}月{p.birth_day}日"
-    return "生日:未提供"
-
-
 def daily_oracle_prompt_parts(
     user: Optional[User], own: Optional[DailyDrawRecord],
-    history: List[DailyDrawRecord], anchor: date,
+    history: List[DailyDrawRecord], anchor: date, notes: Optional[List[dict]] = None,
 ) -> List[Part]:
-    """每日一签提示词：本对话自己的牌作 {today_card}，history 进 {history_block}。"""
+    """每日一签提示词：本对话自己的牌作 {today_card}，history 进 {history_block}。
+
+    用户资料和塔罗/占星同一份（context_service.build_user_context），只是不带本命星盘。"""
     if own:
         pos = "逆位" if own.card.reversed else "正位"
         today_card = f"{own.card.card_name}·{pos}"
@@ -123,12 +138,27 @@ def daily_oracle_prompt_parts(
         today_card = "(未找到本对话的抽牌记录)"
         today_date_str = anchor.isoformat()
     return prompt_service.render_prompt_parts("daily_oracle_system.md", {
-        "nickname": _nickname(user),
-        "birth_info": _birth_info(user),
+        "user_context": context_service.build_user_context(user, include_chart=False),
         "today_date": today_date_str,
         "today_card": today_card,
-        "history_block": build_history_block(history),
+        "history_block": build_history_block(history, note_summaries(notes or [], history)),
     })
+
+
+def journey_window_records(
+    records: Dict[str, DailyDrawRecord], anchor: date,
+) -> List[DailyDrawRecord]:
+    """心灵奇旅的素材窗口:近 CALENDAR_DAYS 天全量日运记录,升序。"""
+    cutoff = anchor - timedelta(days=CALENDAR_DAYS)
+    return [
+        r for d, r in sorted(records.items())
+        if cutoff <= date.fromisoformat(d) <= anchor
+    ]
+
+
+def journey_date_range(recent: List[DailyDrawRecord]) -> str:
+    """这一篇覆盖的日子:第一条到最后一条。提示词里和篇目标题用同一份。"""
+    return f"{recent[0].effective_date} ~ {recent[-1].effective_date}"
 
 
 def journey_prompt_parts(
@@ -143,7 +173,7 @@ def journey_prompt_parts(
     ]
     return prompt_service.render_prompt_parts("daily_journey.md", {
         "nickname": _nickname(user),
-        "date_range": f"{recent[0].effective_date} ~ {recent[-1].effective_date}",
+        "date_range": journey_date_range(recent),
         "history_block": build_history_block(recent),
         "notebook_block": "\n".join(nb_lines) if nb_lines else "(无)",
     })
@@ -154,9 +184,10 @@ class DailyService:
     {
       "<user_id>": {
         "records": { "<effective_date>": DailyDrawRecord.dict() },
-        "journey_cache": { "generated_on": "YYYY-MM-DD", "text": "..." }
+        "journeys": [ { "generated_on", "date_range", "text", "generated_at" } ]
       }
     }
+    journeys 一天最多一篇,按 generated_on 升序;写过的都留着供回顾。
     """
 
     @staticmethod
@@ -195,7 +226,6 @@ class DailyService:
         verdict: Optional[str], note: Optional[str],
     ) -> Optional[DailyDrawRecord]:
         """更新指定日期的印证反馈。整体覆盖 feedback:verdict/note 需一并传入,传 None 会清空既有值。"""
-        from datetime import datetime
         data = await DailyService._read_all()
         raw = data.get(user_id, {}).get("records", {}).get(effective_date)
         if not raw:
@@ -209,16 +239,39 @@ class DailyService:
         return DailyDrawRecord(**raw)
 
     @staticmethod
-    async def get_journey_cache(user_id: str) -> Optional[dict]:
+    async def get_journeys(user_id: str) -> List[dict]:
+        """这个人写过的全部心灵奇旅,新→旧。一天最多一篇。"""
         data = await DailyService._read_all()
-        return data.get(user_id, {}).get("journey_cache")
+        return list(reversed(data.get(user_id, {}).get("journeys", [])))
 
     @staticmethod
-    async def save_journey_cache(user_id: str, generated_on: str, text: str):
+    async def get_journey_of_day(user_id: str, generated_on: str) -> Optional[dict]:
+        """当天那一篇(同日再点就回放它,不再花额度)。"""
+        return next(
+            (j for j in await DailyService.get_journeys(user_id)
+             if j.get("generated_on") == generated_on),
+            None,
+        )
+
+    @staticmethod
+    async def save_journey(user_id: str, generated_on: str, text: str) -> dict:
+        """落一篇心灵奇旅。同一天重新生成就地覆盖,篇目不会越攒越多。"""
         data = await DailyService._read_all()
         node = data.setdefault(user_id, {"records": {}})
-        node["journey_cache"] = {"generated_on": generated_on, "text": text}
+        node.pop("journey_cache", None)   # 只存最新一篇的旧结构,已被 journeys 取代
+        records = {d: DailyDrawRecord(**r) for d, r in node.get("records", {}).items()}
+        recent = journey_window_records(records, date.fromisoformat(generated_on))
+        entry = {
+            "generated_on": generated_on,
+            "date_range": journey_date_range(recent) if recent else generated_on,
+            "text": text,
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+        journeys = [j for j in node.get("journeys", []) if j.get("generated_on") != generated_on]
+        journeys.append(entry)
+        node["journeys"] = sorted(journeys, key=lambda j: j["generated_on"])
         await DailyService._write_all(data)
+        return entry
 
     # ── 提示词组装 ────────────────────────────────────────────────
 
@@ -228,7 +281,8 @@ class DailyService:
         own: Optional[DailyDrawRecord] = None,
     ) -> str:
         """每次请求实时渲染（热加载）：锚点取服务器今日，本对话自己的牌作 {today_card}，
-        其余记录进 {history_block}。抽签那一刻记录还没落库，由调用方把 own 传进来。"""
+        其余记录进 {history_block}（那几天聊下去过的，附上那场的笔记）。
+        抽签那一刻记录还没落库，由调用方把 own 传进来。"""
         records = await DailyService.get_user_records(conversation.user_id)
         if own is None:
             own = next(
@@ -241,7 +295,8 @@ class DailyService:
         }
         anchor = date.today()
         history = select_history_records(others, anchor)
-        return prompt_service.join(daily_oracle_prompt_parts(user, own, history, anchor))
+        notes = notebook_service.get_notes(user.user_id) if notebook_enabled(user) else []
+        return prompt_service.join(daily_oracle_prompt_parts(user, own, history, anchor, notes))
 
     @staticmethod
     async def build_journey_prompt(
@@ -251,12 +306,7 @@ class DailyService:
         """心灵奇旅:近 14 天全量记录 + 对应 daily 对话的占卜笔记。
         素材 < JOURNEY_MIN_RECORDS 时返回 None。"""
         records = await DailyService.get_user_records(user_id)
-        anchor = date.fromisoformat(anchor_date)
-        cutoff = anchor - timedelta(days=CALENDAR_DAYS)
-        recent = [
-            r for d, r in sorted(records.items())
-            if cutoff <= date.fromisoformat(d) <= anchor
-        ]
+        recent = journey_window_records(records, date.fromisoformat(anchor_date))
         if len(recent) < JOURNEY_MIN_RECORDS:
             return None
         return prompt_service.join(journey_prompt_parts(user, recent, notes))

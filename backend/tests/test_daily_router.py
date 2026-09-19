@@ -9,7 +9,7 @@
 import asyncio
 import json
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from models import MessageRole, User, UserProfile, UserType  # noqa: E402
+from services.notebook_service import notebook_service  # noqa: E402
 
 USER_ID = "user_daily"
 
@@ -169,3 +170,53 @@ def test_journey_is_a_single_generation_pushed_whole(env, monkeypatch):
     # 同日缓存命中：不再调 LLM、不计费
     resp2 = env.post(f"/api/daily/{USER_ID}/journey", params={"date": today})
     assert resp2.status_code == 200 and len(prov.prompts) == 1 and _usage() == 1
+
+
+def test_journeys_are_kept_for_reading_back(env, monkeypatch):
+    """写过的每一篇都留着可回顾；同一天重新生成覆盖当天那篇，不会越攒越多。"""
+    from services.daily_service import DailyService
+
+    async def _prompt(*a, **k):
+        return "（心灵奇旅提示词）"
+
+    monkeypatch.setattr(DailyService, "build_journey_prompt", _prompt)
+    today = date.today().isoformat()
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+
+    _install(monkeypatch, "昨天写下的那一篇。")
+    env.post(f"/api/daily/{USER_ID}/journey", params={"date": yesterday})
+    _install(monkeypatch, "今天写下的那一篇。")
+    env.post(f"/api/daily/{USER_ID}/journey", params={"date": today})
+    _install(monkeypatch, "今天重写的那一篇。")
+    env.post(f"/api/daily/{USER_ID}/journey", params={"date": today, "force": True})
+
+    body = env.get(f"/api/daily/{USER_ID}/journeys", params={"date": today}).json()
+    assert [(e["generated_on"], e["text"]) for e in body["entries"]] == [
+        (today, "今天重写的那一篇。"),       # 新→旧，当天那篇被覆盖
+        (yesterday, "昨天写下的那一篇。"),
+    ]
+
+
+def test_journeys_flag_today_conversations_not_yet_archived(env, monkeypatch):
+    """今天抽完签又聊了几句：笔记要 12 小时后才写，这一篇看不到，界面上得说一声。"""
+    from services.daily_service import DailyService
+
+    async def _prompt(*a, **k):
+        return "（心灵奇旅提示词）"
+
+    monkeypatch.setattr(DailyService, "build_journey_prompt", _prompt)
+    monkeypatch.setattr(notebook_service, "get_notes", lambda user_id: [])
+    today = date.today().isoformat()
+
+    assert env.get(f"/api/daily/{USER_ID}/journeys", params={"date": today}).json()["pending_today"] is False
+
+    _install(monkeypatch, "星星在今夜为你点灯。")
+    conv_id = env.post(f"/api/daily/{USER_ID}/draw", json={"effective_date": today}).json()["conversation_id"]
+    # 只抽了签没聊：那张牌本来就在素材里，不算没归档
+    assert env.get(f"/api/daily/{USER_ID}/journeys", params={"date": today}).json()["pending_today"] is False
+
+    from models import Message
+    from services.conversation_service import ConversationService
+    asyncio.run(ConversationService.append_message(
+        conv_id, Message(role=MessageRole.USER, content="今天确实有点累")))
+    assert env.get(f"/api/daily/{USER_ID}/journeys", params={"date": today}).json()["pending_today"] is True

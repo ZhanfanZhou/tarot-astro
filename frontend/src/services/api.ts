@@ -8,6 +8,7 @@ import type {
   DrawCardsRequest,
   DailyOverview,
   DailyDrawRecord,
+  JourneyList,
 } from '@/types';
 import { useAuthStore } from '@/stores/useAuthStore';
 
@@ -393,6 +394,12 @@ export const dailyApi = {
       verdict,
       note: note || null,
     });
+    return r.data;
+  },
+
+  /** 写过的心灵奇旅(新→旧)+ 能不能再写一篇 + 今天的记录归没归档 */
+  journeys: async (userId: string, date: string): Promise<JourneyList> => {
+    const r = await api.get(`/api/daily/${userId}/journeys`, { params: { date } });
     return r.data;
   },
 

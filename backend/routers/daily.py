@@ -7,13 +7,16 @@ from fastapi.responses import StreamingResponse
 
 from models import (
     Conversation, DailyDayView, DailyDrawRecord, DailyDrawRequest, DailyDrawResponse,
-    DailyFeedbackRequest, DailyOverviewResponse, DrawCardsRequest,
+    DailyFeedbackRequest, DailyOverviewResponse, DrawCardsRequest, JourneyListResponse,
     Message, MessageRole, SessionType, User,
 )
 from services import llm
 from services.conversation_service import ConversationService
-from services.daily_service import CALENDAR_DAYS, DailyService, compute_streak, extract_tagline
-from services.notebook_service import notebook_service
+from services.daily_service import (
+    CALENDAR_DAYS, JOURNEY_MIN_RECORDS, DailyService, compute_streak, extract_tagline,
+    journey_window_records,
+)
+from services.notebook_service import notebook_enabled, notebook_service
 from services.tarot_service import TarotService
 from services.user_service import UserService
 from services.rate_limit_service import RateLimitService
@@ -62,6 +65,8 @@ async def get_overview(
         today_record=records.get(date_param),
         streak=streak,
         history=history,
+        journey_ready=len(journey_window_records(records, today)) >= JOURNEY_MIN_RECORDS,
+        journey_count=len(await DailyService.get_journeys(user_id)),
     )
 
 
@@ -146,6 +151,38 @@ async def save_feedback(
     return record
 
 
+async def _has_unarchived_today(user_id: str) -> bool:
+    """今天聊过、但笔记还没写的对话。笔记是退出对话 12 小时后才归档的,所以今天刚发生的
+    事进不了这一篇——界面上据此给一句说明,免得用户以为旅程漏了他今天的占卜。"""
+    today = date.today().isoformat()
+    noted = {e["conversation_id"] for e in notebook_service.get_notes(user_id)}
+    return any(
+        c.created_at[:10] == today
+        and c.conversation_id not in noted
+        and len(c.messages) > 1
+        and (c.has_drawn_cards or any(m.tarot_cards for m in c.messages))
+        for c in await StorageService.get_user_conversations(user_id)
+    )
+
+
+@router.get("/{user_id}/journeys", response_model=JourneyListResponse)
+async def list_journeys(
+    user_id: str,
+    date_param: str = Query(..., alias="date"),
+    current_user: User = Depends(get_current_user),
+):
+    """写过的心灵奇旅(新→旧)+ 现在能不能再写一篇 + 今天的记录归没归档。"""
+    ensure_owner(current_user, user_id)
+    today = _parse_date(date_param)
+    records = await DailyService.get_user_records(user_id)
+    return JourneyListResponse(
+        entries=await DailyService.get_journeys(user_id),
+        ready=len(journey_window_records(records, today)) >= JOURNEY_MIN_RECORDS,
+        pending_today=(await _has_unarchived_today(user_id)
+                       if notebook_enabled(current_user) else False),
+    )
+
+
 @router.post("/{user_id}/journey")
 async def generate_journey(
     user_id: str,
@@ -153,14 +190,14 @@ async def generate_journey(
     force: bool = False,
     current_user: User = Depends(get_current_user),
 ):
-    """心灵奇旅(用户主动触发,SSE 流式)。同日缓存命中且非 force 时直接回放,不花 token。"""
+    """心灵奇旅(用户主动触发,SSE 流式)。当天那一篇已经写过且非 force 时直接回放,不花 token。"""
     ensure_owner(current_user, user_id)
     _parse_date(date_param)
 
-    cache = await DailyService.get_journey_cache(user_id)
-    if cache and cache.get("generated_on") == date_param and not force:
+    today_piece = await DailyService.get_journey_of_day(user_id, date_param)
+    if today_piece and not force:
         async def replay():
-            yield f"data: {json.dumps({'content': cache['text']}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'content': today_piece['text']}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
         return StreamingResponse(replay(), media_type="text/event-stream")
 
@@ -185,7 +222,7 @@ async def generate_journey(
         print(f"[Daily] ⚠️ 心灵奇旅生成失败: {e}")
         raise HTTPException(status_code=503, detail="旅程生成失败，请重试")
     if text:
-        await DailyService.save_journey_cache(user_id, date_param, text)
+        await DailyService.save_journey(user_id, date_param, text)
 
     async def generate():
         yield f"data: {json.dumps({'content': text}, ensure_ascii=False)}\n\n"

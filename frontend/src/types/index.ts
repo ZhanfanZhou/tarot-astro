@@ -116,4 +116,20 @@ export interface DailyOverview {
   today_record?: DailyDrawRecord | null;
   streak: number;
   history: DailyDayView[]; // 升序 14 天,最后一项为今日
+  journey_ready: boolean;  // 素材够不够写新的一篇心灵奇旅
+  journey_count: number;   // 已经写下几卷
+}
+
+/** 一篇写过的心灵奇旅:一天一篇,只读,不可续写 */
+export interface JourneyEntry {
+  generated_on: string;
+  date_range: string;
+  text: string;
+  generated_at: string;
+}
+
+export interface JourneyList {
+  entries: JourneyEntry[]; // 新→旧
+  ready: boolean;
+  pending_today: boolean;  // 今天聊过但笔记还没归档,这一篇里看不到
 }
