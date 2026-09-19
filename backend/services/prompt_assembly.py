@@ -1,11 +1,11 @@
-"""管理页：每个提示词用在哪几次模型调用里、前后接了什么。
+"""管理页：每次模型调用的完整输入是怎么拼出来的，按阶段分组。
 
 这里不拼任何东西——每一处调用都直接调运行时的拼装函数（context_service /
 daily_service / notebook_service），只是把用户、会话换成示例数据。拼接顺序、代码拼的段落、
 模板变量怎么展开，都和线上走同一份代码，改了拼装这里自动跟着变。
 
-新增提示词或新的调用点：在 _call_sites() 里加一项。tests/test_prompt_assembly.py 检查每个
-登记的提示词至少出现在一处，漏接会直接失败。
+新增提示词或新的调用点：在 _call_sites() 里加一项，stage 选一个 _STAGES。
+tests/test_prompt_assembly.py 检查每个登记的提示词至少出现在一处，漏接会直接失败。
 """
 from datetime import date, timedelta
 from typing import List, Optional
@@ -27,6 +27,18 @@ _SYSTEM = "系统提示词（system），由下面几段按顺序拼成"
 _SINGLE = "整段作为一条用户消息单次发出，由下面几段按顺序拼成；没有系统提示词、没有对话历史"
 _HISTORY = ("其后是这场会话的全部记录，逐条对应落库的消息：用户发言 / 占卜师（正文 + 工具调用）/ "
             "工具结果。最后一条是本轮要回应的用户发言或工具结果。")
+
+# 一场占卜按时间走过的几段，管理页按这个分组；每次调用挂在其中一段上
+_STAGES = [
+    ("opening", "开场幕",
+     "塔罗/占星会话的前半场：迎接、问清楚、定路线，最后交出起手单。只有这两个入口有开场幕。"),
+    ("reading", "解读",
+     "交单之后的正场，塔罗与占星各一份大提示词；接场约束把开场已经做完的事压掉。"),
+    ("daily", "每日一签",
+     "每天一张牌：抽签当场生成解读，之后可以接着聊；心灵奇旅是隔一段时间回看这些签。"),
+    ("notebook", "笔记本",
+     "会话结束后离线跑一次：写这场的占卜笔记，并给这个人的画像打补丁。只有注册用户有。"),
+]
 
 
 # ── 示例数据 ────────────────────────────────────────────────────────
@@ -102,9 +114,10 @@ def _agent(agent: Optional[str]) -> dict:
             "provider": provider, "model": model}
 
 
-def _site(title, agent, delivery, parts: List[Part], *, tools=(), force_when="", after="") -> dict:
+def _site(title, stage, agent, delivery, parts: List[Part], *,
+          tools=(), force_when="", after="") -> dict:
     site = {
-        "title": title, **_agent(agent), "delivery": delivery,
+        "title": title, "stage": stage, **_agent(agent), "delivery": delivery,
         "parts": [p.to_dict() for p in parts],
         "tools": toolspecs.specs_by_names(list(tools)),
         "force_tool": None,
@@ -130,43 +143,54 @@ def _call_sites() -> List[dict]:
         _daily_record(today, 2, _card(23, True), "miss"),
         _daily_record(today, 1, _card(41)),
     ]
-    daily_parts = daily_oracle_prompt_parts(_USER, own, history, today)
     notes = [{"conversation_id": "sample-daily-1", "summary": "聊到想给自己放个假，[圣杯六（正位）]像在提醒她回头看看老朋友。"}]
+    daily_parts = daily_oracle_prompt_parts(_USER, own, history, today, notes)
 
     reading_tools = tool_names(SessionType.TAROT, opening=False, has_override=False)
     return [
-        _site("开场 · 每一轮对话", "opening", _SYSTEM,
+        _site("开场白（创建会话那一次）", "opening", "opening", _SINGLE,
+              context_service.greeting_prompt_parts(relationship, SessionType.TAROT)),
+        _site("开场 · 每一轮对话", "opening", "opening", _SYSTEM,
               context_service.opening_prompt_parts(relationship, SessionType.TAROT,
                                                    force_brief=True, user_context=user_context,
                                                    portrait_context=portrait_context),
               tools=tool_names(SessionType.TAROT, opening=True, has_override=False),
               force_when="追问预算用尽的那一轮", after=_HISTORY),
-        _site("开场白（创建会话时）", "opening", _SINGLE,
-              context_service.greeting_prompt_parts(relationship, SessionType.TAROT)),
-        _site("开场 · 强制交单那一轮的过渡语", None,
+        _site("开场 · 强制交单那一轮的过渡语", "opening", None,
               "不发给模型。强制交单那一轮模型只能输出调用、说不出话；走塔罗路线时由代码替它把这句话"
               "推给用户，并作为占卜师的发言（附抽牌调用）写进会话",
               [Part(context_service.forced_brief_handoff_line(),
                     prompt="opening_force_brief.md", label="<过渡语> 小节")]),
-        _site("塔罗解读 · 每一轮对话", "reading", _SYSTEM,
+        _site("塔罗解读 · 每一轮对话", "reading", "reading", _SYSTEM,
               context_service.reading_prompt_parts(SessionType.TAROT, user_context, _TAROT_BRIEF,
                                                    portrait_context),
               tools=reading_tools, after=_HISTORY),
-        _site("占星解读 · 每一轮对话", "reading", _SYSTEM,
+        _site("占星解读 · 每一轮对话", "reading", "reading", _SYSTEM,
               context_service.reading_prompt_parts(SessionType.ASTROLOGY, user_context, _ASTRO_BRIEF,
                                                    portrait_context),
               tools=reading_tools, after=_HISTORY),
-        _site("每日一签 · 抽签当场生成解读", "reading", _SINGLE, daily_parts),
-        _site("每日一签 · 之后接着聊", "reading", _SYSTEM, daily_parts,
+        _site("每日一签 · 抽签当场生成解读", "daily", "reading", _SINGLE, daily_parts),
+        _site("每日一签 · 之后接着聊", "daily", "reading", _SYSTEM, daily_parts,
               tools=tool_names(SessionType.DAILY, opening=False, has_override=True), after=_HISTORY),
-        _site("心灵奇旅", "reading", _SINGLE,
+        _site("心灵奇旅", "daily", "reading", _SINGLE,
               journey_prompt_parts(_USER, history + [own], notes)),
-        _site("笔记本（会话结束后生成这场的占卜笔记 + 用户画像的改动，要求输出 JSON）", "memory", _SINGLE,
+        _site("笔记本（会话结束后生成这场的占卜笔记 + 用户画像的改动，要求输出 JSON）",
+              "notebook", "memory", _SINGLE,
               notebook_prompt_parts(_sample_conversation(), _sample_portrait())),
     ]
 
 
-def call_sites_for(name: str) -> List[dict]:
-    """用到这个提示词的全部调用，每处带完整的拼接顺序。"""
-    prompt_service.get_prompt(name)   # 白名单校验，未知名字抛 KeyError
-    return [s for s in _call_sites() if any(p["prompt"] == name for p in s["parts"])]
+def stages() -> List[dict]:
+    """全部调用按阶段分组，外加每一段里出现过的提示词文件（按出现顺序，段内去重）。"""
+    sites = _call_sites()
+    groups = []
+    for key, label, note in _STAGES:
+        group = [site for site in sites if site["stage"] == key]
+        names = []
+        for site in group:
+            for part in site["parts"]:
+                if part["prompt"] and part["prompt"] not in names:
+                    names.append(part["prompt"])
+        groups.append({"key": key, "label": label, "note": note,
+                       "sites": group, "prompts": names})
+    return groups

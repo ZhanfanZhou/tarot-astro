@@ -30,6 +30,7 @@
 .admin-header nav button.active { color: #cfa94a; border-bottom: 2px solid #cfa94a; border-radius: 0; }
 .admin-logout { white-space: nowrap; }
 .admin-main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+.admin-main.wide { max-width: 1680px; }
 .admin-error { color: #d97b6c; margin: 8px 0; }
 .admin-notice { color: #7fae7a; margin: 8px 0; }
 .admin-dim { color: #7d7788; font-size: 12px; }
@@ -99,36 +100,52 @@
 @media (max-width: 800px) {
   .admin-conv.has-detail .admin-conv-list { display: none; }
 }
-/* prompt */
-.admin-prompts { display: flex; gap: 16px; align-items: flex-start; }
-.prompt-list { list-style: none; padding: 0; margin: 0; width: 260px; flex-shrink: 0; }
-.prompt-list li {
-  padding: 10px 12px; border: 1px solid #2c2838; border-radius: 8px; margin-bottom: 8px;
-  cursor: pointer; background: #1c1926; display: flex; justify-content: space-between; gap: 8px;
+/* ── 提示词：左栏按阶段分组，右侧摊开这一阶段每次调用的完整输入 ─────────── */
+.pm { display: flex; gap: 20px; align-items: flex-start; }
+.pm-nav {
+  width: 250px; flex-shrink: 0; position: sticky; top: 52px;
+  max-height: calc(100vh - 68px); overflow-y: auto;
 }
-.prompt-list li.active { border-color: #cfa94a; }
-.prompt-list .badge {
-  font-style: normal; color: #cfa94a; border: 1px solid #cfa94a;
-  border-radius: 4px; padding: 0 4px; margin-right: 4px; font-size: 11px;
+.pm-group {
+  margin-bottom: 8px; border: 1px solid #2c2838; border-radius: 8px;
+  background: #1c1926; overflow: hidden;
 }
-.prompt-editor { flex: 1; min-width: 0; }
-.prompt-editor textarea {
-  width: 100%; min-height: 60vh; background: #201d29; color: #d8d4c8;
-  border: 1px solid #3a3548; border-radius: 8px; padding: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.6;
-  resize: vertical; box-sizing: border-box;
+.pm-group.active { border-color: #4a4358; }
+.admin-main .pm-group-head {
+  width: 100%; display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  padding: 9px 12px; background: none; border: none; border-radius: 0;
+  color: #d8d4c8; font-weight: 600; text-align: left;
 }
-@media (max-width: 800px) {
-  .admin-prompts { flex-direction: column; }
-  .prompt-list { width: 100%; }
+.pm-group.active .pm-group-head { color: #cfa94a; background: #221e2c; }
+.pm-group ul { list-style: none; margin: 0; padding: 4px 0; }
+.admin-main .pm-group li button {
+  width: 100%; display: flex; flex-direction: column; gap: 1px; text-align: left;
+  padding: 5px 12px; background: none; border: none; border-radius: 0; color: #9a94a8;
 }
-.prompt-views { display: flex; gap: 4px; border-bottom: 1px solid #2c2838; margin-bottom: 12px; }
-.admin-main .prompt-views button {
-  background: none; border: none; border-radius: 0; color: #9a94a8; padding: 6px 12px;
+.admin-main .pm-group li button:hover { color: #d8d4c8; }
+.admin-main .pm-group li button.active {
+  color: #cfa94a; border-left: 2px solid #cfa94a; padding-left: 10px;
 }
-.admin-main .prompt-views button.active { color: #cfa94a; border-bottom: 2px solid #cfa94a; }
+.pm-file-label { display: flex; align-items: center; gap: 5px; font-size: 13px; }
+.pm-file-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #6b6578;
+}
+.pm-dot { font-style: normal; font-size: 9px; color: #d97b6c; }
+.pm-group .badge {
+  font-style: normal; font-size: 10px; color: #cfa94a;
+  border: 1px solid #6b5a2a; border-radius: 3px; padding: 0 4px;
+}
+.pm-body { flex: 1; min-width: 0; }
+.pm-head h2 { margin: 0 0 4px; font-size: 16px; color: #cfa94a; }
+.pm-head p { margin: 0 0 12px; line-height: 1.8; }
+.pm-tools { border-bottom: 1px solid #2c2838; padding-bottom: 10px; }
+.pm-tools .admin-dim { flex: 1; min-width: 220px; line-height: 1.7; }
+@media (max-width: 900px) {
+  .pm { flex-direction: column; }
+  .pm-nav { width: 100%; position: static; max-height: none; }
+}
 
-/* prompt 组成：一次调用一张卡，段落按发送顺序竖排 */
+/* 一次调用一张卡，各段按发送顺序竖排；有条件的段用虚线金边标出来 */
 .cs-card {
   background: #1c1926; border: 1px solid #2c2838; border-radius: 10px;
   padding: 14px 16px; margin-bottom: 14px;
@@ -137,38 +154,59 @@
 .cs-card h3 { margin: 0; font-size: 14px; color: #d8d4c8; flex: 1; min-width: 0; }
 .cs-delivery { color: #8d8799; font-size: 12px; margin: 6px 0 10px; line-height: 1.7; }
 .cs-parts { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
-.cs-part { border: 1px solid #2c2838; border-left-width: 3px; border-radius: 6px; padding: 6px 10px; background: #18161f; }
-.cs-part.cs-file { border-left-color: #6f86a8; }
-.cs-part.cs-file.current { border-left-color: #cfa94a; border-color: #4a4358; }
+.cs-part {
+  border: 1px solid #2c2838; border-left-width: 3px; border-radius: 6px;
+  padding: 7px 10px; background: #18161f;
+}
+/* 左栏点过来时滚到位：留出吸顶导航条的高度，别把这一块的标题压在下面 */
+.cs-part.cs-file { border-left-color: #6f86a8; scroll-margin-top: 62px; }
 .cs-part.cs-code { border-left-color: #5d586a; }
+.cs-part.has-branch { border-left-color: #d9b86c; border-left-style: dashed; }
+.cs-part.cs-file.current { border-color: #4a4358; box-shadow: 0 0 0 1px #6b5a2a inset; }
 .cs-part-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
 .cs-kind {
   color: #8d8799; border: 1px solid #3a3548; border-radius: 4px; padding: 0 5px;
   font-size: 11px; line-height: 1.6; white-space: nowrap;
 }
 .cs-sample { color: #cfa94a; border-color: #6b5a2a; }
+.cs-over { color: #cfa94a; border-color: #cfa94a; }
+.cs-dirty { color: #d97b6c; border-color: #6b3a32; }
 .cs-label { color: #d8d4c8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.cs-when { color: #d9b86c; }
-.admin-main button.cs-link {
-  background: none; border: none; padding: 0; color: #8fb0dd; text-decoration: underline;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+.cs-dim { color: #7d7788; font-size: 12px; }
+.cs-when {
+  color: #d9b86c; flex: 1; min-width: 160px; line-height: 1.6;
+  display: flex; flex-direction: column; gap: 1px;
 }
+.cs-when b { font-weight: 600; margin-right: 5px; color: #cfa94a; }
 .admin-main button.cs-toggle {
   margin-left: auto; background: none; border: 1px solid #3a3548; color: #8d8799;
-  padding: 1px 8px; font-size: 11px; border-radius: 4px;
+  padding: 1px 8px; font-size: 11px; border-radius: 4px; white-space: nowrap;
 }
 .cs-part pre, .cs-tool pre {
   margin: 6px 0 2px; white-space: pre-wrap; word-break: break-word; color: #cfc9bb;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.7;
 }
-.cs-var {
-  background: rgba(207, 169, 74, 0.12); color: #e6d9b0; border-radius: 3px;
-  box-shadow: inset 0 -1px 0 rgba(207, 169, 74, 0.5);
+/* 文件就地编辑：接进来的位置就是编辑框，不另开一个页面 */
+.admin-main textarea.cs-edit {
+  display: block; width: 100%; box-sizing: border-box; margin: 8px 0 6px;
+  background: #201d29; color: #d8d4c8; border: 1px solid #3a3548; border-radius: 6px;
+  padding: 10px 12px; resize: vertical; outline: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; line-height: 1.7;
 }
-.cs-var-name {
-  color: #cfa94a; font-size: 10px; border: 1px solid #6b5a2a; border-radius: 3px;
-  padding: 0 3px; margin-right: 4px; vertical-align: 1px;
+.admin-main textarea.cs-edit:focus { border-color: #6b5a2a; }
+.cs-edit-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* 只取文件里一节的那种位置：先给出这一处真正发出去的那段 */
+.cs-section { margin: 8px 0 0; border-left: 2px solid #6b5a2a; padding-left: 8px; }
+/* 模板变量：正文里的 {xxx} 运行时填什么 */
+.cs-vars {
+  margin-top: 10px; border-top: 1px dashed #2c2838; padding-top: 8px;
+  display: flex; flex-direction: column; gap: 4px;
 }
+.cs-var-row { display: flex; align-items: baseline; gap: 8px; font-size: 12px; min-width: 0; }
+.cs-var-row code { color: #cfa94a; white-space: nowrap; }
+.cs-var-row details { min-width: 0; }
+.cs-var-row summary { color: #8fb0dd; cursor: pointer; }
+.cs-var-inline { color: #cfc9bb; word-break: break-word; }
 .cs-meta, .cs-after { color: #8d8799; font-size: 12px; margin: 10px 0 0; line-height: 1.7; }
 .cs-meta code, .cs-tool code { color: #cfa94a; }
 .cs-tools { margin-top: 10px; border-top: 1px dashed #2c2838; padding-top: 8px; }

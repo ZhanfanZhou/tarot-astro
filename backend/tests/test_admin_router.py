@@ -363,29 +363,44 @@ class TestAdminPrompts:
         r = client.get("/api/admin/prompts", headers=_admin_headers(client)).json()
         assert len(r["items"]) == len(prompt_service.PROMPT_REGISTRY)
         assert all(not p["overridden"] for p in r["items"])
+        # 每份的生效内容随列表一起给：编辑框就地渲染，不再逐个拉详情
+        by_name = {p["name"]: p for p in r["items"]}
+        assert "职业占卜师" in by_name["tarot_system.md"]["content"]
 
-    def test_get_save_reset_roundtrip(self, client):
+    def test_stages_cover_every_call_site_and_prompt(self, client):
+        from services import prompt_assembly, prompt_service
+        r = client.get("/api/admin/prompts", headers=_admin_headers(client)).json()
+        stages = r["stages"]
+        assert [s["key"] for s in stages] == [k for k, _, _ in prompt_assembly._STAGES]
+        # 每次调用都挂在某个阶段下，一次不落
+        assert sum(len(s["sites"]) for s in stages) == len(prompt_assembly._call_sites())
+        # 每份登记的提示词都能在某个阶段的文件清单里找到（找不到 = 管理页里改不了）
+        listed = {name for s in stages for name in s["prompts"]}
+        assert listed == set(prompt_service.PROMPT_REGISTRY)
+
+    def test_save_reset_roundtrip(self, client):
         h = _admin_headers(client)
-        d = client.get("/api/admin/prompts/tarot_system.md", headers=h).json()
-        assert "职业占卜师" in d["content"]
-        assert d["content"] == d["default_content"]
 
         r = client.put("/api/admin/prompts/tarot_system.md",
                        json={"content": "新版提示词"}, headers=h)
         assert r.status_code == 200 and r.json()["overridden"] is True
-        d2 = client.get("/api/admin/prompts/tarot_system.md", headers=h).json()
-        assert d2["content"] == "新版提示词"
-        assert "职业占卜师" in d2["default_content"]  # 默认版不受影响
-        # 组成里展示的就是保存后的生效版
-        parts = d2["call_sites"][0]["parts"]
-        assert parts[0]["prompt"] == "tarot_system.md" and parts[0]["text"] == "新版提示词"
+
+        d = client.get("/api/admin/prompts", headers=h).json()
+        by_name = {p["name"]: p for p in d["items"]}
+        assert by_name["tarot_system.md"]["content"] == "新版提示词"
+        # 组成里嵌的也是保存后的生效版
+        reading = next(s for s in d["stages"] if s["key"] == "reading")
+        tarot_site = next(s for s in reading["sites"] if s["title"].startswith("塔罗解读"))
+        assert tarot_site["parts"][0]["prompt"] == "tarot_system.md"
+        assert tarot_site["parts"][0]["text"] == "新版提示词"
 
         r2 = client.delete("/api/admin/prompts/tarot_system.md", headers=h)
         assert r2.status_code == 200 and r2.json()["overridden"] is False
+        d2 = client.get("/api/admin/prompts", headers=h).json()
+        assert "职业占卜师" in {p["name"]: p for p in d2["items"]}["tarot_system.md"]["content"]
 
     def test_unknown_name_404(self, client):
         h = _admin_headers(client)
-        assert client.get("/api/admin/prompts/evil.md", headers=h).status_code == 404
         assert client.put("/api/admin/prompts/evil.md", json={"content": "x"}, headers=h).status_code == 404
 
     def test_empty_content_400(self, client):

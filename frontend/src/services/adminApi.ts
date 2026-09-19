@@ -115,6 +115,8 @@ export interface PromptInfo {
   overridden: boolean;
   chars: number;
   updated_at: string | null;
+  /** 当前生效内容（覆盖版优先），编辑框直接用它 */
+  content: string;
 }
 
 /** 发给模型的一段文字。prompt 非空 = 来自该 .md；否则是代码拼的（label 说明是哪一块）。 */
@@ -123,9 +125,13 @@ export interface PromptPart {
   prompt: string;
   /** true = prompt 模板里某个变量（label 是变量名）填进去的值 */
   variable: boolean;
+  /** true = 正文是运行时数据，这里看到的只是示例；false = 代码里写死的字 */
+  sample: boolean;
   label: string;
-  /** 什么情况下才有；空 = 每次都有 */
+  /** 满足什么条件才有这一段；空 = 每次都有 */
   when: string;
+  /** 这一段有哪几种形态（每次都有，但内容长得不一样）；空 = 只有一种 */
+  variants: string;
 }
 
 export interface PromptTool {
@@ -134,9 +140,10 @@ export interface PromptTool {
   parameters: unknown;
 }
 
-/** 用到某个提示词的一次模型调用：按实际发送顺序的各段 + 工具 + 其后接什么。 */
+/** 一次模型调用：按实际发送顺序的各段 + 工具 + 其后接什么。 */
 export interface PromptCallSite {
   title: string;
+  stage: string;
   /** null = 这段文字不发给模型 */
   agent: string | null;
   agent_label: string | null;
@@ -149,10 +156,14 @@ export interface PromptCallSite {
   after: string;
 }
 
-export interface PromptDetail extends PromptInfo {
-  content: string;
-  default_content: string;
-  call_sites: PromptCallSite[];
+/** 一场占卜走过的一段，底下是这段里发生的全部模型调用。 */
+export interface PromptStage {
+  key: string;
+  label: string;
+  note: string;
+  sites: PromptCallSite[];
+  /** 这一段里出现过的提示词文件，按出现顺序 */
+  prompts: string[];
 }
 
 export const displayName = (u: {
@@ -210,8 +221,8 @@ export const adminApi = {
   resetUsage: async (userId: string): Promise<void> => {
     await api.delete(`/api/admin/usage/${userId}`);
   },
-  prompts: async (): Promise<{ items: PromptInfo[] }> => (await api.get('/api/admin/prompts')).data,
-  prompt: async (name: string): Promise<PromptDetail> => (await api.get(`/api/admin/prompts/${name}`)).data,
+  prompts: async (): Promise<{ items: PromptInfo[]; stages: PromptStage[] }> =>
+    (await api.get('/api/admin/prompts')).data,
   savePrompt: async (name: string, content: string): Promise<PromptInfo> =>
     (await api.put(`/api/admin/prompts/${name}`, { content })).data,
   resetPrompt: async (name: string): Promise<PromptInfo> =>

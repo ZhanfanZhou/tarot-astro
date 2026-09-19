@@ -78,7 +78,7 @@ export default function AdminApp() {
           退出
         </button>
       </header>
-      <main className="admin-main">
+      <main className={tab === 'prompts' ? 'admin-main wide' : 'admin-main'}>
         {tab === 'overview' && <OverviewPanel />}
         {tab === 'conversations' && <ConversationsPanel />}
         {tab === 'users' && <UsersPanel />}

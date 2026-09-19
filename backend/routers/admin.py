@@ -163,25 +163,19 @@ class PromptSaveRequest(BaseModel):
 
 @router.get("/prompts")
 async def admin_prompts(_: None = Depends(require_admin)):
-    try:
-        return {"items": prompt_service.list_prompts()}
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """管理页一次要的全部东西：每份提示词的生效内容 + 按阶段分组的全部调用点。
 
-
-@router.get("/prompts/{name}")
-async def admin_prompt_detail(name: str, _: None = Depends(require_admin)):
+    编辑框和「组成」视图是同一个页面，分开取会让两边对不上（改了 A 文件，B 调用里
+    嵌的那份还是旧的），所以一个请求返回全量，保存后整体重取。
+    """
     try:
-        info = prompt_service.get_prompt_info(name)
         return {
-            **info,
-            "content": prompt_service.get_prompt(name),
-            "default_content": prompt_service.get_default(name),
-            # 用到它的每一次模型调用，前后接了什么（只读展示，示例数据）
-            "call_sites": prompt_assembly.call_sites_for(name),
+            "items": [
+                {**info, "content": prompt_service.get_prompt(info["name"])}
+                for info in prompt_service.list_prompts()
+            ],
+            "stages": prompt_assembly.stages(),
         }
-    except KeyError:
-        raise HTTPException(status_code=404, detail="提示词不存在")
     except FileNotFoundError as e:
         raise HTTPException(status_code=500, detail=str(e))
 

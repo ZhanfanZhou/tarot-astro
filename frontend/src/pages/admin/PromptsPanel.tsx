@@ -1,135 +1,131 @@
-import { useEffect, useState } from 'react';
-import {
-  adminApi, errMsg, isAuthError, type PromptDetail, type PromptInfo,
-} from '@/services/adminApi';
-import PromptComposition from './PromptComposition';
+import { useEffect, useMemo, useState } from 'react';
+import { adminApi, errMsg, isAuthError, type PromptInfo, type PromptStage } from '@/services/adminApi';
+import StageView, { useScrollToFile, type FileCtl } from './PromptComposition';
 
+/**
+ * 提示词管理：按阶段分组，一个阶段一屏。
+ *
+ * 只有一个视图——一次模型调用的输入按发送顺序摊开，接到 .md 的地方就是那份文件的编辑框，
+ * 不再分「内容 / 组成」两个页签。左栏是这一阶段用到的文件，点了滚到它接进去的位置。
+ */
 export default function PromptsPanel() {
-  const [list, setList] = useState<PromptInfo[]>([]);
-  const [current, setCurrent] = useState<PromptDetail | null>(null);
-  const [text, setText] = useState('');
+  const [stages, setStages] = useState<PromptStage[]>([]);
+  const [items, setItems] = useState<PromptInfo[]>([]);
+  const [stageKey, setStageKey] = useState('');
+  const [focus, setFocus] = useState('');
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
-  // 内容 = 编辑 .md；组成 = 它用在哪几次调用里、前后接了什么（切换文件时保持当前视图）
-  const [view, setView] = useState<'content' | 'composition'>('content');
 
-  const refresh = () =>
-    adminApi.prompts().then((r) => setList(r.items)).catch((e) => {
+  const byName = useMemo(() => Object.fromEntries(items.map((p) => [p.name, p])), [items]);
+
+  const load = async () => {
+    const r = await adminApi.prompts();
+    setStages(r.stages);
+    setItems(r.items);
+    setStageKey((k) => (r.stages.some((s) => s.key === k) ? k : r.stages[0]?.key ?? ''));
+  };
+
+  const run = async (fn: () => Promise<void>) => {
+    setError('');
+    setNotice('');
+    try {
+      await fn();
+    } catch (e) {
       if (isAuthError(e)) {
         window.location.reload();
         return;
       }
       setError(errMsg(e));
-    });
+    }
+  };
 
   useEffect(() => {
-    refresh();
+    run(load);
   }, []);
 
-  const open = async (name: string) => {
-    setError('');
-    setNotice('');
-    try {
-      const d = await adminApi.prompt(name);
-      setCurrent(d);
-      setText(d.content);
-    } catch (e) {
-      if (isAuthError(e)) {
-        window.location.reload();
-        return;
-      }
-      setError(errMsg(e));
-    }
+  useScrollToFile(focus, stageKey);
+
+  const ctl: FileCtl = {
+    info: (name) => byName[name],
+    draft: (name) => drafts[name] ?? byName[name]?.content ?? '',
+    dirty: (name) => name in drafts && drafts[name] !== byName[name]?.content,
+    edit: (name, value) => setDrafts((d) => ({ ...d, [name]: value })),
+    busy,
+    focus,
+    save: (name) => {
+      const info = byName[name];
+      const text = drafts[name];
+      if (!info || text === undefined || text === info.content) return;
+      if (!window.confirm(`确认保存对「${info.label}（${name}）」的修改？保存后下一次对话立即生效。`)) return;
+      setBusy(true);
+      run(async () => {
+        await adminApi.savePrompt(name, text);
+        await load();
+        setDrafts(({ [name]: _dropped, ...rest }) => rest);
+        setNotice(`已保存 ${name}，即时生效`);
+      }).finally(() => setBusy(false));
+    },
+    reset: (name) => {
+      const info = byName[name];
+      if (!info) return;
+      if (!window.confirm(`确认丢弃线上修改，把「${info.label}（${name}）」恢复为代码默认版？`)) return;
+      setBusy(true);
+      run(async () => {
+        await adminApi.resetPrompt(name);
+        await load();
+        setDrafts(({ [name]: _dropped, ...rest }) => rest);
+        setNotice(`${name} 已恢复为默认版`);
+      }).finally(() => setBusy(false));
+    },
   };
 
-  const save = async () => {
-    if (!current) return;
-    if (!window.confirm(`确认保存对「${current.label}」的修改？保存后下一次对话立即生效。`)) return;
-    setBusy(true);
-    setError('');
-    setNotice('');
-    try {
-      await adminApi.savePrompt(current.name, text);
-      await open(current.name);
-      refresh();
-      setNotice('已保存，即时生效');
-    } catch (e) {
-      if (isAuthError(e)) {
-        window.location.reload();
-        return;
-      }
-      setError(errMsg(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const reset = async () => {
-    if (!current) return;
-    if (!window.confirm(`确认丢弃线上修改，恢复「${current.label}」为代码默认版？`)) return;
-    setBusy(true);
-    setError('');
-    setNotice('');
-    try {
-      await adminApi.resetPrompt(current.name);
-      await open(current.name);
-      refresh();
-      setNotice('已重置为默认');
-    } catch (e) {
-      if (isAuthError(e)) {
-        window.location.reload();
-        return;
-      }
-      setError(errMsg(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const stage = stages.find((s) => s.key === stageKey);
 
   return (
-    <div className="admin-prompts">
-      <ul className="prompt-list">
-        {list.map((p) => (
-          <li key={p.name} className={current?.name === p.name ? 'active' : ''} onClick={() => open(p.name)}>
-            <span>{p.label}</span>
-            <span className="admin-dim">
-              {p.overridden && <em className="badge">已覆盖</em>}
-              {p.chars} 字
-            </span>
-          </li>
-        ))}
-      </ul>
-      {current ? (
-        <div className="prompt-editor">
-          <div className="admin-toolbar">
-            <span className="title">{current.label}</span>
-            <span className="admin-dim">{current.name}</span>
-            <button disabled={busy || text === current.content} onClick={save}>保存</button>
-            <button disabled={busy || !current.overridden} onClick={reset}>重置为默认</button>
-          </div>
-          <div className="prompt-views">
-            <button className={view === 'content' ? 'active' : ''} onClick={() => setView('content')}>内容</button>
-            <button className={view === 'composition' ? 'active' : ''} onClick={() => setView('composition')}>
-              组成 · {current.call_sites.length} 处调用
+    <div className="pm">
+      <nav className="pm-nav">
+        {stages.map((st) => (
+          <div key={st.key} className={`pm-group${st.key === stageKey ? ' active' : ''}`}>
+            <button
+              className="pm-group-head"
+              onClick={() => {
+                setStageKey(st.key);
+                setFocus('');
+              }}
+            >
+              <span>{st.label}</span>
+              <span className="admin-dim">{st.sites.length} 次调用</span>
             </button>
+            <ul>
+              {st.prompts.map((name) => (
+                <li key={name}>
+                  <button
+                    className={st.key === stageKey && focus === name ? 'active' : ''}
+                    onClick={() => {
+                      setStageKey(st.key);
+                      setFocus(name);
+                    }}
+                  >
+                    <span className="pm-file-label">
+                      {byName[name]?.label ?? name}
+                      {ctl.dirty(name) && <em className="pm-dot" title="有未保存的修改">●</em>}
+                      {byName[name]?.overridden && <em className="badge">改</em>}
+                    </span>
+                    <span className="pm-file-name">{name}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
           </div>
-          {error && <p className="admin-error">{error}</p>}
-          {notice && <p className="admin-notice">{notice}</p>}
-          {view === 'content' ? (
-            <textarea value={text} onChange={(e) => setText(e.target.value)} spellCheck={false} />
-          ) : (
-            <PromptComposition
-              sites={current.call_sites}
-              current={current.name}
-              stale={text !== current.content}
-              onOpen={open}
-            />
-          )}
-        </div>
-      ) : (
-        <p className="admin-dim">← 选择一个提示词查看/编辑</p>
-      )}
+        ))}
+      </nav>
+      <section className="pm-body">
+        {error && <p className="admin-error">{error}</p>}
+        {notice && <p className="admin-notice">{notice}</p>}
+        {stage && <StageView stage={stage} ctl={ctl} />}
+      </section>
     </div>
   );
 }
