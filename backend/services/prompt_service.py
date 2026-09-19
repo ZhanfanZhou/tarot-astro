@@ -17,18 +17,19 @@ from uuid import uuid4
 from config import PROMPTS_DIR, PROMPT_OVERRIDES_DIR
 
 # 可管理提示词白名单（防路径穿越；新增 prompt 在此登记）
+# 名字在管理页左栏按阶段分好组之后显示，不必再带「开场幕·」这类前缀
 PROMPT_REGISTRY: Dict[str, str] = {
     "tarot_system.md": "塔罗对话系统提示词",
     "astrology_system.md": "占星对话系统提示词",
-    "opening_persona.md": "开场幕·人设与迎接（开场白那一次只发这份）",
-    "opening_system.md": "开场幕·前置占卜师提示词",
-    "opening_greeting.md": "开场幕·开场白那一轮的指令",
-    "opening_force_brief.md": "开场幕·追问预算用尽那一轮（强制交单指令 + 过渡语）",
-    "reading_handoff.md": "开场→解读 接场约束",
-    "portrait_usage.md": "用户画像块怎么用（开场与解读都带）",
-    "notebook_system.md": "笔记本生成提示词（占卜笔记 + 用户画像）",
-    "daily_oracle_system.md": "每日一签系统提示词",
-    "daily_journey.md": "心灵奇旅提示词",
+    "opening_persona.md": "人设与迎接",
+    "opening_system.md": "前置占卜师要做的事",
+    "opening_greeting.md": "开场白那一轮的指令",
+    "opening_force_brief.md": "追问预算用尽那一轮（强制交单指令 + 过渡语）",
+    "reading_handoff.md": "接场约束",
+    "portrait_usage.md": "用户画像块怎么用",
+    "notebook_system.md": "笔记本生成（占卜笔记 + 用户画像）",
+    "daily_oracle_system.md": "每日一签解读",
+    "daily_journey.md": "心灵奇旅",
 }
 
 MAX_PROMPT_CHARS = 100_000
@@ -73,14 +74,18 @@ class Part:
     看到的拼接顺序和代码实际发的是同一个来源，不另写一份说明。
       prompt    来自哪个 .md（管理页可改）；空 = 代码拼的
       variable  True = 这段是 prompt 模板里某个变量填进去的值，不是文件正文
+      sample    True = 这段正文是运行时数据，管理页里看到的只是示例；False = 代码里写死的字
       label     这一段是什么（代码段的名字、模板变量名、文件里的哪个小节）
-      when      什么情况下才有；空 = 每次都有
+      when      满足什么条件才有这一段；空 = 每次都有
+      variants  这一段有哪几种形态（每次都有，但内容长得不一样）；空 = 只有一种
     """
     text: str
     prompt: str = ""
     variable: bool = False
+    sample: bool = False
     label: str = ""
     when: str = ""
+    variants: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -106,7 +111,8 @@ def render_prompt_parts(name: str, variables: Dict[str, str]) -> List[Part]:
     parts = []
     for i, piece in enumerate(re.split(f"({pattern})", text)):
         if i % 2:
-            parts.append(Part(str(variables[piece[1:-1]]), prompt=name, variable=True, label=piece))
+            parts.append(Part(str(variables[piece[1:-1]]), prompt=name,
+                              variable=True, sample=True, label=piece))
         elif piece:
             parts.append(Part(piece, prompt=name))
     return parts

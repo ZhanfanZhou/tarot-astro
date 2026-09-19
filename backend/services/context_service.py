@@ -75,12 +75,15 @@ async def build_relationship_meta(user_id: str, current_conversation_id: str) ->
     }
 
 
-def build_user_context(user: Optional[User]) -> str:
+def build_user_context(user: Optional[User], include_chart: bool = True) -> str:
     """用户资料块：两个相位的系统提示词都带。最后是本命星盘：基本星盘或它的状态。
 
     一个字段都没填过（profile 为 None，注册/游客时没填任何东西就是这样）也照样出这一块，
     写明「尚未完善」和星盘缺哪几项：两份提示词都写着「看 <用户资料> 里有没有完整的出生
     日期」，块整个不出现的话，模型是去一个不存在的小节里找答案。
+
+    include_chart=False 只出资料几行，不带星盘那一行——每日一签用这一份：一张牌的日运
+    不看盘，但昵称、性别、生日、出生地照样是同一份资料。
     """
     if not user:
         return ""
@@ -104,7 +107,9 @@ def build_user_context(user: Optional[User]) -> str:
     # tarot_system.md / astrology_system.md / opening_system.md 都已写明，
     # 代码里再写一遍就是第四份，改提示词时必然漏掉这一份。
     lines = context_parts or ["尚未完善"]
-    return "\n# <用户资料>\n" + "\n".join(lines + [_chart_status(user)])
+    if include_chart:
+        lines = lines + [_chart_status(user)]
+    return "\n# <用户资料>\n" + "\n".join(lines)
 
 
 def _chart_status(user: User) -> str:
@@ -118,6 +123,9 @@ def _chart_status(user: User) -> str:
     return "本命星盘：未保存（出生资料齐全，可以排盘）"
 
 
+_PROFILE_SHAPES = ("一个字段都没填过时只写「尚未完善」；末行本命星盘三种：已存基本星盘 / "
+                   "出生资料齐全但还没排过 / 缺出生资料排不了（示例是第一种）")
+
 _PORTRAIT_LABELS = {
     "recent": "生活近况",
     "people_and_events": "近期的人与事",
@@ -129,6 +137,7 @@ _PORTRAIT_EMPTY = "还没有形成印象。"
 
 # 画像块只有注册用户有，两个相位都带
 _PORTRAIT_ONLY = "注册用户才有（游客没有笔记本）"
+_PORTRAIT_SHAPES = "四项里只出写过的那几项；一项都没写过时块里只有一句「还没有形成印象。」"
 
 
 def render_portrait_block(portrait: Optional[dict]) -> str:
@@ -177,6 +186,8 @@ def render_relationship_block(meta: dict) -> str:
         line += f" ｜ 距上次：{days} 天" if days is not None else " ｜ 距上次：不详"
     return f"<关系上下文>\n{line}"
 
+
+_RELATIONSHIP_SHAPES = "第 1 次来访没有「距上次」那一段；查不到上次时间写「距上次：不详」"
 
 _BRIEF_LABELS = [
     ("question", "问题"),
@@ -230,7 +241,8 @@ def _portrait_parts(portrait_context: str) -> List[Part]:
     if not portrait_context:
         return []
     return [
-        Part(f"\n\n{portrait_context}", label="用户画像", when=_PORTRAIT_ONLY),
+        Part(f"\n\n{portrait_context}", label="用户画像", sample=True,
+             when=_PORTRAIT_ONLY, variants=_PORTRAIT_SHAPES),
         Part("\n\n"),
         prompt_service.prompt_part("portrait_usage.md", when=_PORTRAIT_ONLY),
     ]
@@ -239,7 +251,7 @@ def _portrait_parts(portrait_context: str) -> List[Part]:
 def _entry_part(session_type: SessionType) -> Part:
     entry = _ENTRY_LABEL.get(session_type, "塔罗")
     return Part(f"\n\n# <入口>\n{entry}", label="入口",
-                when="按会话入口：" + " / ".join(_ENTRY_LABEL.values()))
+                variants="按会话入口取值：" + " / ".join(_ENTRY_LABEL.values()))
 
 
 def opening_prompt_parts(
@@ -266,10 +278,11 @@ def opening_prompt_parts(
              _entry_part(session_type)]
 
     if user_context:
-        parts.append(Part(f"\n{user_context}", label="用户资料"))
+        parts.append(Part(f"\n{user_context}", label="用户资料", sample=True, variants=_PROFILE_SHAPES))
     parts += _portrait_parts(portrait_context)
     if relationship_block:
-        parts.append(Part(f"\n\n{relationship_block}", label="关系上下文"))
+        parts.append(Part(f"\n\n{relationship_block}", label="关系上下文",
+                          sample=True, variants=_RELATIONSHIP_SHAPES))
     if force_brief:
         parts.append(Part("\n\n"))
         parts.append(Part(_forced_brief_parts()[0], prompt="opening_force_brief.md",
@@ -300,7 +313,8 @@ def greeting_prompt_parts(relationship_block: str, session_type: SessionType) ->
     """
     parts = [prompt_service.prompt_part("opening_persona.md"), _entry_part(session_type)]
     if relationship_block:
-        parts.append(Part(f"\n\n{relationship_block}", label="关系上下文"))
+        parts.append(Part(f"\n\n{relationship_block}", label="关系上下文",
+                          sample=True, variants=_RELATIONSHIP_SHAPES))
     return parts + [
         Part("\n\n"),
         prompt_service.prompt_part("opening_greeting.md"),
@@ -369,12 +383,12 @@ def reading_prompt_parts(
     """
     parts = [prompt_service.prompt_part(reading_base_prompt_name(session_type))]
     if user_context:
-        parts.append(Part(f"\n\n{user_context}", label="用户资料"))
+        parts.append(Part(f"\n\n{user_context}", label="用户资料", sample=True, variants=_PROFILE_SHAPES))
     parts += _portrait_parts(portrait_context)
 
     brief_block = render_brief_block(strategy)
     if brief_block:
-        parts.append(Part(brief_block, label="本场起手", when=_BRIEF_ONLY))
+        parts.append(Part(brief_block, label="本场起手", sample=True, when=_BRIEF_ONLY))
         parts.append(Part("\n\n"))
         parts.append(prompt_service.prompt_part("reading_handoff.md", when=_BRIEF_ONLY))
     return parts
