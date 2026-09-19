@@ -1,0 +1,121 @@
+# 每日一签 · 心灵奇旅
+
+殿堂主页的日运入口：一天一张牌，可回看两周、可印证、可接着聊；
+攒够素材后能写一篇回望这段日子的「心灵奇旅」，写过的都留在卷宗里。
+
+---
+
+## 1. 规则
+
+| | |
+|---|---|
+| 抽牌频次 | 每「生效日」仅一次，不可重抽 |
+| 生效日 | 按浏览器本地时间：18:00 前抽算今天，18:00 后算明天（「晚上为明日求签」） |
+| 牌阵 | 单张 |
+| 解读上下文 | 最近 5 次日运记录（最远回溯 14 天）+ 用户资料（不含本命星盘），**不读对话正文** |
+| 反馈 | 日历回访的「印证」控件（应验 / 没感觉 + 一句话）+ 继续聊天经笔记本沉淀 |
+| 对话建模 | 每日一个独立对话，`SessionType.DAILY`，没有开场幕 |
+
+**日运记录是轻量索引，重内容全部活在对话系统里。** 解读文字、后续聊天、笔记沉淀
+复用现有会话与笔记本机制；新增存储只记「哪天抽了什么牌、反馈如何、写过哪几篇旅程」。
+
+---
+
+## 2. 存储 `backend/data/daily_draws.json`
+
+```json
+{
+  "<user_id>": {
+    "records":  { "<effective_date>": { ...DailyDrawRecord } },
+    "journeys": [ { "generated_on", "date_range", "text", "generated_at" } ]
+  }
+}
+```
+
+- 一日一条，以 `effective_date` 为键天然去重。
+- `journeys` 一天最多一篇（同日重写就地覆盖），按 `generated_on` 升序；只读，供卷宗回顾。
+- **streak 不落库**，读取时从 records 倒推：从今日生效日（今日未抽则从昨日）起连续有记录的天数。
+
+`DailyDrawRecord` = `effective_date` + `card` + `conversation_id` + `drawn_at` +
+`feedback{verdict, note, fed_back_at}`。
+
+---
+
+## 3. 接口
+
+| 接口 | 行为 |
+|---|---|
+| `GET /api/daily/{user_id}/overview?date=` | 今日记录、streak、近 14 天逐日（牌面 / 签语 / 对话还在不在）、能不能写新旅程、已写几卷。签语从对应对话首条 assistant 懒取首句，不冗余存储 |
+| `POST /api/daily/{user_id}/draw` | 一日一次。校验该日无记录（409）且与服务器日期偏差 ≤1 天（422）→ 扣额度 → 服务端随机单张 → **当场生成今日解读** → 建 daily 对话，解读与牌面落成同一条 assistant → 落记录 |
+| `POST /api/daily/{user_id}/feedback` | 更新该日印证；近 14 天内任意有记录的日期均可印证 / 修改 |
+| `GET /api/daily/{user_id}/journeys?date=` | 卷宗：写过的每一篇（新→旧）+ 素材够不够再写一篇 + 今天的记录归没归档 |
+| `POST /api/daily/{user_id}/journey?date=&force=` | SSE 生成心灵奇旅。当天那一篇已写过且非 force 时直接回放，不花额度；生成成功后落进 `journeys` |
+
+**解读由「抽签」这个动作产生**：牌已经在提示词里，模型没有工具可调，
+也没有用户发言要回——和开场白同一个道理，一次生成、落成第一条 assistant。
+生成失败则什么都不落，用户重抽即可（签是随机的，重抽不违背一日一签）。
+
+抽完之后接着聊走普通的 `/api/tarot/message`，用的是每日一签的提示词和工具集。
+
+---
+
+## 4. 提示词
+
+两份，都在 `backend/prompts/`，每次请求实时读盘渲染（改完即生效，无需重启）。
+
+**`daily_oracle_system.md`** — 占位符 `{user_context}` `{today_date}` `{today_card}` `{history_block}`。
+
+- `{user_context}` 就是塔罗 / 占星那份用户资料块
+  （`context_service.build_user_context(user, include_chart=False)`）：
+  日运不看盘，只要昵称、性别、生日、出生地。
+- `{history_block}` 窗口：最近 **5** 次日运记录，最远回溯 14 天（0 次时写「这是旅程的第一签」）。
+  每条一行：`6月10日 | 宝剑三·逆位 | 印证:应验了 | 附言:确实和同事起了争执`；
+  未反馈显示「未印证」；附言存全文、不截断。
+  那天签后聊下去、并已写成笔记的（注册用户才有），牌那行下面紧跟一行 `  笔记:<summary>`——
+  按 `conversation_id` 只认这几天日签对话自己的笔记，且只取 `summary` 一个字段
+  （牌和用户资料上面已经有了）。
+- **不读对话正文**，聊天细节一律经笔记本沉淀后再回来。
+
+**`daily_journey.md`** — 占位符 `{nickname}` `{history_block}` `{notebook_block}` `{date_range}`。
+它的 `{history_block}` 不受 5 次窗口限制，用近 14 天全量记录；笔记走它自己的 `{notebook_block}`。
+素材少于 `JOURNEY_MIN_RECORDS`（3）条时不给写。
+
+---
+
+## 5. 前端
+
+- **`DailyOracleBanner`** — 挂在殿堂主页牌廊横幅下方，同宽稍矮。
+  未抽态是呼吸的牌背（18:00 后文案变「为明日求一签」），已抽态翻转为今日牌面 + 签语首句；
+  连续 ≥2 天显示 streak 徽记。挂载与窗口重新聚焦时重算生效日并拉 overview。
+- **`DailyOracleModal`** — 顶部 14 格日历带（可回看、可印证、可跳进当日对话）+ 今日舞台
+  （未抽：唤起全屏 `TarotCardDrawer`；已抽：牌面 + 解读 + 「继续这段对话 ›」）。
+- **`JourneyBanner`** — 主页上通往卷宗的入口（游客不显示）。
+- **`JourneyChronicle`** — 卷宗：写过的每一篇按时间成卷（卷一、卷二…）。
+  **只读**——旅程是一次性的记述，不能续写、不能对话，写过的篇目连重生成都不给；
+  只有今天那一篇允许重写（素材还在变）。
+  今天聊过但笔记还没归档时（笔记是离场 12 小时后才写的），页面上直说，
+  免得用户以为旅程漏了他今天的占卜。
+
+---
+
+## 6. 边界
+
+| 情况 | 处理 |
+|---|---|
+| 重复抽取 | 后端 409 → 前端提示并静默刷新 overview 纠正状态（多标签页 / 多设备） |
+| 跨天停留 / 18:00 边界 | window focus 时重算生效日并拉 overview |
+| 删除 daily 对话 | 记录保留（日历、牌面、反馈完整），回顾态显示降级文案 |
+| 游客 | 与注册用户同等可抽可聊；没有笔记本，旅程只按抽签记录写，卷宗入口不出现 |
+| 素材不足 3 天 | 旅程入口置灰 |
+
+---
+
+## 7. 代码在哪
+
+| 文件 | 管什么 |
+|---|---|
+| `routers/daily.py` | 五个接口 |
+| `services/daily_service.py` | 记录读写、streak、history_block、旅程窗口与落库、两份提示词的渲染 |
+| `prompts/daily_oracle_system.md` · `daily_journey.md` | 提示词 |
+| `components/daily/` | 横幅、弹窗、日历带、卷宗 |
+| `utils/dailyDate.ts` | 生效日计算（18:00 规则） |

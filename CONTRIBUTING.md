@@ -85,7 +85,7 @@ git push origin feature/your-feature-name
 - [ ] 代码符合项目风格
 - [ ] 添加了必要的注释
 - [ ] 更新了 README.md（如果需要）
-- [ ] 更新了 arch.md（如果改动了架构）
+- [ ] 更新了对应的 spec（`docs/superpowers/specs/`，如果改动了机制）
 - [ ] 测试通过（如果有）
 - [ ] 没有引入新的警告或错误
 

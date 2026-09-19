@@ -153,7 +153,7 @@ npm run preview  # 预览构建结果
 ## 下一步
 
 - 阅读 [README.md](README.md) 了解详细功能
-- 查看 [arch.md](arch.md) 了解架构设计
+- 查看 [docs/superpowers/specs/](docs/superpowers/specs/) 了解各功能的设计
 - 阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 参与开发
 
 祝你占卜愉快！🔮✨
