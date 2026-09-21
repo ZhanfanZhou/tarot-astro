@@ -11,7 +11,7 @@ interface SessionButtonsProps {
 
 interface SessionDef {
   type: SessionType;
-  portrait: string;     // 720px webp，顶栏/侧栏/对话里的小头像也用这张
+  portrait: string;     // 720px webp，顶栏/对话里的小头像也用这张
   label: string;
   en: string;
   tagline: string;
@@ -193,9 +193,9 @@ const SessionButtons: React.FC<SessionButtonsProps> = ({
                 </span>
               )}
               {!button.comingSoon && (
-                /* enter cue / 落座中 */
+                /* enter cue / 落座中：挂在字下面、不占行，拱窗这一行矮一截，殿堂才放得下下面那排入口 */
                 <span
-                  className={`mt-1 text-xs tracking-[0.3em] font-display transition-opacity duration-500 ${
+                  className={`absolute top-full inset-x-0 mt-1 text-xs tracking-[0.3em] font-display transition-opacity duration-500 ${
                     isPending ? 'opacity-100 animate-pulse' : 'opacity-0 group-hover:opacity-100'
                   }`}
                   style={{ color: button.accent }}

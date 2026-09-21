@@ -84,12 +84,13 @@
 
 ## 5. 前端
 
-- **`DailyOracleBanner`** — 挂在殿堂主页牌廊横幅下方，同宽稍矮。
+- **殿堂入口** — `HubStrip` 中间那一栏（见 [前端](frontend.md) §2）。
   未抽态是呼吸的牌背（18:00 后文案变「为明日求一签」），已抽态翻转为今日牌面 + 签语首句；
-  连续 ≥2 天显示 streak 徽记。挂载与窗口重新聚焦时重算生效日并拉 overview。
+  连续 ≥2 天显示「连续 N 天」。挂载与窗口重新聚焦时重算生效日并拉 overview。
 - **`DailyOracleModal`** — 顶部 14 格日历带（可回看、可印证、可跳进当日对话）+ 今日舞台
   （未抽：唤起全屏 `TarotCardDrawer`；已抽：牌面 + 解读 + 「继续这段对话 ›」）。
-- **`JourneyBanner`** — 主页上通往卷宗的入口（游客不显示）。
+- **卷宗入口** — `HubStrip` 右边那一栏：写过几卷就标「已写下 N 卷」；游客标「注册专属」、点不动；
+  注册用户没写过、素材也不够时同样点不动。
 - **`JourneyChronicle`** — 卷宗：写过的每一篇按时间成卷（卷一、卷二…）。
   **只读**——旅程是一次性的记述，不能续写、不能对话，写过的篇目连重生成都不给；
   只有今天那一篇允许重写（素材还在变）。
@@ -117,5 +118,5 @@
 | `routers/daily.py` | 五个接口 |
 | `services/daily_service.py` | 记录读写、streak、history_block、旅程窗口与落库、两份提示词的渲染 |
 | `prompts/daily_oracle_system.md` · `daily_journey.md` | 提示词 |
-| `components/daily/` | 横幅、弹窗、日历带、卷宗 |
+| `components/daily/` | 弹窗、日历带、卷宗（殿堂入口在 `components/HubStrip.tsx`） |
 | `utils/dailyDate.ts` | 生效日计算（18:00 规则） |
