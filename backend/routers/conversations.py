@@ -129,13 +129,16 @@ async def delete_conversation(
     conversation_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    """删除对话（仅本人）"""
+    """删除对话（仅本人），连同这场的占卜笔记。没接着聊过的每日一签不能删。"""
     conversation = await ConversationService.get_conversation(conversation_id)
     if not conversation:
         raise HTTPException(status_code=404, detail="对话不存在")
     ensure_owner(current_user, conversation.user_id)
+    if not ConversationService.deletable(conversation):
+        raise HTTPException(status_code=400, detail="每日一签的对话不能删除")
     try:
         await ConversationService.delete_conversation(conversation_id)
+        notebook_service.delete_note(conversation.user_id, conversation_id)
         return {"message": "对话已删除"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

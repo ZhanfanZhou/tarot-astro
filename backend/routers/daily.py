@@ -13,8 +13,7 @@ from models import (
 from services import llm
 from services.conversation_service import ConversationService
 from services.daily_service import (
-    CALENDAR_DAYS, JOURNEY_MIN_RECORDS, DailyService, compute_streak, extract_tagline,
-    journey_window_records,
+    CALENDAR_DAYS, DailyService, compute_streak, drew_cards, extract_tagline,
 )
 from services.notebook_service import notebook_enabled, notebook_service
 from services.tarot_service import TarotService
@@ -65,7 +64,7 @@ async def get_overview(
         today_record=records.get(date_param),
         streak=streak,
         history=history,
-        journey_ready=len(journey_window_records(records, today)) >= JOURNEY_MIN_RECORDS,
+        journey_ready=await DailyService.journey_ready(user_id, today),
         journey_count=len(await DailyService.get_journeys(user_id)),
     )
 
@@ -160,7 +159,7 @@ async def _has_unarchived_today(user_id: str) -> bool:
         c.created_at[:10] == today
         and c.conversation_id not in noted
         and len(c.messages) > 1
-        and (c.has_drawn_cards or any(m.tarot_cards for m in c.messages))
+        and drew_cards(c)
         for c in await StorageService.get_user_conversations(user_id)
     )
 
@@ -174,10 +173,9 @@ async def list_journeys(
     """写过的心灵奇旅(新→旧)+ 现在能不能再写一篇 + 今天的记录归没归档。"""
     ensure_owner(current_user, user_id)
     today = _parse_date(date_param)
-    records = await DailyService.get_user_records(user_id)
     return JourneyListResponse(
         entries=await DailyService.get_journeys(user_id),
-        ready=len(journey_window_records(records, today)) >= JOURNEY_MIN_RECORDS,
+        ready=await DailyService.journey_ready(user_id, today),
         pending_today=(await _has_unarchived_today(user_id)
                        if notebook_enabled(current_user) else False),
     )

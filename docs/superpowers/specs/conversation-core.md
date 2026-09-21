@@ -142,10 +142,16 @@ SSE 形状与 `/message` 一致，前端的等待体验因此和等一轮回复�
 
 ---
 
-## 7. 离场
+## 7. 离场与删除
 
 `POST /api/conversations/{id}/exit` 登记一个笔记任务，12 小时后生成（仅注册用户）。
 机制见 [笔记本](notebook.md)。
+
+`DELETE /api/conversations/{id}` 删掉这场对话，这一场写过的占卜笔记跟着删（画像不回退）。
+**没接着聊过的每日一签不能删**（400）：用户在里面发过言，它才算普通对话、才能删；
+删掉的只是对话，那天的日运记录（牌面、印证）留着。
+前端的删除入口按同一条规则显示或隐藏（`utils/conversation.ts` 的 `canDelete`，
+对应后端 `ConversationService.deletable`）。
 
 ---
 
