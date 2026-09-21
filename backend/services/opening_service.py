@@ -1,12 +1,12 @@
-"""开场幕的 router 侧公共逻辑：开场白生成、守卫判定、交单落库。
+"""开场幕的 router 侧公共逻辑：开场白生成、上下文拼装、交单落库。
 
 塔罗与占星两个 router 共用，避免复制粘贴。
 """
 from typing import Optional, Tuple
 
 import config
-from models import Conversation, MessageRole, SessionType, User
-from services import context_service, prompt_service
+from models import Conversation, SessionType, User
+from services import context_service, prompt_service, spread_service
 from services.storage_service import StorageService
 
 
@@ -25,53 +25,18 @@ def _nickname(user: Optional[User]) -> str:
     return "朋友"
 
 
-def count_user_messages(conversation: Conversation) -> int:
-    return sum(1 for m in conversation.messages if m.role == MessageRole.USER)
-
-
-def should_force_brief(conversation: Conversation) -> bool:
-    """守卫第 2 层：开场相位内澄清预算用尽 → 本轮 Gemini 调用带 mode=ANY 强制交单。"""
-    if context_service.get_phase(conversation) != context_service.PHASE_OPENING:
-        return False
-    return count_user_messages(conversation) >= config.OPENING_FORCE_BRIEF_AFTER_USER_MSGS
-
-
-def should_hard_exit(conversation: Conversation) -> bool:
-    """守卫第 3 层：强制交单也失败 → 直接翻 phase，保证不存在卡死在开场幕的会话。"""
-    if context_service.get_phase(conversation) != context_service.PHASE_OPENING:
-        return False
-    return count_user_messages(conversation) >= config.OPENING_HARD_EXIT_AFTER_USER_MSGS
-
-
-async def hard_exit_to_reading(conversation: Conversation) -> Conversation:
-    """兜底出场：只翻 phase，strategy 保持 None——不伪造假策略单污染数据。"""
-    conversation.phase = context_service.PHASE_READING
-    await StorageService.save_conversation(conversation)
-    print(f"[Opening] 🛟 守卫兜底：{conversation.conversation_id} 强制进入解读相位（无策略单）")
-    return conversation
-
-
 async def prepare_opening_context(
     conversation: Conversation, user: Optional[User]
-) -> Tuple[str, bool, str]:
-    """开场幕的 router 侧上下文，一次算清：守卫兜底 → 相位 → 强制交单 → 关系上下文块。
+) -> Tuple[str, str]:
+    """开场幕的 router 侧上下文：相位 + <称呼与来访次数> 块。
 
     塔罗与占星此前各自逐字复制了同一段拼装（还各自内联了第三份昵称逻辑），任何一边
     改漏就是静默分裂 —— 收归此处，两个 router 各一行调用。
 
     Returns:
-        (phase, force_brief, relationship_block)；解读相位下后两者恒为 (False, "")。
-
-    Note:
-        守卫第 3 层触发时 `conversation` 会被**就地**改写（phase 翻成 reading 并落库），
-        调用方后续从同一个对象取 strategy，无需重新读库。
+        (phase, relationship_block)；解读相位下后者恒为 ""。
     """
-    # 守卫第 3 层：强制交单也失败 → 兜底翻 phase，保证不存在卡死在开场幕的会话
-    if should_hard_exit(conversation):
-        await hard_exit_to_reading(conversation)
-
     phase = context_service.get_phase(conversation)
-    force_brief = should_force_brief(conversation)  # 守卫第 2 层
 
     relationship_block = ""
     if phase == context_service.PHASE_OPENING:
@@ -81,7 +46,29 @@ async def prepare_opening_context(
         meta["nickname"] = _nickname(user)
         relationship_block = context_service.render_relationship_block(meta)
 
-    return phase, force_brief, relationship_block
+    return phase, relationship_block
+
+
+async def submit_brief(conversation: Conversation, args: dict) -> dict:
+    """交单：按牌阵 ID 展开成完整起手单 → 落库 + 翻相位。返回值就是发回模型的工具结果。
+
+    开场只交一个牌阵 ID（`spread_type`），位置、张数、牌阵名都挂在那个 ID 上，在这里
+    从牌阵目录展开一次，之后解读相位读到的就是完整的一单：`render_brief_block` 出名字和
+    编好号的位置，`_spread_parts` 按同一个 ID 接上那副阵的解读方法。
+
+    ID 不认识 → 不落库、不翻相位，把可选值回给模型让它重选。schema 里 spread_type 是
+    enum，正常走不到这里；真走到了也不该拿一副阵去顶替它选的那副——抽出来的牌会按错的
+    位置解读一整场。重选一次便宜得多。
+    """
+    brief = context_service.expand_brief(args)
+    if brief is None:
+        print(f"[Opening] ⚠️ 牌阵 ID 不认识: {args.get('spread_type')!r}，退回重选")
+        return {"success": False,
+                "error": f"spread_type 必须是 <牌阵选择参考> 里的牌阵 ID，"
+                         f"只能是这几个之一：{'、'.join(spread_service.SPREAD_IDS)}"}
+
+    await save_strategy(conversation, brief)
+    return {"success": True}
 
 
 async def save_strategy(conversation: Conversation, strategy: dict) -> Conversation:
@@ -128,7 +115,7 @@ async def build_greeting(
     """开场白：走前置占卜师提示词生成。失败一律抛 GreetingUnavailable。
 
     不吞异常：关系元数据的 SQL 错、提示词文件缺失、provider 故障，都该原样浮出来，
-    而不是被一条看起来正常的问候盖住、让会话带着空的关系上下文继续往下走。
+    而不是被一条看起来正常的问候盖住、让会话带着空的来访信息继续往下走。
     """
     try:
         meta = await context_service.build_relationship_meta(

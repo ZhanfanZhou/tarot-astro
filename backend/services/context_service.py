@@ -1,13 +1,13 @@
 """开场幕上下文服务：相位判定、关系元数据、策略单渲染、两相位的提示词拼装。
 
-「相位」概念的唯一权威——gemini_service、routers、守卫全部问这里，不各自判断，
+「相位」概念的唯一权威——gemini_service、routers 全部问这里，不各自判断，
 杜绝「路由认为在开场、工具集却给了抽牌」的分裂。
 """
 from datetime import datetime
 from typing import List, Optional
 
 from models import GENDER_LABELS, Conversation, SessionType, User, UserProfile
-from services import prompt_service
+from services import prompt_service, spread_service
 from services.astrology_service import AstrologyService
 from services.db import get_db
 from services.notebook_service import notebook_enabled, notebook_service as notebook
@@ -172,7 +172,7 @@ def build_portrait_context(user: Optional[User]) -> str:
 
 
 def render_relationship_block(meta: dict) -> str:
-    """关系上下文块：只注入事实（称呼/第几次/距上次多久）。
+    """<称呼与来访次数> 块：只注入事实（称呼/第几次/距上次多久）。
 
     「新客要安静、回头客要熟人语气、禁止翻旧账」这类语气指令写在 opening_persona.md 的
     <迎接> 一节（管理页可在线改）。这里留纯数据，代码里不再藏文案。
@@ -184,7 +184,7 @@ def render_relationship_block(meta: dict) -> str:
     if visit_count > 1:
         days = meta.get("days_since_last")
         line += f" ｜ 距上次：{days} 天" if days is not None else " ｜ 距上次：不详"
-    return f"<关系上下文>\n{line}"
+    return f"# <称呼与来访次数>\n{line}"
 
 
 _RELATIONSHIP_SHAPES = "第 1 次来访没有「距上次」那一段；查不到上次时间写「距上次：不详」"
@@ -193,13 +193,33 @@ _BRIEF_LABELS = [
     ("question", "问题"),
     ("context", "背景"),
     ("route", "起手"),
-    ("spread_type", "牌阵"),
+    ("spread", "牌阵"),
     ("positions", "位置"),
 ]
 
 
+def _brief_value(strategy: dict, key: str):
+    """一个起手单字段渲染成一行里的值。
+
+    牌阵一行同时给名字和 ID：名字是解读时要说的那副阵，ID 是 <牌阵说明> 那一块的出处。
+    位置编号，因为牌阵说明里是按 1、2、3 讲各位置职责的，不编号模型得自己数。
+    存量会话只有 spread_type（当时是模型自拟的阵名），照原样出。
+    """
+    if key == "spread":
+        name, spread_id = strategy.get("spread_name"), strategy.get("spread_type")
+        if not spread_id:
+            return name
+        return f"{name}（{spread_id}）" if name else spread_id
+    value = strategy.get(key)
+    if key == "positions" and value:
+        return " / ".join(f"{i} {p}" for i, p in enumerate(value, 1))
+    if isinstance(value, (list, tuple)):
+        return " / ".join(str(v) for v in value)
+    return value
+
+
 def render_brief_block(strategy: Optional[dict]) -> str:
-    """起手单块。None/空 → 空串（存量会话与守卫兜底场景，解读 Agent 表现同改动前）。
+    """起手单块。None/空 → 空串（存量会话，解读 Agent 表现同改动前）。
 
     措辞是「本场起手」而不是「当前策略」：它是开场定下的一次性记录，用户后来换了角度、
     补抽了别的牌阵都不会回写这里，解读 Agent 不该拿它当当前指令用。
@@ -211,11 +231,9 @@ def render_brief_block(strategy: Optional[dict]) -> str:
         return ""
     lines = []
     for key, label in _BRIEF_LABELS:
-        value = strategy.get(key)
+        value = _brief_value(strategy, key)
         if not value:
             continue
-        if isinstance(value, (list, tuple)):
-            value = " / ".join(str(v) for v in value)
         lines.append(f"{label}：{value}")
     if not lines:
         return ""
@@ -225,15 +243,58 @@ def render_brief_block(strategy: Optional[dict]) -> str:
     )
 
 
-# 走塔罗但模型没给 positions 时的兜底——不为这个再花一次往返去问它
-_DEFAULT_SPREAD = {
-    "spread_type": "three_card",
-    "positions": ["现状", "阻碍", "流向"],
-}
+def spread_of(strategy: Optional[dict]):
+    """这场用的牌阵。非塔罗路线、存量会话里模型自拟的阵名 → None。"""
+    if (strategy or {}).get("route") != "tarot":
+        return None
+    return spread_service.get(strategy.get("spread_type"))
 
 
-_BRIEF_ONLY = "开场幕交过单才有（旧会话、守卫兜底进来的没有）"
-_FORCED_ONLY = "追问预算用尽的那一轮才有"
+def expand_brief(args: Optional[dict]) -> Optional[dict]:
+    """交单参数 → 完整起手单。牌阵 ID 不在目录里 → None（调用方负责退回重选）。
+
+    开场只交 ID，位置、张数、牌阵名都挂在那个 ID 上，在这里一次性展开。展开只在这一处
+    做：落库的那一份、同一轮里交给解读 Agent 的那一份、推给抽牌器的那一副，
+    都从这个返回值来，不各自再查一遍目录。
+    """
+    if args is None:
+        return None
+    brief = dict(args)
+    if brief.get("route") == "tarot":
+        spread = spread_service.get(brief.get("spread_type"))
+        if spread is None:
+            return None
+        brief["spread_name"] = spread.name
+        brief["positions"] = list(spread.positions)
+    else:
+        # 星盘路线没有牌阵。模型多填了也不留：留着 <本场起手> 会多出一行没有位置的牌阵，
+        # 而这场根本没抽牌。
+        brief.pop("spread_type", None)
+    return brief
+
+
+def _spread_parts(spread) -> List[Part]:
+    """牌阵说明块：这副牌阵的固定位置、适用场合、解读方法与限制，逐字来自它自己那份 .md。
+
+    开场只交一个牌阵 ID，这一整块的内容它从没见过——五副阵的详解一起发过去，
+    对只需要选阵的开场 Agent 是纯噪音。选定之后才在这里接给解读 Agent。
+
+    正文取 spread.detail 而不是整份文件：文件头那几行（id / name / positions）是给代码
+    读的，positions 已经在 <本场起手> 里编好号了，同一份东西不发两遍。
+    """
+    return [
+        Part(f"\n\n# <牌阵说明>\n本场用的是「{spread.name}」。"
+             "以下是这副牌阵的固定位置与解读方法。\n\n",
+             label="块标题 + 这副阵的名字", sample=True, when=_SPREAD_ONLY),
+        Part(spread.detail, prompt=spread_service.prompt_name(spread.id), when=_SPREAD_ONLY,
+             label="正文（文件头那几行是机器读的，不发给模型）",
+             variants="按本场起手单的 spread_type 从五副阵里取一份；"
+                      "这一页显示的是示例起手单选中的那副"),
+    ]
+
+
+_BRIEF_ONLY = "开场幕交过单才有（旧会话没有）"
+_SPREAD_ONLY = "起手单走塔罗、牌阵 ID 在目录里才有（星盘路线和旧会话没有）"
 
 
 def _portrait_parts(portrait_context: str) -> List[Part]:
@@ -250,22 +311,28 @@ def _portrait_parts(portrait_context: str) -> List[Part]:
 
 def _entry_part(session_type: SessionType) -> Part:
     entry = _ENTRY_LABEL.get(session_type, "塔罗")
-    return Part(f"\n\n# <入口>\n{entry}", label="入口",
+    return Part(f"\n\n# <用户点开的入口>\n{entry}", label="用户点开的入口",
                 variants="按会话入口取值：" + " / ".join(_ENTRY_LABEL.values()))
 
 
 def opening_prompt_parts(
     relationship_block: str,
     session_type: SessionType,
-    force_brief: bool = False,
     user_context: str = "",
     portrait_context: str = "",
 ) -> List[Part]:
-    """开场相位系统提示词 = opening_persona.md + opening_system.md + 入口 + 用户资料
-    + 用户画像 + 关系上下文 [+ opening_force_brief.md 的 <本轮强制> 小节]。
+    """开场相位系统提示词 = opening_persona.md + opening_system.md + opening_spread_catalog.md
+    + 用户点开的入口 + 称呼与来访次数 + 用户资料 + 用户画像。
+
+    <称呼与来访次数> 紧跟在入口后面：opening_persona.md 的 <迎接> 一节按它决定语气，
+    两块挨着，读提示词的人不必从头翻到尾才知道那一节指的是哪一块。
 
     人设与迎接单独一份（opening_persona.md）：开场白那一次调用只发得着这一份，见
     greeting_prompt_parts。开场的活（问清楚 / 选路线 / 牌阵 / 交单）留在 opening_system.md。
+
+    牌阵目录紧跟在后面：opening_system.md 里「仅从 <牌阵选择参考> 的五种牌阵中选择」
+    指的就是它。这里只有每副阵的简介和适用场合，够选阵用；各阵的位置与解读方法是
+    解读相位的事（render_spread_block），开场看不到也不需要看到。
 
     用户资料必须注入：前置占卜师要自己判断「这个问题该不该走星盘」，而星盘要出生信息。
     看不见资料它就只能盲调 request_user_profile 去撞。
@@ -275,34 +342,31 @@ def opening_prompt_parts(
     parts = [prompt_service.prompt_part("opening_persona.md"),
              Part("\n\n"),
              prompt_service.prompt_part("opening_system.md"),
+             Part("\n\n"),
+             prompt_service.prompt_part("opening_spread_catalog.md"),
              _entry_part(session_type)]
 
+    if relationship_block:
+        parts.append(Part(f"\n\n{relationship_block}", label="称呼与来访次数",
+                          sample=True, variants=_RELATIONSHIP_SHAPES))
     if user_context:
         parts.append(Part(f"\n{user_context}", label="用户资料", sample=True, variants=_PROFILE_SHAPES))
     parts += _portrait_parts(portrait_context)
-    if relationship_block:
-        parts.append(Part(f"\n\n{relationship_block}", label="关系上下文",
-                          sample=True, variants=_RELATIONSHIP_SHAPES))
-    if force_brief:
-        parts.append(Part("\n\n"))
-        parts.append(Part(_forced_brief_parts()[0], prompt="opening_force_brief.md",
-                          label="<本轮强制> 小节", when=_FORCED_ONLY))
     return parts
 
 
 def build_opening_prompt(
     relationship_block: str,
     session_type: SessionType,
-    force_brief: bool = False,
     user_context: str = "",
     portrait_context: str = "",
 ) -> str:
     return prompt_service.join(opening_prompt_parts(
-        relationship_block, session_type, force_brief, user_context, portrait_context))
+        relationship_block, session_type, user_context, portrait_context))
 
 
 def greeting_prompt_parts(relationship_block: str, session_type: SessionType) -> List[Part]:
-    """开场白那一次调用 = opening_persona.md + 入口 + 关系上下文 + opening_greeting.md。
+    """开场白那一次调用 = opening_persona.md + 用户点开的入口 + 称呼与来访次数 + opening_greeting.md。
 
     只发人设与迎接。开场的活那几节（问清楚 / 选塔罗还是星盘 / 牌阵表 / 交单 / 边界）这一次
     一件也做不了——用户还没开口，这次调用也没有工具——发过去只是让一句问候语挤在两千字后面。
@@ -313,7 +377,7 @@ def greeting_prompt_parts(relationship_block: str, session_type: SessionType) ->
     """
     parts = [prompt_service.prompt_part("opening_persona.md"), _entry_part(session_type)]
     if relationship_block:
-        parts.append(Part(f"\n\n{relationship_block}", label="关系上下文",
+        parts.append(Part(f"\n\n{relationship_block}", label="称呼与来访次数",
                           sample=True, variants=_RELATIONSHIP_SHAPES))
     return parts + [
         Part("\n\n"),
@@ -321,42 +385,19 @@ def greeting_prompt_parts(relationship_block: str, session_type: SessionType) ->
     ]
 
 
-def first_action(strategy: dict) -> tuple:
+def first_action(strategy: Optional[dict]) -> tuple:
     """起手单 → 交单后 harness 要执行的第一个动作 (tool_name, args)。
 
-    route=tarot 时牌阵已经在单子里，直接推抽牌，不必再让解读 Agent 重念一遍；
-    positions 缺失则兜底三张阵。route 非 tarot 一律走星盘移交（解读 Agent 自己取盘）。
+    收的是 `expand_brief` 展开过的单子：route=tarot 时牌阵与位置都已经在里面，直接推抽牌，
+    不必再让解读 Agent 重念一遍。route 非 tarot 一律走星盘移交（解读 Agent 自己取盘）。
 
     抽几张由 positions 的长度决定，没有单独的张数字段——见 DrawCardsRequest。
     """
     if (strategy or {}).get("route") != "tarot":
         return (None, None)
 
-    args = {key: strategy.get(key) or fallback for key, fallback in _DEFAULT_SPREAD.items()}
-    return ("draw_tarot_cards", args)
-
-
-# opening_force_brief.md 的两个小节标题。这一轮有两段文案，用途不同：
-#   <本轮强制> 注入系统提示词，是给模型的指令；
-#   <过渡语>   反过来是替模型说给用户听的——强制交单走 mode=ANY，模型在解码层
-#              只被允许输出函数调用，一个字也说不出来，不是它选择沉默，是它没得选。
-#              不补这句，抽牌器就凭空弹到用户面前。
-# 其余路径一律不补：模型想说就说（说了照常流式输出），不想说就沉默，两种都正常。
-#
-# 两段同属「预算用尽的那一轮」，放同一个文件同一个管理页条目里改；小节标题就是
-# 分隔符本身，编辑的人看得见，不是藏在正文里的隐形标记。
-_FORCED_BRIEF_LINE_HEADING = "# <过渡语>"
-
-
-def _forced_brief_parts() -> tuple:
-    text = prompt_service.get_prompt("opening_force_brief.md")
-    instruction, _, line = text.partition(_FORCED_BRIEF_LINE_HEADING)
-    return instruction.strip(), line.strip()
-
-
-def forced_brief_handoff_line() -> str:
-    """守卫第 2 层被迫沉默时，替模型说的那句过渡语。"""
-    return _forced_brief_parts()[1]
+    return ("draw_tarot_cards", {"spread_type": strategy["spread_type"],
+                                 "positions": list(strategy["positions"])})
 
 
 # 接场约束：只在「开场幕真的跑过」（strategy 非空）时追加。
@@ -377,9 +418,15 @@ def reading_prompt_parts(
     strategy: Optional[dict],
     portrait_context: str = "",
 ) -> List[Part]:
-    """解读相位系统提示词 = 塔罗/占星提示词 + 用户资料 + 用户画像 + 起手单块 [+ 接场约束]。
+    """解读相位系统提示词 = 塔罗/占星提示词 + 用户资料 + 用户画像 + 起手单块
+    [+ 牌阵说明] [+ 接场约束]。
 
-    strategy 为空（存量会话 / 守卫兜底）→ 不追加接场约束，表现与开场幕上线前一致。
+    strategy 为空（存量会话）→ 不追加接场约束，表现与开场幕上线前一致。
+    牌阵说明按起手单里的牌阵 ID 取那一副，所以只有走塔罗、且 ID 在目录里时才有这一段；
+    它紧接在 <本场起手> 后面——那一块列的是这副阵的位置，位置怎么解读就在这一段里。
+
+    接场约束永远是最后一段：它作废的是上面塔罗/占星提示词里的「先欢迎、先澄清」，
+    中间再插东西，等于让它离要压的那两条更远、离结尾更远。
     """
     parts = [prompt_service.prompt_part(reading_base_prompt_name(session_type))]
     if user_context:
@@ -387,10 +434,17 @@ def reading_prompt_parts(
     parts += _portrait_parts(portrait_context)
 
     brief_block = render_brief_block(strategy)
-    if brief_block:
-        parts.append(Part(brief_block, label="本场起手", sample=True, when=_BRIEF_ONLY))
-        parts.append(Part("\n\n"))
-        parts.append(prompt_service.prompt_part("reading_handoff.md", when=_BRIEF_ONLY))
+    if not brief_block:
+        return parts
+
+    parts.append(Part(brief_block, label="本场起手", sample=True, when=_BRIEF_ONLY))
+
+    spread = spread_of(strategy)      # 走塔罗才有；牌阵 ID 决定取哪一份详解
+    if spread:
+        parts += _spread_parts(spread)
+
+    parts.append(Part("\n\n"))
+    parts.append(prompt_service.prompt_part("reading_handoff.md", when=_BRIEF_ONLY))
     return parts
 
 

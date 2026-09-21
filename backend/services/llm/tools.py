@@ -1,5 +1,6 @@
 """中性工具规格：唯一真源。GeminiProvider 转成 FunctionDeclaration，
 OpenAICompatProvider 转成 OpenAI tool。描述文案与旧 FunctionDeclaration 逐字一致。"""
+from services.spread_service import SPREAD_IDS
 
 DRAW_TAROT_CARDS = {
     "name": "draw_tarot_cards",
@@ -124,17 +125,15 @@ SUBMIT_READING_BRIEF = {
                 "enum": ["tarot", "astrology"],
                 "description": "这场占卜用什么起手：tarot=抽牌，astrology=看本命盘。两个都想用就填先做的那个",
             },
+            # 只交 ID。位置、张数、解读方法都挂在这个 ID 上，由 spread_service 展开——
+            # 模型自拟位置的那条路已经关掉（牌阵是课程里定死的，不是每场现编的）。
             "spread_type": {
                 "type": "string",
-                "description": "route=tarot 时必填：牌阵名，如 three_card / two_choice / celtic_cross",
-            },
-            "positions": {
-                "type": "array",
+                "enum": list(SPREAD_IDS),
                 "description": (
-                    "route=tarot 时必填：每个位置代表什么，如 ['现状', '阻碍', '流向']。"
-                    "抽几张由这里的个数决定，几张都可以"
+                    "route=tarot 时必填：<牌阵选择参考> 里那一副牌阵的 ID，只能是列出的这几个之一。"
+                    "位置含义和张数由这个 ID 决定，不要自己写；route=astrology 时省略"
                 ),
-                "items": {"type": "string"},
             },
         },
         "required": ["question", "route"],
@@ -150,8 +149,11 @@ DAILY_TOOL_NAMES = ["draw_tarot_cards", "get_astrology_chart",
 # 解读相位不再持有 submit_reading_brief：起手单是「这场怎么开的」的一次性记录，
 # 不是可改写的当前状态。解读中要换牌阵/补抽，直接调 draw_tarot_cards 即可。
 READING_TOOL_NAMES = list(DAILY_TOOL_NAMES)
-# 开场相位要能替星盘路线要出生信息，否则它没法自己判断这条路走不走得通
-OPENING_TOOL_NAMES = ["submit_reading_brief", "request_user_profile"]
+# 开场相位：交单 + 替星盘路线要出生信息（否则它没法自己判断这条路走不走得通）
+# + 翻以前的占卜记录（用户说「上次那件事」时，开场就能把背景写进起手单，
+# 不必等解读 Agent 上场再查一遍）
+OPENING_TOOL_NAMES = ["submit_reading_brief", "request_user_profile",
+                      "read_divination_notes"]
 
 # interrupt 式工具：调用只是把界面推到用户面前（抽牌器 / 资料表单），结果要等用户动手，
 # 跨一次 HTTP 请求才产生。Agent Loop 见到它就收口；结果由 /draw（抽牌）或 /resume

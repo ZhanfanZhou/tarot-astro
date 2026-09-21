@@ -84,17 +84,13 @@ def _parse(response) -> TurnResult:
 
 
 class _GeminiSession:
-    def __init__(self, model_name, system_prompt, history, tools, force_tool):
+    def __init__(self, model_name, system_prompt, history, tools):
         gtools = None
         if tools:
             gtools = [Tool(function_declarations=[FunctionDeclaration(**t) for t in tools])]
-        kwargs = {}
-        if force_tool:
-            kwargs["tool_config"] = {"function_calling_config": {
-                "mode": "ANY", "allowed_function_names": [force_tool]}}
         model = genai.GenerativeModel(
             model_name=model_name, generation_config=_GEN_CONFIG, tools=gtools,
-            system_instruction=system_prompt, **kwargs)
+            system_instruction=system_prompt)
         self._chat = model.start_chat(history=_to_history(history))
 
     async def send_user(self, text: str) -> TurnResult:
@@ -107,16 +103,11 @@ class _GeminiSession:
 
 
 class GeminiProvider:
-    def __init__(self, model: str, supports_forced_tool: bool = True):
+    def __init__(self, model: str):
         self.model = model
-        self._can_force = supports_forced_tool
 
-    def open_session(self, system_prompt, history, tools, force_tool=None):
-        if force_tool and not self._can_force:
-            # 见 catalog.supports_forced_tool：这个模型传了会报错，干脆不传
-            print(f"[LLM] {self.model} 不支持强制调用 {force_tool}，守卫第 2 层本轮降级")
-            force_tool = None
-        return _GeminiSession(self.model, system_prompt, history, tools, force_tool)
+    def open_session(self, system_prompt, history, tools):
+        return _GeminiSession(self.model, system_prompt, history, tools)
 
     async def generate_json(self, prompt: str) -> str:
         cfg = {"temperature": 0.7, "response_mime_type": "application/json"}

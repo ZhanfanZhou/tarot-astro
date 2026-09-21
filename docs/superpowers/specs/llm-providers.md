@@ -4,7 +4,7 @@
 
 | Agent | 职责 | 对模型的要求 |
 |---|---|---|
-| **opening** 前置 | 开场定义占卜、交单 | 重度依赖 function calling，且依赖强制工具调用 |
+| **opening** 前置 | 开场定义占卜、交单 | 重度依赖 function calling |
 | **reading** 解读 | 抽牌 / 取盘、解读对话 | 重度依赖 function calling + 长文本质量 |
 | **memory** 记忆 | 会话结束写笔记本 | 只产 JSON、无工具，便宜模型足够 |
 
@@ -41,7 +41,7 @@ class LLMSession(Protocol):
     async def send_tool_result(self, name, result, call_id="") -> TurnResult: ...
 
 class LLMProvider(Protocol):
-    def open_session(self, system_prompt, history, tools, force_tool=None) -> LLMSession: ...
+    def open_session(self, system_prompt, history, tools) -> LLMSession: ...
     async def generate_json(self, prompt) -> str: ...
     async def generate_text(self, prompt, *, temperature=1.0, max_tokens=200, timeout=8) -> str: ...
 ```
@@ -94,15 +94,14 @@ MEMORY_PROVIDER / MEMORY_MODEL
 
 ## 4. 真 key 自检
 
-真实 provider 的 tool_call 参数格式、`tool_choice` 支持度在 mock 下完全看不见。
-`backend/scripts/check_providers.py` 覆盖这四个点：
+真实 provider 的 tool_call 参数格式在 mock 下完全看不见。
+`backend/scripts/check_providers.py` 覆盖这三个点：
 
 | 检查 | 验什么 | 风险 |
 |---|---|---|
 | `memory · generate_json` | JSON 模式能否出合法 JSON | 低 |
 | `reading · 文本生成` | 基本文本往返 | 低 |
 | `opening · tool_call` | 工具调用能否触发、参数是否合法 | **高** |
-| `opening · force_tool` | `tool_choice` 指定函数支不支持——开场幕守卫第 2 层靠它 | **最高**，各家支持度参差 |
 
 **换 provider 或换 model 之后都要重跑这个脚本。**
 脚本之外仍需人工联调的只有跨 provider 移交（开场与解读配不同家时，

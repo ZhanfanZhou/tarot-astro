@@ -84,9 +84,20 @@ yield 三种事件：`content`（正文片段）、`message`（一条要落库�
 
 ## 3. 抽牌仪式
 
-选牌器是纯仪式：用户洗牌、在扇形里选牌，但**选择不决定牌面**——真实牌由服务端
-`TarotService.draw_cards` 随机产生。牌阵、张数、每个位置的含义来自模型的调用参数
-（开场幕交单的塔罗路线由 harness 照单直推，牌阵与单子逐字一致）。
+选牌器是纯仪式：打开即洗牌（无需再点一次开始），洗完展开扇形让用户选牌，
+但**选择不决定牌面**——真实牌由服务端
+`TarotService.draw_cards` 随机产生。牌阵、张数、每个位置的含义来自模型的调用参数：
+开场幕交单的塔罗路线只交一个牌阵 ID，位置由牌阵目录展开后 harness 照单直推，
+与单子逐字一致（见[开场幕](opening-agent.md) §3.1）；解读中途补抽由解读 Agent
+自己填 `draw_tarot_cards` 的参数，那一条路不受目录约束。
+
+用户按下「确认抽牌」，选牌器当场退场，`/draw` 把真牌落库并直接返回牌面，前端用
+`CardRevealOverlay` 在对话界面上把这几张牌逐张翻开（等牌那段先摆牌背），翻完淡出，
+牌这时已经画在对话里了。
+
+**翻牌不占用户的等待**：`/draw` 一回来就发 `/resume`，解读在翻牌那几秒里已经开始流；
+对话里的牌面要刷一次会话才有（牌挂在 tool 记录上），那次刷新与 `/resume` 并排跑，
+不挡在前面（这一轮结束时 `runTurn` 还会再刷一次，落地之后并行那次就不再覆盖）。
 
 牌面取图按钱包里的 `active_deck_id`（见 [牌组商城](deck-store.md)）。
 
@@ -156,7 +167,7 @@ SSE 形状与 `/message` 一致，前端的等待体验因此和等一轮回复�
 | `services/turn_service.py` | 一轮对话的全流程（塔罗占星共用） |
 | `services/tool_turns.py` | 工具轮落库形状、interrupt 结果、旧会话判定 |
 | `services/gemini_service.py` | Agent Loop |
-| `services/context_service.py` | 相位判定、提示词拼装、用户资料 / 画像 / 关系上下文块 |
+| `services/context_service.py` | 相位判定、提示词拼装、用户资料 / 画像 / 来访次数块 |
 | `services/conversation_service.py` | 会话消息逻辑 |
 | `services/storage_service.py` · `db.py` | SQLite 存取与建表 |
 | `services/tarot_service.py` · `astrology_service.py` | 抽牌 · 星盘接口 |

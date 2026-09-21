@@ -53,22 +53,6 @@ def test_send_user_tool_call():
     assert kwargs["tools"][0]["function"]["name"] == "submit_reading_brief"
 
 
-def test_force_tool_sets_tool_choice():
-    from services.llm.openai_provider import OpenAICompatProvider
-    from services.llm import tools
-    create = AsyncMock(return_value=_completion(_msg(tool_calls=[_tc("i", "submit_reading_brief", {})])))
-    with patch("services.llm.openai_provider.AsyncOpenAI", return_value=_patched_client(create)):
-        OpenAICompatProvider("deepseek-chat", "http://x", "k", "deepseek").open_session(
-            "SYS", [], tools.specs_by_names(["submit_reading_brief"]),
-            force_tool="submit_reading_brief").send_user  # open only
-        # 触发一次 create
-        sess = OpenAICompatProvider("deepseek-chat", "http://x", "k", "deepseek").open_session(
-            "SYS", [], tools.specs_by_names(["submit_reading_brief"]), force_tool="submit_reading_brief")
-        asyncio.run(sess.send_user("x"))
-    _, kwargs = create.call_args
-    assert kwargs["tool_choice"] == {"type": "function", "function": {"name": "submit_reading_brief"}}
-
-
 def test_tool_result_roundtrip_and_single_toolcall_kept():
     """只保留第一个 tool_call（与 Agent Loop『处理第一个函数调用』一致），
     避免 OpenAI 要求每个 tool_call 都要有对应 tool 响应而报错。"""

@@ -1,4 +1,4 @@
-"""前置 Agent 的 Loop 行为：工具集按相位隔离、守卫 force_tool、相位提示词、同轮移交。
+"""前置 Agent 的 Loop 行为：工具集按相位隔离、相位提示词、同轮移交。
 
 Agent Loop 已接 provider 抽象——不再直连 genai。全程 patch `services.llm.get_provider`
 返回按脚本吐 TurnResult 的假 provider（不发真实请求、不花钱）。
@@ -46,11 +46,12 @@ def _run(agen):
     return asyncio.run(_collect(agen))
 
 
+# 开场只交牌阵 ID；位置与张数由牌阵目录展开（spread_three_card_state.md 的文件头）
 BRIEF = {
     "question": "他还会回来吗", "context": "上周开始冷淡",
-    "route": "tarot", "spread_type": "three_card",
-    "positions": ["你的位置", "他的位置", "这段关系的流向"],
+    "route": "tarot", "spread_type": "three_card_state",
 }
+BRIEF_POSITIONS = ["左牌：共同回答本次问题", "中牌：共同回答本次问题", "右牌：共同回答本次问题"]
 
 BRIEF_ASTRO = {"question": "我这两年的事业格局", "route": "astrology"}
 
@@ -63,13 +64,15 @@ async def _ok_executor(name, args):
 # 工具集组成（中性真源 services.llm.tools 的名单——与改动前一字不差）
 # ---------------------------------------------------------------------------
 
-def test_opening_tools_are_brief_and_profile_only():
+def test_opening_tools_exclude_drawing_and_chart():
     """开场相位看不见抽牌/星盘工具——机械杜绝『没定义问题先抽牌』。
 
-    但要能替星盘路线要出生信息，否则它没法自己判断这条路走不走得通。
+    要资料是为星盘路线自己判断走不走得通；翻笔记是为了接上「上次那件事」，
+    两样都不产生前端以外的副作用。
     """
     from services.llm import tools
-    assert tools.OPENING_TOOL_NAMES == ["submit_reading_brief", "request_user_profile"]
+    assert tools.OPENING_TOOL_NAMES == [
+        "submit_reading_brief", "request_user_profile", "read_divination_notes"]
 
 
 def test_reading_tools_drop_submit_reading_brief():
@@ -140,25 +143,6 @@ def test_override_wins_over_phase_for_tools_not_just_prompt(monkeypatch):
     assert prov.sessions[0].system.startswith("（日运提示词")
 
 
-def test_override_never_arms_force_brief_guard(monkeypatch):
-    """override 下守卫不许上膛：mode=ANY 指名一个不在工具集里的函数 = 必然的 API 错误。"""
-    from services.gemini_service import GeminiService
-
-    prov = _install(monkeypatch, [[_text("今日宜静。")]])
-    _run(GeminiService().stream_response(
-        messages=[Message(role=MessageRole.USER, content="嗯")],
-        user=None,
-        session_type=SessionType.TAROT,
-        system_prompt_override="（日运提示词）",
-        phase="opening",
-        force_brief=True,
-        function_executor=_ok_executor,
-    ))
-
-    assert prov.sessions[0].force_tool is None
-    assert "submit_reading_brief" not in tool_names(prov.sessions[0].tools)
-
-
 def test_override_in_reading_phase_also_drops_submit_tool(monkeypatch):
     """override + reading：同理——自带提示词的会话没有开场幕语义，不该看见交单工具。"""
     from services.gemini_service import GeminiService
@@ -190,7 +174,7 @@ def test_no_override_keeps_phase_authority(monkeypatch):
     ))
 
     assert tool_names(prov.sessions[0].tools) == [
-        "submit_reading_brief", "request_user_profile"]
+        "submit_reading_brief", "request_user_profile", "read_divination_notes"]
 
 
 # ---------------------------------------------------------------------------
@@ -198,16 +182,20 @@ def test_no_override_keeps_phase_authority(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_submit_reading_brief_schema_is_execution_only():
-    """起手单只装执行必需：问题 + 起手方式 + 牌阵参数，不含任何关于人的判词。"""
+    """起手单只装执行必需：问题 + 起手方式 + 牌阵 ID，不含任何关于人的判词。"""
+    from services import spread_service
     from services.llm import tools
 
     params = tools.SUBMIT_READING_BRIEF["parameters"]
     assert set(params["properties"].keys()) == {
-        "question", "context", "route", "spread_type", "positions",
+        "question", "context", "route", "spread_type",
     }
     assert set(params["required"]) == {"question", "route"}
     # route 必须 enum 锁死：不锁的话模型会照抄 description 里的括号说明
     assert params["properties"]["route"]["enum"] == ["tarot", "astrology"]
+    # 牌阵同理，而且只交 ID：位置不是模型填的字段，它填了也没地方收
+    assert params["properties"]["spread_type"]["enum"] == spread_service.SPREAD_IDS
+    assert "positions" not in params["properties"]
 
 
 def test_opening_phase_system_prompt_is_opening_not_tarot():
@@ -219,7 +207,7 @@ def test_opening_phase_system_prompt_is_opening_not_tarot():
         user=None,
         session_type=SessionType.TAROT,
         phase="opening",
-        relationship_block="<关系上下文>\n首次来访",
+        relationship_block="# <称呼与来访次数>\n首次来访",
     )
     assert "submit_reading_brief" in system
     assert "首次来访" in system
@@ -237,7 +225,7 @@ def test_reading_phase_system_prompt_includes_strategy_block():
                   "spread_type": "三张关系阵"},
     )
     assert "他还会回来吗" in system
-    assert "不要复述起手单" in system      # 接场约束（reading_handoff.md）随起手单一起进来
+    assert "不要再欢迎用户" in system      # 接场约束（reading_handoff.md）随起手单一起进来
 
 
 def test_reading_phase_without_strategy_is_unchanged():
@@ -251,7 +239,8 @@ def test_reading_phase_without_strategy_is_unchanged():
         phase="reading",
         strategy=None,
     )
-    assert "本场起手" not in system
+    # 塔罗提示词正文里也提到 <本场起手>，所以只看注入的那一块在不在
+    assert "# <本场起手>" not in system
 
 
 def test_both_phases_inject_the_users_portrait(tmp_path, monkeypatch):
@@ -335,13 +324,13 @@ def test_tarot_route_draws_straight_from_the_brief(monkeypatch):
         session_type=SessionType.TAROT,
         function_executor=executor,
         phase="opening",
-        relationship_block="<关系上下文>\n称呼：小夏 ｜ 来访：第 1 次",
+        relationship_block="# <称呼与来访次数>\n称呼：小夏 ｜ 来访：第 1 次",
     ))
 
     # 全程只开了开场 session —— 没有第二次 provider 往返
     assert len(prov.sessions) == 1
     assert tool_names(prov.sessions[0].tools) == [
-        "submit_reading_brief", "request_user_profile"]
+        "submit_reading_brief", "request_user_profile", "read_divination_notes"]
 
     # 事件只有正文、记录、收口——没有另开的「推给前端」通道
     assert all(set(e) <= {"content", "message", "done"} for e in events)
@@ -360,33 +349,83 @@ def test_tarot_route_draws_straight_from_the_brief(monkeypatch):
     assert recorded[0].tool_calls[0].name == "submit_reading_brief"
     assert recorded[1].tool_call_id == recorded[0].tool_calls[0].id
     assert recorded[2].content == "" and recorded[2].tool_calls[0].name == "draw_tarot_cards"
-    # 抽牌参数逐字取自起手单
+    # 抽牌参数 = 起手单上那个牌阵 ID 展开出来的位置
     assert recorded[2].tool_calls[0].args == {
-        "spread_type": "three_card",
-        "positions": ["你的位置", "他的位置", "这段关系的流向"],
+        "spread_type": "three_card_state",
+        "positions": BRIEF_POSITIONS,
     }
 
 
-def test_tarot_route_falls_back_to_three_card_when_spread_missing(monkeypatch):
-    """牌阵字段没填全 → 兜底三张阵，不为这个再花一次往返去问模型。"""
+def test_opening_can_read_notes_then_submit_in_one_turn(monkeypatch):
+    """翻旧记录不是 interrupt：结果当场回给模型，同一轮里接着交单。
+
+    开场拿到 read_divination_notes 就是为了这条路——用户说「上次那件事」时，
+    背景由它自己接上，而不是让用户重讲一遍、也不用等解读 Agent 上场再查。
+    """
     from services.gemini_service import GeminiService
 
-    _install(monkeypatch, [[_call("submit_reading_brief",
-                                  {"question": "他还会回来吗", "route": "tarot"})]])
+    prov = _install(monkeypatch, [[
+        _call("read_divination_notes", {"reason": "他说的上次是哪一场"}),
+        _text_call("嗯，那件事我记得。", "submit_reading_brief", BRIEF),
+    ]])
+
+    executed = []
+
+    async def executor(name, args):
+        executed.append(name)
+        return {"success": True, "note_count": 1}
+
+    events = _run(GeminiService().stream_response(
+        messages=[Message(role=MessageRole.USER, content="上次问的那件事后来没成，再看看")],
+        user=None,
+        session_type=SessionType.TAROT,
+        function_executor=executor,
+        phase="opening",
+    ))
+
+    # 同一个 session 跑完两轮：翻记录不切 provider、不收口
+    assert len(prov.sessions) == 1
+    assert executed == ["read_divination_notes", "submit_reading_brief"]
+
+    # 落库形状：翻记录的调用 + 结果 → 交单那一轮 + 结果 → harness 发起的抽牌
+    recorded = [e["message"] for e in events if "message" in e]
+    assert [m.role.value for m in recorded] == [
+        "assistant", "tool", "assistant", "tool", "assistant"]
+    assert recorded[0].tool_calls[0].name == "read_divination_notes"
+    assert recorded[1].tool_call_id == recorded[0].tool_calls[0].id
+    assert recorded[-1].tool_calls[0].name == "draw_tarot_cards"
+
+
+def test_failed_brief_does_not_close_the_opening(monkeypatch):
+    """交单被打回（牌阵 ID 不认识）→ 开场没有结束：不抽牌、不移交，结果回给模型重来。
+
+    收束的判据是交单「成功了」，不是「调用过」。判错的话，一份没落库的起手单也会把
+    相位翻过去，用户会拿到一副谁都没选过的牌阵。
+    """
+    from services.gemini_service import GeminiService
+
+    prov = _install(monkeypatch, [[
+        _call("submit_reading_brief", dict(BRIEF, spread_type="celtic_cross")),
+        _text("那我们换一副阵。"),
+    ]])
+
+    async def rejecting(name, args):
+        return {"success": False, "error": "spread_type 必须是目录里的牌阵 ID"}
 
     events = _run(GeminiService().stream_response(
         messages=[Message(role=MessageRole.USER, content="他还会回来吗")],
         user=None,
         session_type=SessionType.TAROT,
-        function_executor=_ok_executor,
+        function_executor=rejecting,
         phase="opening",
     ))
 
-    args = [e["message"].tool_calls[0].args for e in events
-            if "message" in e and e["message"].tool_calls
-            and e["message"].tool_calls[0].name == "draw_tarot_cards"][0]
-    assert len(args["positions"]) == 3
-    assert args["positions"] == ["现状", "阻碍", "流向"]
+    calls = [e["message"].tool_calls[0].name for e in events
+             if "message" in e and e["message"].tool_calls]
+    assert "draw_tarot_cards" not in calls          # 没抽牌
+    assert len(prov.sessions) == 1                  # 没移交给解读 Agent
+    assert tool_names(prov.sessions[0].tools) == [
+        "submit_reading_brief", "request_user_profile", "read_divination_notes"]
 
 
 def test_astrology_route_hands_off_to_reading_agent(monkeypatch):
@@ -426,31 +465,6 @@ def test_astrology_route_hands_off_to_reading_agent(monkeypatch):
 
     assert executed == ["submit_reading_brief", "get_astrology_chart"]
     assert "".join(e.get("content", "") for e in events) == "你的土星在十宫。"
-
-
-def test_force_brief_passes_force_tool_to_opening_session(monkeypatch):
-    """守卫开启时，force_tool='submit_reading_brief' 真的传给了 opening session。"""
-    from services.gemini_service import GeminiService
-
-    # 走星盘路线，这样移交后的解读 session 会被开出来，能一并验它没被守卫污染
-    scripts = [
-        [_call("submit_reading_brief", BRIEF_ASTRO)],
-        [_text("你的土星在十宫。")],
-    ]
-    prov = _install(monkeypatch, scripts)
-
-    _run(GeminiService().stream_response(
-        messages=[Message(role=MessageRole.USER, content="嗯")],
-        user=None,
-        session_type=SessionType.ASTROLOGY,
-        function_executor=_ok_executor,
-        phase="opening",
-        force_brief=True,
-    ))
-
-    assert prov.sessions[0].force_tool == "submit_reading_brief"
-    # 移交后的解读 session 绝不带守卫（否则解读 Agent 也被逼着只能交单）
-    assert prov.sessions[1].force_tool is None
 
 
 def test_done_is_emitted_exactly_once_when_last_iteration_is_plain_text(monkeypatch):

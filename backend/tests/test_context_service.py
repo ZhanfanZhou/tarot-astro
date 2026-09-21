@@ -222,6 +222,53 @@ def test_render_brief_block_is_heading_plus_fields_only():
     assert block.startswith("\n\n# <本场起手>\n问题：")
 
 
+def test_render_brief_block_shows_the_spread_name_and_numbered_positions():
+    """展开过的起手单：牌阵一行给名字和 ID，位置编号——牌阵说明里是按 1、2、3 讲职责的。"""
+    from services import context_service
+
+    block = context_service.render_brief_block(context_service.expand_brief({
+        "question": "留在这家公司还是接那个 offer，之后一年各自怎么发展",
+        "route": "tarot",
+        "spread_type": "choice_two",
+    }))
+    assert "牌阵：二选一·分支发展（choice_two）" in block
+    assert "位置：1 共同现状 / 2 选项 A 的前期" in block
+
+
+def test_expand_brief_fills_the_positions_from_the_spread_id():
+    """模型只交 ID，位置和牌阵名在这里补上；张数就是位置个数。"""
+    from services import context_service, spread_service
+
+    brief = context_service.expand_brief({
+        "question": "他还会回来吗", "route": "tarot", "spread_type": "three_card_state"})
+    spread = spread_service.require("three_card_state")
+    assert brief["spread_name"] == spread.name
+    assert brief["positions"] == list(spread.positions)
+    assert context_service.first_action(brief) == (
+        "draw_tarot_cards", {"spread_type": "three_card_state",
+                             "positions": list(spread.positions)})
+
+
+def test_expand_brief_rejects_an_id_outside_the_catalog():
+    """目录外的牌阵 ID → None。随便拿一副顶替，整场牌都会按错的位置解读。"""
+    from services import context_service
+
+    assert context_service.expand_brief(
+        {"question": "他还会回来吗", "route": "tarot", "spread_type": "celtic_cross"}) is None
+    assert context_service.expand_brief(
+        {"question": "他还会回来吗", "route": "tarot"}) is None
+
+
+def test_expand_brief_drops_a_spread_on_the_astrology_route():
+    """星盘路线没有牌阵：模型多填了也不留，否则 <本场起手> 会多出一行没抽过的牌阵。"""
+    from services import context_service
+
+    brief = context_service.expand_brief(
+        {"question": "今年事业往哪走", "route": "astrology", "spread_type": "choice_two"})
+    assert "spread_type" not in brief and "positions" not in brief
+    assert context_service.first_action(brief) == (None, None)
+
+
 def test_render_brief_block_skips_missing_fields():
     from services import context_service
 
@@ -295,14 +342,12 @@ def test_build_opening_prompt_contains_prompt_relationship_and_entry():
     from services import context_service
 
     prompt = context_service.build_opening_prompt(
-        relationship_block="<关系上下文>\n首次来访",
+        relationship_block="# <称呼与来访次数>\n首次来访",
         session_type=SessionType.TAROT,
-        force_brief=False,
     )
     assert "submit_reading_brief" in prompt      # 来自 opening_system.md
-    assert "首次来访" in prompt                    # 关系上下文
-    assert "塔罗" in prompt                        # 入口偏好（route 默认依据）
-    assert "预算已用尽" not in prompt              # 未触发守卫
+    assert "首次来访" in prompt                    # 称呼与来访次数
+    assert "塔罗" in prompt                        # 用户点开的入口（route 默认依据）
 
 
 def test_greeting_prompt_carries_the_persona_but_not_the_opening_work():
@@ -313,30 +358,19 @@ def test_greeting_prompt_carries_the_persona_but_not_the_opening_work():
     """
     from services import context_service, prompt_service
 
-    parts = context_service.greeting_prompt_parts("<关系上下文>\n称呼：阿岚 ｜ 来访：第 2 次",
+    parts = context_service.greeting_prompt_parts("# <称呼与来访次数>\n称呼：阿岚 ｜ 来访：第 2 次",
                                                   SessionType.TAROT)
     assert [p.prompt for p in parts if p.prompt] == ["opening_persona.md", "opening_greeting.md"]
 
     prompt = prompt_service.join(parts)
-    assert "职业占卜师" in prompt and "说话像人，不像客服" in prompt   # 人设 + 迎接
-    assert "第 2 次" in prompt and "塔罗" in prompt                    # 关系上下文 + 入口
-    for work in ("submit_reading_brief", "凯尔特十字", "把问题问清楚", "不要填表"):
+    assert "职业占卜师" in prompt and "说话像人" in prompt             # 人设 + 迎接
+    assert "第 2 次" in prompt and "塔罗" in prompt                    # 来访次数 + 入口
+    for work in ("submit_reading_brief", "牌阵选择参考", "什么时候交单", "不要填表"):
         assert work not in prompt
 
     # 开场的对话轮两份都要：人设在前，活在后
     full = context_service.build_opening_prompt("", SessionType.TAROT)
     assert full.index("职业占卜师") < full.index("submit_reading_brief")
-
-
-def test_build_opening_prompt_with_force_brief_appends_guard_instruction():
-    from services import context_service
-
-    prompt = context_service.build_opening_prompt(
-        relationship_block="",
-        session_type=SessionType.TAROT,
-        force_brief=True,
-    )
-    assert "预算已用尽" in prompt
 
 
 @pytest.fixture
@@ -377,6 +411,74 @@ def test_build_reading_prompt_with_strategy_appends_handoff_constraints(base_pro
     assert "不要再欢迎用户" in handoff
 
 
+def test_opening_prompt_carries_the_catalog_but_not_the_spread_details():
+    """开场看得见五副阵的简介（选阵够用），看不见各阵的解读方法。
+
+    五份详解一起发过去，对只需要选一个 ID 的开场 Agent 是两千多字的噪音，
+    还会诱导它去重写牌位、提前讲解读规则——那两件事提示词里都明令禁止。
+    """
+    from services import context_service, prompt_service, spread_service
+
+    parts = context_service.opening_prompt_parts("", SessionType.TAROT)
+    assert "opening_spread_catalog.md" in [p.prompt for p in parts]
+
+    prompt = prompt_service.join(parts)
+    for spread_id in spread_service.SPREAD_IDS:
+        assert spread_id in prompt                      # 选得出的那几个 ID 都在
+    assert "主牌" not in prompt                          # 主次判断是解读的事
+    assert "## 解读方法" not in prompt
+
+
+def test_reading_prompt_appends_the_detail_of_the_spread_that_was_filed(base_prompt):
+    """解读相位按起手单上那个 ID 取一份牌阵说明接在末尾，别的四副一个字都不出现。"""
+    from services import context_service, spread_service
+
+    prompt = context_service.build_reading_prompt(
+        session_type=SessionType.TAROT, user_context="",
+        strategy=context_service.expand_brief({
+            "question": "他还会回来吗", "route": "tarot",
+            "spread_type": "three_card_state"}),
+    )
+    chosen = spread_service.require("three_card_state")
+    assert "# <牌阵说明>" in prompt
+    assert f"本场用的是「{chosen.name}」" in prompt
+    assert chosen.detail in prompt
+    assert "---\nid: three_card_state" not in prompt    # 文件头是机器读的，不发给模型
+
+    for other in spread_service.all_spreads():
+        if other.id != chosen.id:
+            assert other.name not in prompt
+
+    # 顺序：起手单 → 牌阵说明 → 接场约束（接场约束永远压在最末）
+    assert prompt.index("本场起手") < prompt.index("牌阵说明") < prompt.index("不要再欢迎用户")
+
+
+def test_reading_prompt_has_no_spread_block_on_the_astrology_route(base_prompt):
+    """星盘路线没抽牌，也就没有牌阵说明这一块。"""
+    from services import context_service
+
+    prompt = context_service.build_reading_prompt(
+        session_type=SessionType.ASTROLOGY, user_context="",
+        strategy=context_service.expand_brief(
+            {"question": "今年事业往哪走", "route": "astrology"}),
+    )
+    assert "牌阵说明" not in prompt
+
+
+def test_reading_prompt_of_a_legacy_session_has_no_spread_block(base_prompt):
+    """存量会话的阵名是当时模型自拟的，目录里查不到 → 不出牌阵说明，只照原样列在起手单里。"""
+    from services import context_service
+
+    prompt = context_service.build_reading_prompt(
+        session_type=SessionType.TAROT, user_context="",
+        strategy={"question": "他还会回来吗", "route": "tarot",
+                  "spread_type": "two_choice",
+                  "positions": ["现状", "选 A 的走向", "选 B 的走向"]},
+    )
+    assert "牌阵：two_choice" in prompt
+    assert "牌阵说明" not in prompt
+
+
 def test_reading_prompts_carry_no_opening_phase_instructions():
     """解读提示词只留解读的活：迎接、澄清问题、采集背景与诉求都归开场幕。
 
@@ -413,7 +515,7 @@ def test_both_phases_carry_the_portrait_and_its_usage_rules(base_prompt):
     portrait = context_service.render_portrait_block(_portrait(recent="在上海做设计"))
     prompts = [
         context_service.build_opening_prompt(
-            relationship_block="<关系上下文>\n第 4 次", session_type=SessionType.TAROT,
+            relationship_block="# <称呼与来访次数>\n第 4 次", session_type=SessionType.TAROT,
             user_context="\n# <用户资料>\n昵称：小夏", portrait_context=portrait,
         ),
         context_service.build_reading_prompt(
@@ -439,7 +541,7 @@ def test_no_portrait_leaves_both_phases_byte_identical(base_prompt):
     ) == "BASE:tarot_system.md\n\n<用户资料>昵称：小夏"
 
     opening = context_service.build_opening_prompt(
-        relationship_block="<关系上下文>\n首次来访", session_type=SessionType.TAROT,
+        relationship_block="# <称呼与来访次数>\n首次来访", session_type=SessionType.TAROT,
         user_context="\n# <用户资料>\n昵称：小夏", portrait_context="",
     )
     assert "用户画像" not in opening and "画像怎么用" not in opening

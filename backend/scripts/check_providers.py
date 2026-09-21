@@ -5,9 +5,8 @@
 只读，不碰 data/，不写库。按风险从低到高逐项验——这正是多 provider 那期计划里
 「mock 看不见」的三个点：
   1. memory  → generate_json：JSON 模式能不能出合法 JSON
-  2. opening → 工具调用：tool_call 的参数格式（enum / array / int 能不能原样回来）
-  3. opening → force_tool：tool_choice 指定函数（守卫第 2 层所依赖）支不支持
-  4. reading → 纯文本：解读 Agent 的普通对话往返
+  2. opening → 工具调用：tool_call 的参数格式（交单的 enum、抽牌的 array 能不能原样回来）
+  3. reading → 纯文本：解读 Agent 的普通对话往返
 """
 import asyncio
 import json
@@ -22,9 +21,10 @@ load_dotenv(ROOT.parent / ".env")
 
 import config                                      # noqa: E402
 from services import llm                           # noqa: E402
-from services.llm import agent_config, catalog, tools   # noqa: E402
+from services import spread_service                 # noqa: E402
+from services.llm import agent_config, tools   # noqa: E402
 
-OK, BAD, SKIP = "✅", "❌", "⏭️"
+OK, BAD = "✅", "❌"
 
 
 def _line(status, label, detail=""):
@@ -42,10 +42,16 @@ async def check_memory():
 
 
 async def check_opening_tool_call():
+    """enum 与 array 两种参数各验一次，都在 opening 那个 provider 上。
+
+    交单只出 enum（route / spread_type 都锁死取值）；array 挪到了抽牌工具上，
+    所以第二次往返带上 draw_tarot_cards —— 数组参数是 provider 差异最大的地方，
+    少验一次，某家 SDK 回私有类型就要等线上抽牌时才发现。
+    """
     prov = llm.get_provider("opening")
     session = prov.open_session(
         "你是占卜师。用户的问题已经清楚了，立刻调用 submit_reading_brief 交单，"
-        "route 填 tarot，牌阵用三张，positions 三个位置含义。不要说话。",
+        "route 填 tarot，牌阵从 spread_type 允许的取值里挑一个。不要说话。",
         [],
         tools.specs_by_names(tools.OPENING_TOOL_NAMES),
     )
@@ -55,37 +61,20 @@ async def check_opening_tool_call():
     assert call.name == "submit_reading_brief", f"调错了工具：{call.name}"
     args = call.args
     assert args.get("route") in ("tarot", "astrology"), f"route 取值非法：{args.get('route')!r}"
-    detail = f"route={args.get('route')} spread={args.get('spread_type')!r}"
-    positions = args.get("positions")
-    # 数组参数是 provider 差异最大的地方：这里要的是纯 list，不是 SDK 的私有类型
-    assert isinstance(positions, list), f"positions 不是 list：{type(positions).__name__}"
-    detail += f" positions={len(positions)}张 {positions}"
-    return detail
+    spread = args.get("spread_type")
+    assert spread in spread_service.SPREAD_IDS, (
+        f"spread_type 不在牌阵目录里：{spread!r}（可选 {spread_service.SPREAD_IDS}）")
+    detail = f"route={args.get('route')} spread={spread!r}"
 
-
-class Skipped(Exception):
-    """这一项在当前配置下不适用——不是失败。"""
-
-
-async def check_force_tool():
-    """守卫第 2 层：tool_choice 指定函数。
-
-    不是每个模型都有这个能力（Kimi 全系没有），清单里标了的就跳过——这正是
-    catalog.supports_forced_tool 的用途，跳过属于预期，不该算作未通过。
-    """
-    provider_name, model, _ = agent_config.resolve("opening")
-    if not catalog.supports_forced_tool(provider_name, model):
-        raise Skipped(f"{provider_name}/{model} 不支持，守卫第 2 层自动降级（第 3 层仍兜底）")
-
-    prov = llm.get_provider("opening")
     session = prov.open_session(
-        "你是占卜师。", [],
-        tools.specs_by_names(tools.OPENING_TOOL_NAMES),
-        force_tool="submit_reading_brief",
+        "你是占卜师。立刻调用 draw_tarot_cards 抽三张牌，不要说话。", [],
+        tools.specs_by_names(["draw_tarot_cards"]),
     )
-    result = await session.send_user("不知道欸，说不上来")
-    assert result.tool_calls, "强制模式下仍未调用工具"
-    return f"强制交单生效（{result.tool_calls[0].name}）"
+    result = await session.send_user("帮我看看接下来会怎么发展")
+    assert result.tool_calls, "抽牌工具没有被调用"
+    positions = result.tool_calls[0].args.get("positions")
+    assert isinstance(positions, list), f"positions 不是 list：{type(positions).__name__}"
+    return detail + f" ｜ array 参数回来了 {len(positions)} 项"
 
 
 async def check_reading_text():
@@ -102,7 +91,6 @@ async def check_reading_text():
 CHECKS = [
     ("memory  · generate_json", check_memory),
     ("opening · 工具调用参数", check_opening_tool_call),
-    ("opening · force_tool 强制交单", check_force_tool),
     ("reading · 纯文本往返", check_reading_text),
 ]
 
@@ -111,16 +99,13 @@ async def main():
     print("配置（管理页覆盖优先，否则 .env）：")
     for agent in llm.AGENT_CONFIG:
         provider, model, source = agent_config.resolve(agent)
-        forced = "可强制交单" if catalog.supports_forced_tool(provider, model) else "无强制交单"
-        print(f"  {agent:8s} {provider:10s} {model:24s} [{source}] {forced}")
+        print(f"  {agent:8s} {provider:10s} {model:24s} [{source}]")
     print()
 
     failed = 0
     for label, fn in CHECKS:
         try:
             _line(OK, label, await fn())
-        except Skipped as e:
-            _line(SKIP, label, str(e))
         except Exception as e:                      # noqa: BLE001 —— 自检要把错误打全
             failed += 1
             _line(BAD, label, f"{type(e).__name__}: {e}")

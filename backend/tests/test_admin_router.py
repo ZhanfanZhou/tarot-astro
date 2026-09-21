@@ -420,9 +420,9 @@ def test_llm_config_lists_agents_and_options(client):
     body = r.json()
     assert [a["agent"] for a in body["agents"]] == ["opening", "reading", "memory"]
     assert {p["provider"] for p in body["providers"]} == {"gemini", "deepseek", "kimi"}
-    # 每个模型都带上「能不能强制交单」——管理页据此提示，和后端共用同一份数据
+    # 下拉要的是 id + 人看的 label，管理页不该手敲模型名
     for prov in body["providers"]:
-        assert all("forced_tool" in m for m in prov["models"])
+        assert all({"id", "label"} <= set(m) for m in prov["models"])
 
 
 def test_llm_config_requires_admin(client):

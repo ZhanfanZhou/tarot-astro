@@ -15,10 +15,10 @@ from models import (
     Conversation, DailyDrawRecord, DailyFeedback, DrawCardsRequest, Gender, Message, MessageRole,
     SessionType, TarotCard, ToolCallRecord, User, UserProfile, UserType,
 )
-from services import context_service, prompt_service, tool_turns
+from services import context_service, prompt_service, spread_service, tool_turns
 from services.daily_service import daily_oracle_prompt_parts, journey_prompt_parts
-from services.gemini_service import FORCED_BRIEF_TOOL, tool_names
-from services.llm import agent_config, catalog
+from services.gemini_service import tool_names
+from services.llm import agent_config
 from services.llm import tools as toolspecs
 from services.notebook_service import empty_portrait, merge_portrait, notebook_prompt_parts
 from services.prompt_service import Part
@@ -54,13 +54,17 @@ _USER = User(user_id="sample", user_type=UserType.REGISTERED, profile=UserProfil
 
 _RELATIONSHIP = {"nickname": "小夏", "visit_count": 4, "days_since_last": 11}
 
-_TAROT_BRIEF = {
-    "question": "该不该接杭州的 offer",
-    "context": "工作三年，拿到杭州一家公司的 offer，薪资高三成。男朋友在上海，还没跟他商量。",
-    "route": "tarot",
-    "spread_type": "two_choice",
-    "positions": ["接 offer", "留在上海", "真正在意的"],
-}
+
+def _tarot_brief() -> dict:
+    """示例起手单。走的是线上同一条展开：开场只交牌阵 ID，位置由牌阵目录补上。"""
+    return context_service.expand_brief({
+        "question": "留在上海现在这家公司，还是接杭州这个 offer，未来一年各自会怎么发展",
+        "context": "工作三年，拿到杭州一家公司的 offer，薪资高三成。男朋友在上海，还没跟他商量。",
+        "route": "tarot",
+        "spread_type": "choice_two",
+    })
+
+
 _ASTRO_BRIEF = {"question": "今年事业往哪走", "context": "做了三年运营，想转产品。", "route": "astrology"}
 
 
@@ -84,10 +88,13 @@ def _sample_portrait() -> dict:
 
 
 def _sample_conversation() -> Conversation:
-    brief = ToolCallRecord(id="call-1", name="submit_reading_brief", args=_TAROT_BRIEF)
-    spread = DrawCardsRequest(spread_type=_TAROT_BRIEF["spread_type"], positions=_TAROT_BRIEF["positions"])
+    filed = _tarot_brief()
+    # 落库的调用参数是模型交的那几项，不含展开出来的位置——展开的结果在 conversation.strategy
+    brief = ToolCallRecord(id="call-1", name="submit_reading_brief", args={
+        k: filed[k] for k in ("question", "context", "route", "spread_type")})
+    spread = DrawCardsRequest(spread_type=filed["spread_type"], positions=filed["positions"])
     draw = ToolCallRecord(id="call-2", name="draw_tarot_cards", args=spread.model_dump())
-    cards = [_card(24), _card(56, True), _card(5)]
+    cards = [_card(24), _card(56, True), _card(5), _card(31), _card(62, True)]
     return Conversation(
         conversation_id="sample", user_id="sample", session_type=SessionType.TAROT,
         messages=[
@@ -98,13 +105,25 @@ def _sample_conversation() -> Conversation:
             tool_turns.assistant_message("", [draw]),
             tool_turns.tool_message(draw, tool_turns.cards_result(cards, spread),
                                     tarot_cards=cards, draw_request=spread),
-            Message(role=MessageRole.ASSISTANT, content="「接 offer」这边是权杖三，你其实已经在往外看了……"),
+            Message(role=MessageRole.ASSISTANT, content="「选项 B 的前期」这边是权杖三，你其实已经在往外看了……"),
             Message(role=MessageRole.USER, content="确实，我心里已经想去了"),
         ],
     )
 
 
 # ── 调用点 ──────────────────────────────────────────────────────────
+
+def _spread_catalog_parts() -> List[Part]:
+    """五份牌阵说明各一段，管理页在这里逐份编辑；线上一次只发其中一份。"""
+    parts = []
+    for spread in spread_service.all_spreads():
+        parts.append(Part(f"\n\n【{spread.name}】{spread.card_count} 张 · "
+                          f"ID `{spread.id}` · 位置：{' / '.join(spread.positions)}\n\n",
+                          label="文件头那几项（代码读的）", sample=True))
+        parts.append(Part(spread.detail, prompt=spread_service.prompt_name(spread.id),
+                          label="正文（发给模型的就是这一段）"))
+    return parts
+
 
 def _agent(agent: Optional[str]) -> dict:
     if agent is None:
@@ -115,20 +134,13 @@ def _agent(agent: Optional[str]) -> dict:
 
 
 def _site(title, stage, agent, delivery, parts: List[Part], *,
-          tools=(), force_when="", after="") -> dict:
-    site = {
+          tools=(), after="") -> dict:
+    return {
         "title": title, "stage": stage, **_agent(agent), "delivery": delivery,
         "parts": [p.to_dict() for p in parts],
         "tools": toolspecs.specs_by_names(list(tools)),
-        "force_tool": None,
         "after": after,
     }
-    if force_when:
-        site["force_tool"] = {
-            "name": FORCED_BRIEF_TOOL, "when": force_when,
-            "supported": catalog.supports_forced_tool(site["provider"], site["model"]),
-        }
-    return site
 
 
 def _call_sites() -> List[dict]:
@@ -152,19 +164,20 @@ def _call_sites() -> List[dict]:
               context_service.greeting_prompt_parts(relationship, SessionType.TAROT)),
         _site("开场 · 每一轮对话", "opening", "opening", _SYSTEM,
               context_service.opening_prompt_parts(relationship, SessionType.TAROT,
-                                                   force_brief=True, user_context=user_context,
+                                                   user_context=user_context,
                                                    portrait_context=portrait_context),
               tools=tool_names(SessionType.TAROT, opening=True, has_override=False),
-              force_when="追问预算用尽的那一轮", after=_HISTORY),
-        _site("开场 · 强制交单那一轮的过渡语", "opening", None,
-              "不发给模型。强制交单那一轮模型只能输出调用、说不出话；走塔罗路线时由代码替它把这句话"
-              "推给用户，并作为占卜师的发言（附抽牌调用）写进会话",
-              [Part(context_service.forced_brief_handoff_line(),
-                    prompt="opening_force_brief.md", label="<过渡语> 小节")]),
+              after=_HISTORY),
         _site("塔罗解读 · 每一轮对话", "reading", "reading", _SYSTEM,
-              context_service.reading_prompt_parts(SessionType.TAROT, user_context, _TAROT_BRIEF,
+              context_service.reading_prompt_parts(SessionType.TAROT, user_context, _tarot_brief(),
                                                    portrait_context),
               tools=reading_tools, after=_HISTORY),
+        _site("塔罗解读 · 五份牌阵说明", "reading", None,
+              "不单独发给模型。开场交单只交一个牌阵 ID，解读时按这个 ID 取下面对应的一份，"
+              "接在塔罗解读提示词末尾（上面那一处显示的就是示例起手单选中的那一份）。"
+              "每份文件开头的 id / name / positions 是给代码读的：位置和张数从那里来，"
+              "不发给模型，也不要在正文里另写一遍",
+              _spread_catalog_parts()),
         _site("占星解读 · 每一轮对话", "reading", "reading", _SYSTEM,
               context_service.reading_prompt_parts(SessionType.ASTROLOGY, user_context, _ASTRO_BRIEF,
                                                    portrait_context),

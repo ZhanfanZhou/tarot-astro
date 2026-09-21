@@ -88,24 +88,6 @@ def test_tool_call_args_come_back_as_plain_python():
     json.dumps(args)   # 落库这一步不能炸
 
 
-def test_force_tool_sets_mode_any():
-    from services.llm.gemini_provider import GeminiProvider
-    from services.llm import tools
-    captured = {}
-    def fake_model(**kwargs):
-        captured.update(kwargs)
-        chat = MagicMock()
-        chat.send_message_async = AsyncMock(return_value=_resp([_text_part("x")]))
-        return MagicMock(start_chat=MagicMock(return_value=chat))
-    with patch("services.llm.gemini_provider.genai.GenerativeModel", side_effect=fake_model):
-        GeminiProvider("gemini-x").open_session(
-            "SYS", [], tools=tools.specs_by_names(["submit_reading_brief"]),
-            force_tool="submit_reading_brief")
-    tc = captured["tool_config"]["function_calling_config"]
-    assert tc["mode"] == "ANY"
-    assert tc["allowed_function_names"] == ["submit_reading_brief"]
-
-
 def test_system_prompt_goes_to_system_instruction_not_history():
     """系统提示词走 system_instruction；history 里只有真实发生过的轮。
 

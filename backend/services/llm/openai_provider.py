@@ -26,25 +26,14 @@ def _parse(message) -> TurnResult:
                       reasoning=getattr(message, "reasoning_content", None) or "")
 
 
-# DeepSeek 的思考模型（deepseek-flash / deepseek-v4-pro）在思考态下不接受
-# tool_choice，指定函数会直接 400：
-#     "Thinking mode does not support this tool_choice"
-# 两者是互斥的，只能二选一 —— 而强制交单这一次调用的全部意义就是「必须调这个工具」，
-# 所以这里关思考。普通轮次（不指定 tool_choice）不受影响，照常思考。
-# 非 DeepSeek 的 OpenAI 兼容端（Kimi 等）不认这个字段，所以只对 DeepSeek 发。
-_NO_THINKING = {"thinking": {"type": "disabled"}}
-
-
 class _OpenAISession:
-    def __init__(self, client, model, system_prompt, history, tools, force_tool,
+    def __init__(self, client, model, system_prompt, history, tools,
                  is_deepseek=False, reasoning_effort=""):
         self._client = client
         self._model = model
         self._tools = _to_openai_tools(tools)
         self._is_deepseek = is_deepseek
         self._effort = reasoning_effort
-        self._force = ({"type": "function", "function": {"name": force_tool}}
-                       if force_tool else None)
         self._messages = [{"role": "system", "content": system_prompt}]
         for m in history:
             if m["role"] == "tool_result":
@@ -82,10 +71,6 @@ class _OpenAISession:
             kwargs["reasoning_effort"] = self._effort
         if self._tools:
             kwargs["tools"] = self._tools
-            if self._force:
-                kwargs["tool_choice"] = self._force
-        if self._force and self._is_deepseek:
-            kwargs["extra_body"] = dict(_NO_THINKING)
         resp = await self._client.chat.completions.create(**kwargs)
         msg = resp.choices[0].message
         result = _parse(msg)
@@ -118,23 +103,18 @@ class _OpenAISession:
 
 class OpenAICompatProvider:
     def __init__(self, model: str, base_url: str, api_key: str, label: str = "",
-                 supports_forced_tool: bool = True, reasoning_effort: str = ""):
+                 reasoning_effort: str = ""):
         self.model = model
         self._client = AsyncOpenAI(base_url=base_url, api_key=api_key)
         # 工厂已经按配置里的 provider 名建的实例，直接用它，不必再去猜 base_url
         self._is_deepseek = label == "deepseek"
-        self._can_force = supports_forced_tool
         # 思考强度（Kimi 的 reasoning_effort）。工厂只在这家认的时候传进来，
         # 所以这里不必再判 provider：有值就发，空就不发。
         self._effort = reasoning_effort
 
-    def open_session(self, system_prompt, history, tools, force_tool=None):
-        if force_tool and not self._can_force:
-            # 见 catalog.supports_forced_tool：这个模型传了会报错，干脆不传
-            print(f"[LLM] {self.model} 不支持强制调用 {force_tool}，守卫第 2 层本轮降级")
-            force_tool = None
+    def open_session(self, system_prompt, history, tools):
         return _OpenAISession(self._client, self.model, system_prompt, history,
-                              tools, force_tool, self._is_deepseek, self._effort)
+                              tools, self._is_deepseek, self._effort)
 
     def _effort_kwargs(self) -> dict:
         return {"reasoning_effort": self._effort} if self._effort else {}

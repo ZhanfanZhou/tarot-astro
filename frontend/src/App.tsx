@@ -15,6 +15,7 @@ import JourneyChronicle from './components/daily/JourneyChronicle';
 import WalletChip from './components/wallet/WalletChip';
 import { useDeckWallet } from './stores/useDeckWallet';
 import TarotCardDrawer from './components/TarotCardDrawer';
+import CardRevealOverlay from './components/CardRevealOverlay';
 import AuthModal from './components/AuthModal';
 import AstrologyProfileModal from './components/AstrologyProfileModal';
 import ConvertToRegisteredModal from './components/ConvertToRegisteredModal';
@@ -28,7 +29,7 @@ import { useConversationStore } from './stores/useConversationStore';
 import { userApi, conversationApi, tarotApi, astrologyApi, dailyApi } from './services/api';
 import { getEffectiveDate } from './utils/dailyDate';
 import { MessageRole, UserType } from './types';
-import type { Conversation, SessionType, DrawCardsRequest, Message, ToolCallRecord, UserProfile, DailyOverview } from './types';
+import type { Conversation, SessionType, DrawCardsRequest, Message, TarotCard, ToolCallRecord, UserProfile, DailyOverview } from './types';
 
 /** 会话末尾是一次还在等用户动手的调用（抽牌 / 补资料）→ 返回它。和后端 tool_turns.pending_interrupt 同一个判据。 */
 const INTERRUPT_TOOLS = new Set(['draw_tarot_cards', 'request_user_profile']);
@@ -62,6 +63,8 @@ const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [showConvertModal, setShowConvertModal] = useState(false);
   const [showCardDrawer, setShowCardDrawer] = useState(false);
+  // 揭牌幕：抽牌窗口关掉之后盖在对话上翻牌。cards 为 null = 真牌还在路上
+  const [reveal, setReveal] = useState<{ positions: string[]; cards: TarotCard[] | null } | null>(null);
   const [showAstrologyProfileModal, setShowAstrologyProfileModal] = useState(false);
   const isCreatingSessionRef = useRef(false); // 防止重复创建会话
   const [creatingSessionType, setCreatingSessionType] = useState<SessionType | null>(null);
@@ -401,15 +404,36 @@ const App: React.FC = () => {
     const call = conv ? pendingInterrupt(conv) : undefined;
     if (!conv || call?.name !== 'draw_tarot_cards') return;
     const api = turnApi(conv.session_type);
+    const request = call.args as unknown as DrawCardsRequest;
+
+    // 抽牌窗口就此退场，揭牌幕接着亮起来：牌背先按牌阵落位，等后端把真牌发回来再逐张翻开
+    setReveal({ positions: request.positions ?? [], cards: null });
 
     await runTurn(conv, async (onChunk) => {
-      // 真牌由后端生成，作为那次 draw_tarot_cards 调用的结果落库；先刷新让牌面出来，再请模型解读
+      // 真牌由后端生成，作为那次 draw_tarot_cards 调用的结果落库
+      let drawn: TarotCard[];
       try {
-        await api.drawCards(conv.conversation_id, call.args as unknown as DrawCardsRequest);
+        drawn = await api.drawCards(conv.conversation_id, request);
       } catch {
+        setReveal(null);
         throw new Error('抽牌失败，请重试');
       }
-      updateConversation(await conversationApi.get(conv.conversation_id));
+      // 用户中途切走了就别把牌盖在别的会话上
+      const stillHere = useConversationStore.getState().currentConversation?.conversation_id === conv.conversation_id;
+      setReveal((prev) => (prev && stillHere ? { ...prev, cards: drawn } : null));
+
+      // 牌一到就请模型开口，翻牌那几秒解读已经在跑了，不必等它翻完。
+      // 对话里的牌面挂在 tool 记录上，得刷一次会话才有——让它和解读并排跑，别挡在前面。
+      // (这一轮结束时 runTurn 还会再刷一次；那次落地之后这条就不该再覆盖回去了)
+      conversationApi
+        .get(conv.conversation_id)
+        .then((refreshed) => {
+          if (useConversationStore.getState().liveTurns[conv.conversation_id] !== undefined) {
+            updateConversation(refreshed);
+          }
+        })
+        .catch((error) => console.error('刷新对话失败:', error));
+
       await api.resume(conv.conversation_id, onChunk);
     }, '解读失败，请重试');
   };
@@ -775,6 +799,15 @@ const App: React.FC = () => {
           onClose={() => setShowCardDrawer(false)}
           onCardsDrawn={handleCardsDrawn}
         />
+
+        {/* 揭牌：抽牌窗口之后的一幕，半透明压在对话上逐张翻牌，翻完自己退场 */}
+        {reveal && (
+          <CardRevealOverlay
+            cards={reveal.cards}
+            positions={reveal.positions}
+            onDone={() => setReveal(null)}
+          />
+        )}
 
         {user && (
           <DailyOracleModal

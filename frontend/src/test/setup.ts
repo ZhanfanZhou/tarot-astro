@@ -8,3 +8,21 @@ if (!('ResizeObserver' in globalThis)) {
     disconnect() {}
   } as unknown as typeof ResizeObserver;
 }
+
+// jsdom 的 matchMedia 不能用（揭牌幕靠它认窄屏）——按 innerWidth 给个最小实现,
+// 测试里改 window.innerWidth 就能切到手机那套排布
+if (typeof window.matchMedia !== 'function') {
+  window.matchMedia = ((query: string) => {
+    const max = /max-width:\s*(\d+)px/.exec(query);
+    return {
+      matches: max ? window.innerWidth <= Number(max[1]) : false,
+      media: query,
+      onchange: null,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+      dispatchEvent: () => false,
+    };
+  }) as unknown as typeof window.matchMedia;
+}

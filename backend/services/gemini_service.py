@@ -4,10 +4,6 @@ from models import Message, MessageRole, ToolCallRecord, User, SessionType
 from services import context_service, tool_turns
 
 
-# 守卫第 2 层强制调用的工具
-FORCED_BRIEF_TOOL = "submit_reading_brief"
-
-
 # 正文推给前端的分块大小。模型是整段回完才到这里的，切块纯粹是让前端逐块渲染出
 # 「一句一句写出来」的样子 —— 开场白那次调用也按同一个尺寸推（见 turn_service.stream_text）。
 CLIENT_CHUNK_SIZE = 50
@@ -52,13 +48,12 @@ class GeminiService:
         phase: str = "reading",
         strategy: Optional[dict] = None,
         relationship_block: str = "",
-        force_brief: bool = False,
     ) -> Tuple[str, List[Dict[str, Any]], Tuple[str, Any]]:
         """把消息拆成 provider 中性形状：(system_prompt, history, pending)。
 
         - system_prompt 按相位拼装（context_service 是相位的唯一权威）：
             · override(daily)：调用方完整渲染，原样透传
-            · opening: opening_system.md + 入口偏好 + 用户资料 + 用户画像 + 关系上下文 [+ 守卫指令]
+            · opening: opening_system.md + 入口 + 称呼与来访次数 + 用户资料 + 用户画像
             · reading: 塔罗/占星提示词 + 用户资料 + 用户画像 + 策略单块（策略单可空）
           用户画像每轮无条件带上（注册用户），不再指望模型自己去翻笔记本
         - history：除末尾那条外的全部记录，逐条映射成 NeutralMsg（见 llm.base）
@@ -73,7 +68,6 @@ class GeminiService:
             system_prompt = context_service.build_opening_prompt(
                 relationship_block=relationship_block,
                 session_type=session_type,
-                force_brief=force_brief,
                 user_context=context_service.build_user_context(user),
                 portrait_context=context_service.build_portrait_context(user),
             )
@@ -129,7 +123,6 @@ class GeminiService:
         phase: str = "reading",
         strategy: Optional[dict] = None,
         relationship_block: str = "",
-        force_brief: bool = False,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         流式生成回复（支持 Function Calling 的 Agent Loop，走 provider 抽象）。
@@ -141,8 +134,7 @@ class GeminiService:
             function_executor: 函数执行器 async callable(func_name, func_args) -> Dict
             phase: 相位（opening=开场读人 / reading=解读），由 context_service 判定
             strategy: 本场策略单（解读相位注入系统提示词；开场相位为 None）
-            relationship_block: 关系上下文块（仅开场相位）
-            force_brief: 守卫——澄清预算用尽，本轮强制交单（仅开场相位）
+            relationship_block: <称呼与来访次数> 块（仅开场相位）
 
         Yields:
             Dict 包含以下可能的键：
@@ -156,8 +148,8 @@ class GeminiService:
         from services.llm import tools as toolspecs
 
         # override（日运自带完整提示词）优先级高于相位——_build_neutral 就是这么判的。
-        # 这里必须同源：override 在场 → 整个开场幕语义（开场工具集、强制交单守卫、同轮移交）
-        # 一律不适用，否则提示词与工具集/守卫会分裂。
+        # 这里必须同源：override 在场 → 整个开场幕语义（开场工具集、同轮移交）
+        # 一律不适用，否则提示词与工具集会分裂。
         has_override = system_prompt_override is not None
         is_opening = (not has_override) and phase == context_service.PHASE_OPENING
 
@@ -169,13 +161,10 @@ class GeminiService:
         system, history, pending = self._build_neutral(
             messages, user, session_type, system_prompt_override,
             phase=phase, strategy=strategy, relationship_block=relationship_block,
-            force_brief=force_brief,
         )
-        # 守卫第 2 层：opening 且预算用尽 → 本轮 mode=ANY，模型只能交单（provider 负责编码）
-        force = FORCED_BRIEF_TOOL if (is_opening and force_brief) else None
-        session = provider.open_session(system, history, _tool_specs(is_opening), force)
+        session = provider.open_session(system, history, _tool_specs(is_opening))
 
-        print(f"\n[Agent] 会话类型: {session_type.value} | 相位: {phase}" + (" | 强制交单" if is_opening and force_brief else ""))
+        print(f"\n[Agent] 会话类型: {session_type.value} | 相位: {phase}")
 
         # 本轮产生的记录（模型的每一轮 + 每个工具结果），按发生顺序 yield {"message"} 交给
         # 调用方落库；同轮移交时 messages + turns 就是解读 Agent 该看到的完整历史。
@@ -232,7 +221,10 @@ class GeminiService:
             ):
                 is_opening = False
                 phase = context_service.PHASE_READING
-                action, action_args = context_service.first_action(call.args)
+                # 展开后的单子（牌阵 ID → 牌阵名 + 位置）。交单执行器刚用同一个函数展开过
+                # 并落了库，这里重算一次是为了让本轮在飞的这一份和库里那一份逐字相同。
+                brief = context_service.expand_brief(call.args)
+                action, action_args = context_service.first_action(brief)
 
                 # 塔罗路线：牌阵已经在单子里，harness 替解读 Agent 发起抽牌调用，推抽牌器
                 # 给前端，然后收口等用户抽牌。不必为了一句过渡语再叫解读 Agent 出来跑一轮——
@@ -240,16 +232,11 @@ class GeminiService:
                 # 这次调用照样记成一条 assistant，抽牌结果落库后和它配对。
                 if action == "draw_tarot_cards":
                     print(f"[Agent] 🎬 开场收束 → 直接抽牌 {action_args}")
-                    # 模型这一轮说了什么，上面已经原样流式输出了——说与不说都由它。
-                    # 唯一的例外是守卫第 2 层：force 上膛时它在解码层就发不出文本，
-                    # 这时候的沉默不是它的选择，替它说一句，别让抽牌器凭空弹出来。
-                    line = ""
-                    if force and not (result.text or "").strip():
-                        line = context_service.forced_brief_handoff_line()
-                        yield {"content": line}
+                    # 模型这一轮说了什么，上面已经原样流式输出了——说与不说都由它，
+                    # 这里不替它补过渡语。
                     draw_call = ToolCallRecord(
                         name=action, args=action_args, id=tool_turns.new_call_id(action))
-                    yield _record(tool_turns.assistant_message(line, [draw_call]))
+                    yield _record(tool_turns.assistant_message("", [draw_call]))
                     yield {"done": True}
                     return
 
@@ -262,9 +249,9 @@ class GeminiService:
                 # 和它下一次请求从库里读到的完全一样，不另造移交指令。
                 system2, history2, pending2 = self._build_neutral(
                     messages + turns, user, session_type, system_prompt_override,
-                    phase=phase, strategy=call.args,
+                    phase=phase, strategy=brief,
                 )
-                session = provider.open_session(system2, history2, _tool_specs(False), None)
+                session = provider.open_session(system2, history2, _tool_specs(False))
                 pending = pending2
                 continue
 

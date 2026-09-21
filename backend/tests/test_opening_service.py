@@ -1,4 +1,4 @@
-"""开场白生成与三层守卫的判定逻辑。"""
+"""开场白生成与开场上下文拼装。"""
 import asyncio
 import sys
 from pathlib import Path
@@ -47,50 +47,21 @@ def _conv(phase="opening", strategy=None, user_msgs=0):
     )
 
 
-def test_guard_no_force_below_threshold():
-    from services import opening_service
-
-    assert opening_service.should_force_brief(_conv(user_msgs=2)) is False
-
-
-def test_guard_forces_brief_at_threshold():
-    """第 2 层：用户消息数 >= 3 且未交单 → 强制交单。"""
-    from services import opening_service
-
-    assert opening_service.should_force_brief(_conv(user_msgs=3)) is True
-
-
-def test_guard_no_force_in_reading_phase():
-    from services import opening_service
-
-    conv = _conv(phase="reading", strategy={"user_goal": "求认同"}, user_msgs=9)
-    assert opening_service.should_force_brief(conv) is False
-
-
-def test_hard_exit_triggers_above_hard_threshold():
-    """第 3 层：>= 5 条用户消息仍无策略单 → 兜底翻 phase，strategy 保持 None（不伪造）。"""
-    from services import opening_service
-
-    assert opening_service.should_hard_exit(_conv(user_msgs=5)) is True
-    assert opening_service.should_hard_exit(_conv(user_msgs=4)) is False
-
-
 # ---------------------------------------------------------------------------
-# prepare_opening_context：两个 router 的开场上下文拼装（守卫 + 相位 + 关系块）
+# prepare_opening_context：两个 router 的开场上下文拼装（相位 + 关系块）
 # 收归一处 —— 此前塔罗/占星各有一份逐字复制，任何一边改漏都是静默分裂。
 # ---------------------------------------------------------------------------
 
 def test_prepare_context_in_opening_phase_returns_relationship_block(db_env):
-    """开场相位：关系上下文非空，且昵称走 _nickname（不再由 router 内联第三份）。"""
+    """开场相位：<称呼与来访次数> 非空，且昵称走 _nickname（不再由 router 内联第三份）。"""
     from services import opening_service
 
     conv = _conv(phase="opening", user_msgs=1)
-    phase, force_brief, block = asyncio.run(
+    phase, block = asyncio.run(
         opening_service.prepare_opening_context(conv, _user("小夏"))
     )
 
     assert phase == "opening"
-    assert force_brief is False
     assert block != ""
     assert "小夏" in block
 
@@ -99,7 +70,7 @@ def test_prepare_context_falls_back_to_default_nickname(db_env):
     """无资料的游客：昵称兜底为「朋友」，与 _nickname 单一实现保持一致。"""
     from services import opening_service
 
-    phase, _, block = asyncio.run(
+    phase, block = asyncio.run(
         opening_service.prepare_opening_context(_conv(phase="opening"), None)
     )
 
@@ -108,53 +79,16 @@ def test_prepare_context_falls_back_to_default_nickname(db_env):
 
 
 def test_prepare_context_in_reading_phase_returns_empty_block(db_env):
-    """解读相位：不查库、不拼关系块、不开守卫 —— 存量会话完全不受开场幕影响。"""
+    """解读相位：不查库、不拼关系块 —— 存量会话完全不受开场幕影响。"""
     from services import opening_service
 
     conv = _conv(phase="reading", strategy={"user_goal": "求认同"}, user_msgs=9)
-    phase, force_brief, block = asyncio.run(
+    phase, block = asyncio.run(
         opening_service.prepare_opening_context(conv, _user())
     )
 
     assert phase == "reading"
-    assert force_brief is False
     assert block == ""
-
-
-def test_prepare_context_opens_force_brief_guard_at_threshold(db_env):
-    """守卫第 2 层：澄清预算用尽 → force_brief=True，但仍在开场相位（本轮强制交单）。"""
-    from services import opening_service
-
-    conv = _conv(phase="opening", user_msgs=config.OPENING_FORCE_BRIEF_AFTER_USER_MSGS)
-    phase, force_brief, block = asyncio.run(
-        opening_service.prepare_opening_context(conv, _user())
-    )
-
-    assert phase == "opening"
-    assert force_brief is True
-    assert block != ""
-
-
-def test_prepare_context_hard_exits_and_flips_phase(db_env):
-    """守卫第 3 层：超硬上限 → 就地翻相位（落库），本轮即以解读相位返回，绝不卡死。"""
-    from services import opening_service
-    from services.storage_service import StorageService
-
-    conv = _conv(phase="opening", user_msgs=config.OPENING_HARD_EXIT_AFTER_USER_MSGS)
-    asyncio.run(StorageService.save_conversation(conv))
-
-    phase, force_brief, block = asyncio.run(
-        opening_service.prepare_opening_context(conv, _user())
-    )
-
-    assert phase == "reading"
-    assert force_brief is False   # 已不在开场相位，不该再强制交单
-    assert block == ""
-    # 就地改写 + 落库：router 后续用同一个对象取 strategy
-    assert conv.phase == "reading"
-    saved = asyncio.run(StorageService.get_conversation(conv.conversation_id))
-    assert saved.phase == "reading"
-    assert saved.strategy is None  # 兜底不伪造假策略单
 
 
 def test_greeting_raises_when_llm_fails(db_env):
@@ -202,6 +136,10 @@ def test_greeting_llm_call_sets_timeout(db_env):
         async def generate_text(self, prompt, **kwargs):
             captured.update(kwargs)
             return "坐吧。"
+
+        def open_session(self, *args, **kwargs):
+            # 开场白这一轮不开 session —— 也就谈不上带任何工具
+            raise AssertionError("开场白不该开 session")
 
     with patch("services.llm.get_provider", return_value=_FakeProvider()) as get_provider:
         text = asyncio.run(opening_service._generate_greeting_via_llm("PROMPT"))

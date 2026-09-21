@@ -11,7 +11,7 @@
 
 1. 一个具体的、可以直接起卦的问题（不是「我最近很烦」，是「该不该接这个外地的 offer」）
 2. 用塔罗还是星盘起手
-3. 走塔罗的话：什么牌阵、抽几张、每个位置代表什么
+3. 走塔罗的话：从牌阵目录里选一副，只交它的 ID
 
 三件事齐了立刻调 `submit_reading_brief`，解读不归它管。
 
@@ -28,10 +28,14 @@
 | 叙事性澄清 | **一个**开放问题，让用户把事情讲出来 | 参数化填表、一次问多个、连环追问 |
 | 静默移交 | 不预告、不解释判断，直接进仪式 | 「我判断你是求认同型」、生硬换挡 |
 
-**追问预算最多 1 轮。** 用户说的已经够具体 → 0 轮直接交单；用户催「直接抽吧」→ 立刻交单。
-**问了问题的那一轮不交单**——提问和交单不能同时出现，它在等回答。
-这条写死在提示词里，harness 不做机械拦截：模型返回 text + tool_call 就执行工具继续循环，
-是标准 agent loop 行为，不该为它加特例。
+**交单的判据是「填得出来吗」，不是「问了几轮」。** 起手单的字段能从这段对话得到，
+或者空缺处能从已有信息合理补上，就立刻交单；只有当缺的那一项真的决定这场占卜在问什么、
+又补不出来时才追问。用户问的是通用问题（塔罗能解决什么、怎么抽）就正常回答，那不算追问、
+也不是交单的前提。写死在提示词里的只有一条禁令：问题已清楚、用户想抽、基本澄清也做过了，
+却还在兜圈子不交单。
+
+**harness 不数消息、不强制、不兜底**（这三样都拆掉了，见 §4）。模型返回 text + tool_call
+就执行工具继续循环，是标准 agent loop 行为，不为开场加特例。
 
 ---
 
@@ -42,10 +46,12 @@
 
 opening:
   用户消息 → 前置 Agent（OPENING provider）
-             提示词: opening_system.md + <入口> + <用户资料> + <用户画像> + <关系上下文> [+ <本轮强制>]
+             提示词: opening_system.md + <牌阵选择参考> + <用户点开的入口>
+                    + <称呼与来访次数> + <用户资料> + <用户画像>
              工具:   submit_reading_brief + request_user_profile
+                    + read_divination_notes
              ↓ 调 submit_reading_brief
-             harness: 归一化 → strategy 落库 + phase→reading
+             harness: 归一化 → 按牌阵 ID 展开 → strategy 落库 + phase→reading
       ┌──────────────── 按 route 分两条 ────────────────┐
       ▼ route=tarot                        route=astrology ▼
   harness 照单直推抽牌器                同轮移交解读 Agent（READING provider）
@@ -56,13 +62,13 @@ opening:
 reading:
   用户消息 → 解读 Agent（READING provider）
              提示词: tarot/astrology_system.md + <用户资料> + <用户画像>
-                    + <本场起手> + reading_handoff.md
+                    + <本场起手> [+ <牌阵说明>] + reading_handoff.md
              工具:   draw_tarot_cards / get_astrology_chart /
                     request_user_profile / read_divination_notes
 ```
 
 - **任意时刻单一声音。** 每场最多一次相位切换，没有每轮跑两个模型的导演层。
-- **塔罗路线零额外往返。** 牌阵参数已经在单子里，harness 直接推抽牌器。
+- **塔罗路线零额外往返。** 牌阵位置在交单那一步就从目录展开好了，harness 直接推抽牌器。
   不叫解读 Agent 出来说过渡语——那是纯浪费的往返，而且它会自己另选一副牌阵，跟单子对不上。
 - **星盘路线同轮移交。** 解读 Agent 看到的历史就是落库的历史，待发的是交单结果，
   和它下一次请求从库里读到的完全一样，**不另造移交指令**。
@@ -72,9 +78,13 @@ reading:
 
 ### 塔罗与星盘不是两条产品线
 
-对前置 Agent 来说它们只是手段选项，判断逻辑同一套，`<入口>` 只是先验偏好，
+对前置 Agent 来说它们只是手段选项，判断逻辑同一套，`<用户点开的入口>` 只是先验偏好，
 它判断另一条更合适可以改。`route` 填的是**起手动作**，不是全场计划——
 两个都想用就填先做的那个。
+
+开场手上只有三个工具，都不产生解读：`submit_reading_brief` 交单、
+`request_user_profile` 要出生信息、`read_divination_notes` 翻这位用户以前的占卜记录
+（用户说「上次那件事」时，背景由它自己接上，不必让用户重讲，也不必等解读 Agent 上场再查）。
 
 星盘需要出生信息，所以开场工具集里有 `request_user_profile`，且 `<用户资料>` 必须注入开场提示词：
 看不见资料，模型就没法判断星盘这条路走不走得通，只能盲调工具去撞。
@@ -89,15 +99,24 @@ reading:
 | `question` | 一句话，具体到可以直接起卦 | ✅ |
 | `context` | 2–3 句：用户讲出来的背景 | |
 | `route` | `tarot` / `astrology`（`enum` 锁死） | ✅ |
-| `spread_type` | 牌阵名（塔罗路线） | |
-| `card_count` | 张数，须与 `positions` 长度一致 | |
-| `positions` | 各位置含义（字符串数组） | |
+| `spread_type` | 牌阵 ID，`enum` 锁死在目录那几副（塔罗路线） | |
 
-必填由 schema 的 `required` 保证，**不做额外字段校验**：缺字段渲染器直接跳过，
-塔罗路线牌阵字段缺失由 `_DEFAULT_SPREAD`（三张阵：现状 / 阻碍 / 流向）兜底，
-不为这个再花一次往返去问模型。
+**模型只交牌阵 ID，不写位置。** 位置、张数、牌阵名都挂在那个 ID 上，交单时由
+`context_service.expand_brief()` 从牌阵目录（§3.1）展开一次，落库的就是展开后的完整一单：
 
-牌阵选型表（问题类型 × 牌阵 × 位置含义）写在 `opening_system.md` 里，管理页可在线改。
+```
+question / context / route / spread_type   ← 模型交的
+spread_name / positions                    ← 按 ID 展开补上的
+```
+
+展开只此一处。同一轮里推给抽牌器的那副（`first_action`）、下一轮解读相位读到的那一份，
+都从这个返回值来，不各自再查一遍目录。星盘路线不留 `spread_type`（模型多填了也丢掉）：
+这场没抽牌，留着只会让 `<本场起手>` 多出一行没有位置的牌阵。
+
+必填由 schema 的 `required` 保证。**牌阵 ID 是唯一做额外校验的字段**：不在目录里就
+不落库、不翻相位，把可选值作为工具结果回给模型重选（`enum` 已经锁死，正常走不到）。
+随便拿一副阵去顶替它选的那副，整场牌都会按错的位置解读；重选一次便宜得多，
+真选不出来就再交一次。
 
 `context_service.to_plain()` 收口交单参数：Gemini 的 `function_call.args` 里数组是
 RepeatedComposite、整数常以 float 到手，整个 JSON 要落库，留着 proto 类型会在 `json.dumps` 当场炸。
@@ -105,21 +124,73 @@ RepeatedComposite、整数常以 float 到手，整个 JSON 要落库，留着 p
 `strategy` 为 None 时起手单渲染器返回空串，解读 Agent 表现同没有开场幕——
 **起手单是增强项，不是通行证。**
 
+### 3.1 牌阵目录
+
+一副牌阵一份 `prompts/spread_<id>.md`，文件头是机器读的那几项，正文是发给解读 Agent 的说明：
+
+```
+---
+id: three_card_state          ← 必须和文件名一致
+name: 三张无牌阵·状态／结果
+positions:                    ← 位置的唯一真源，个数即张数
+  - 左牌：共同回答本次问题
+  ...
+---
+# 三张无牌阵·状态／结果        ← 首行标题与块标题重复，注入时去掉
+## 牌阵属性 / 适用场合 / 解读方法与限制
+```
+
+**可用牌阵 = `PROMPT_REGISTRY` 里所有 `spread_*.md`**，`SPREAD_IDS` 由它派生，
+再由它生成交单那个 `enum`。加一副阵只有两步：放文件、登记。当前开放五副：
+
+| ID | 名称 | 张数 |
+|---|---|---|
+| `three_card_state` | 三张无牌阵·状态／结果 | 3 |
+| `three_card_timeline` | 三张无牌阵·未来时间流 | 3 |
+| `thoughts_development` | 想法及发展牌阵 | 6 |
+| `development_five` | 五张发展牌阵 | 5 |
+| `choice_two` | 二选一·分支发展 | 5 |
+
+文件头读不出来（管理页改坏了、新加的阵忘了写 positions）**当场抛**，不给任何默认位置：
+牌阵少一副，开场的 `enum` 就少一个选项，必须立刻看见；给个默认阵的后果是用户按一副
+谁都没选过的牌阵抽完一整场。
+
+**两份文案分两个相位发，从不同时出现：**
+
+- 开场只发 `opening_spread_catalog.md`（`<牌阵选择参考>`）：五副阵的简介与适用场合，
+  够选阵用。五份详解一起发是两千多字的噪音，还会诱导开场去重写牌位、提前讲解读规则
+  ——那两件事提示词里都明令禁止。
+- 解读按起手单上的 ID 取那一份详解，作为 `<牌阵说明>` 紧接在 `<本场起手>` 后面：
+  那一块列的是这副阵的位置，位置怎么解读就在这一段里。位置职责、主次判断、解读限制
+  都在其中。目录外的阵名（存量会话）不出这一块。
+
+两份都在 `PROMPT_REGISTRY` 里，管理页可在线改、热加载。
+
 ---
 
-## 4. 预算守卫：三层强制交单
+## 4. 交单只由提示词管
 
-1. **提示词纪律（软）**：`opening_system.md` 写明追问预算与交单时机。绝大多数会话在这层完成。
-2. **API 机械强制（硬）**：用户消息数 ≥ `OPENING_FORCE_BRIEF_AFTER_USER_MSGS`（默认 3）
-   且未交单 → 该轮带 `force_tool="submit_reading_brief"`（Gemini 为 `mode=ANY`，
-   OpenAI 兼容为 `tool_choice`）。这是解码层约束：该轮禁止纯文本输出，只能产出交单调用。
-   同时注入 `<本轮强制>` 一行保证被强制时字段质量不崩。
-   - 配套：强制轮模型在解码层一个字也说不出来。塔罗路线直推抽牌器前补一句
-     `opening_force_brief.md` 的过渡语，别让抽牌器凭空弹到用户面前。
-     其余路径一律不补——模型想说就说，不想说就沉默。
-3. **harness 兜底（确定性下界）**：用户消息数 ≥ `OPENING_HARD_EXIT_AFTER_USER_MSGS`（默认 5）
-   仍无起手单 → 代码直接翻 `phase="reading"`，`strategy` 保持 None（不伪造假单子）。
-   预期永不触发，但保证**数学上不存在卡死在开场幕的会话**。
+**代码里没有任何强制交单的机械件。** 没有消息计数、没有 `tool_choice` 强制、没有
+harness 兜底翻相位。什么时候交单、追问到什么程度，全部写在 `opening_system.md` 里，
+在线改提示词即可调整，不必改代码、不必重启。
+
+判据写在提示词里的三条：
+
+1. 起手单的字段现在填得出来 → 立刻交单。
+2. 有空缺但能从已有信息合理补上 → 补上交单，不为此再问一句。可以替用户定的是路线、
+   牌阵、问题怎么措辞；不能把他没说过的事实写成已知（时间范围没说就在背景里注明未限定）。
+3. 缺的那一项真的决定这场占卜在问什么、又补不出来 → 才追问，一次一个自然的问题。
+
+附带一条严格禁令：问题已清楚、用户有抽牌的意思、基本澄清也做过了，却还在追问细节、
+复述问题求确认、说「我们再理一理」——这种时候唯一正确的动作是调 `submit_reading_brief`。
+
+通用问答（塔罗能解决什么、怎么抽、这副阵是干什么的）正常回答，不算追问，也不是交单
+的前提；用户还没说今天想问什么就不交单，等他说出来再按上面判断。
+
+**为什么把机械件全拆了**：三层守卫防的是「模型无限澄清」，但它数的是用户消息条数，
+而这个数字和对话内容无关——用户前两句在问「塔罗是什么」、第三句才说事，守卫已经在
+逼着交单了。该不该交单要读懂这段对话才知道，那是模型的活；提示词能表达的判据（字段
+填不填得出来、缺的那项要不要紧），计数器表达不了。
 
 ---
 
@@ -129,7 +200,8 @@ RepeatedComposite、整数常以 float 到手，整个 JSON 要落库，留着 p
 `POST /api/conversations/{id}/greeting` 单独取，SSE 形状与 `/message` 一致。
 等待因此发生在对话里、和等一轮回复长得一样，而不是卡在首页那个按钮上。
 
-- 提示词只发人设与迎接：`opening_persona.md` + `<入口>` + `<关系上下文>` + `opening_greeting.md`。
+- 提示词只发人设与迎接：`opening_persona.md` + `<用户点开的入口>` + `<称呼与来访次数>`
+  + `opening_greeting.md`。
   无工具、短输出，超时 `OPENING_GREETING_TIMEOUT_SECONDS`（默认 8 秒）。
 - 生成在进流之前做完——provider 挂了还能以 503 返回让前端提示重试；
   一旦进了流，就只剩正文可推、没法再表达失败。
@@ -141,7 +213,7 @@ RepeatedComposite、整数常以 float 到手，整个 JSON 要落库，留着 p
 
 ---
 
-## 6. 关系上下文
+## 6. `<称呼与来访次数>`
 
 `context_service.build_relationship_meta()` 一条 SQL，不加载会话全文：
 
@@ -158,7 +230,7 @@ WHERE user_id = ? AND conversation_id != ?
 渲染出来只有事实行：
 
 ```
-<关系上下文>
+# <称呼与来访次数>
 称呼：小夏 ｜ 来访：第 4 次 ｜ 距上次：11 天
 ```
 
@@ -172,9 +244,11 @@ WHERE user_id = ? AND conversation_id != ?
 `tarot_system.md` / `astrology_system.md` 是给「从零开始的占卜师」写的，
 里面仍命令「首次对话先欢迎用户」和「意图模糊时参数化澄清」，与开场幕直接打架。
 
-解决方式不动那两份大提示词：起手单非空时在解读提示词后追加 `reading_handoff.md`，
+解决方式不动那两份大提示词：起手单非空时在解读提示词**最末**追加 `reading_handoff.md`，
 宣告开场 / 迎接 / 澄清已完成、上述两条本场失效。
-起手单为空（存量会话 / 守卫兜底）→ 不追加任何东西。
+它永远是最后一段——它作废的是上面那两份提示词里的条款，中间再插别的块，
+只会让它离要压的条款和结尾都更远。`<牌阵说明>` 因此排在它前面。
+起手单为空（存量会话）→ 不追加任何东西。
 
 ---
 
@@ -184,8 +258,9 @@ WHERE user_id = ? AND conversation_id != ?
 |---|---|
 | 开场白 LLM 失败或超时 | 503，前端提示重试；不生成假问候 |
 | 星盘移交重建 session 失败 | 该轮以起手单已落库结束，下轮自然进 reading |
-| 模型不交单 | 三层守卫（§4） |
-| 塔罗路线牌阵字段缺失 | `_DEFAULT_SPREAD` 三张阵兜底 |
+| 模型不交单 | 提示词纪律（§4）。代码不介入 |
+| 牌阵 ID 不在目录里 | 不落库、不翻相位，把可选值回给模型重选（§3） |
+| 牌阵文件头读不出来 | 当场抛，不给默认位置（§3.1） |
 | 交单参数含 proto 类型 | `to_plain()` 收口 |
 
 ---
@@ -194,12 +269,14 @@ WHERE user_id = ? AND conversation_id != ?
 
 | 文件 | 管什么 |
 |---|---|
-| `prompts/opening_system.md` | 人设、迎接规范、追问纪律、路线选择、牌阵选型表、交单纪律 |
+| `prompts/opening_system.md` | 交单判据、追问纪律、路线选择、选阵纪律 |
+| `prompts/opening_spread_catalog.md` | `<牌阵选择参考>`：五副阵的简介，开场选阵用 |
+| `prompts/spread_*.md` | 一副阵一份：文件头（id / name / positions）+ 解读说明 |
 | `prompts/opening_persona.md` · `opening_greeting.md` | 开场白那一次发的两段 |
-| `prompts/opening_force_brief.md` | 强制交单指令 + 过渡语 |
 | `prompts/reading_handoff.md` | 接场约束 |
-| `services/opening_service.py` | 开场白生成、守卫计数、交单落库、硬退出 |
-| `services/context_service.py` | 相位判定、关系元数据、起手单渲染与归一、两相位提示词拼装、`first_action` |
+| `services/spread_service.py` | 牌阵目录：ID → 牌阵名 / 位置 / 解读说明，文件头解析 |
+| `services/opening_service.py` | 开场白生成、开场上下文拼装、交单校验与落库 |
+| `services/context_service.py` | 相位判定、关系元数据、起手单展开与渲染、两相位提示词拼装、`first_action` |
 | `services/gemini_service.py` | Agent Loop 按相位取 provider / 提示词 / 工具集，交单后分路 |
-| `config.py` | 守卫两个阈值 + 开场白超时 |
+| `config.py` | 开场白超时 |
 | `pages/admin/ConversationsPanel.tsx` | 会话列表开场幕徽标 + 详情页起手单卡片 |

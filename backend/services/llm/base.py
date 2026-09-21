@@ -37,7 +37,6 @@ class LLMProvider(Protocol):
         system_prompt: str,
         history: list[NeutralMsg],      # 不含最后一条待发的 user / tool_result
         tools: Optional[list[dict]],    # 中性工具规格 [{name, description, parameters}]
-        force_tool: Optional[str] = None,
     ) -> LLMSession: ...
     async def generate_json(self, prompt: str) -> str: ...
     async def generate_text(self, prompt: str, *, temperature: float = 1.0,

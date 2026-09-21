@@ -30,13 +30,12 @@ class FakeProvider:
     def __init__(self, scripts):
         # scripts: list[list[TurnResult]]，每次 open_session 取一个（按 session 创建顺序）
         self._scripts = list(scripts)
-        self.sessions = []      # 记录每个 open_session 的 system/history/tools/force_tool
+        self.sessions = []      # 记录每个 open_session 的 system/history/tools
 
-    def open_session(self, system, history, tools, force_tool=None):
+    def open_session(self, system, history, tools):
         s = FakeSession(self._scripts.pop(0))
         s.system = system
         s.history = history
         s.tools = tools
-        s.force_tool = force_tool
         self.sessions.append(s)
         return s

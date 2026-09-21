@@ -23,9 +23,16 @@ PROMPT_REGISTRY: Dict[str, str] = {
     "astrology_system.md": "占星对话系统提示词",
     "opening_persona.md": "人设与迎接",
     "opening_system.md": "前置占卜师要做的事",
+    "opening_spread_catalog.md": "牌阵选择参考（开场选阵用的简介）",
     "opening_greeting.md": "开场白那一轮的指令",
-    "opening_force_brief.md": "追问预算用尽那一轮（强制交单指令 + 过渡语）",
     "reading_handoff.md": "接场约束",
+    # 牌阵详解：一副一份，文件名里的 id 就是牌阵 ID（见 spread_service）。
+    # 顺序即 <牌阵选择参考> 的顺序，也是交单 spread_type 那个 enum 的顺序。
+    "spread_three_card_state.md": "牌阵详解 · 三张无牌阵（状态／结果）",
+    "spread_three_card_timeline.md": "牌阵详解 · 三张无牌阵（未来时间流）",
+    "spread_thoughts_development.md": "牌阵详解 · 想法及发展（六张）",
+    "spread_development_five.md": "牌阵详解 · 五张发展",
+    "spread_choice_two.md": "牌阵详解 · 二选一分支发展",
     "portrait_usage.md": "用户画像块怎么用",
     "notebook_system.md": "笔记本生成（占卜笔记 + 用户画像）",
     "daily_oracle_system.md": "每日一签解读",

@@ -7,13 +7,12 @@
   · 绝不触碰 backend/data/（DB → tmp_path；用量计数文件 → tmp_path）
 
 锁住的契约：
-  1. 开场相位工具集只有 submit_reading_brief；交单后同一次回复内换成解读工具集并抽牌
+  1. 开场相位是开场那套工具集；交单后同一次回复内换成解读工具集并抽牌
   2. submit_reading_brief 是纯后台工具——SSE 里一个字节都不能外泄；SSE 只有正文。
      抽牌调用落库在会话末尾，前端据此显示抽牌按钮（不另开事件通道）
   3. 移交重建的 session 必须带上用户最后一句澄清回答（读人素材，丢了就白读）
-  4. 抽牌参数的 wire 契约：positions 必须是 list，前端据此渲染槽位（个数=张数）
+  4. 抽牌参数的 wire 契约：开场只交牌阵 ID，位置由牌阵目录展开成 list，前端据此渲染槽位（个数=张数）
   5. 存量会话（phase=reading）行为不变：单 session、完整工具集、绝不移交
-  6. 守卫第 3 层：开场澄清超预算 → 兜底翻相位，不存在卡死在开场幕的会话
 """
 import asyncio
 import json
@@ -28,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from models import (  # noqa: E402
     Conversation, Message, MessageRole, SessionType, User, UserType, UserProfile,
 )
-from services import context_service  # noqa: E402
+from services import spread_service  # noqa: E402
 from tests._fake_llm import FakeProvider, FakeSession, TurnResult, ToolCall, tool_names  # noqa: E402
 
 USER_ID = "user_e2e"
@@ -69,14 +68,13 @@ class _TracingProvider(FakeProvider):
         super().__init__(scripts)
         self.trace = trace
 
-    def open_session(self, system, history, tools, force_tool=None):
+    def open_session(self, system, history, tools):
         index = len(self.sessions) + 1
         self.trace.append(f"chat:{index}")
         s = _TracingSession(self._scripts.pop(0), self.trace)
         s.system = system
         s.history = history
         s.tools = tools
-        s.force_tool = force_tool
         self.sessions.append(s)
         return s
 
@@ -138,7 +136,7 @@ def _seed_conversation(
     return conv
 
 
-# 塔罗与占星的 router 有约 20 行逐字复制的接线（交单分支、守卫、relationship_block、
+# 塔罗与占星的 router 有约 20 行逐字复制的接线（交单分支、relationship_block、
 # 抽牌 wire 转换）。复制粘贴出错不会被任何只打塔罗的测试抓到 —— 主链路按入口参数化，
 # 两个 router 跑同一套断言。
 ROUTES = [
@@ -203,14 +201,14 @@ def _greeting_and_user(*user_texts):
 
 # provider 交出来的就是纯 python（proto 转换在 GeminiProvider 内部，见
 # test_gemini_provider.test_tool_call_args_come_back_as_plain_python）。
-# 抽几张由 positions 的个数决定，没有单独的张数字段。
+# 开场只交牌阵 ID，位置和张数由牌阵目录展开，模型不写位置。
 BRIEF_ARGS = {
     "question": "他还会回头吗",
     "context": "上周三他突然不回消息",
     "route": "tarot",
-    "spread_type": "three_card",
-    "positions": ["过去", "现在", "未来"],
+    "spread_type": "three_card_timeline",
 }
+BRIEF_POSITIONS = ["前期", "中期", "后期"]      # spread_three_card_timeline.md 的文件头
 
 # 星盘路线：不需要用户动手，交单后同轮移交给解读 Agent 取盘
 BRIEF_ASTRO = {"question": "我这两年的事业格局", "route": "astrology"}
@@ -254,7 +252,7 @@ def test_opening_submits_brief_then_draws_straight_from_it(
     ]
     assert len(prov.sessions) == 1
     assert tool_names(prov.sessions[0].tools) == [
-        "submit_reading_brief", "request_user_profile"]
+        "submit_reading_brief", "request_user_profile", "read_divination_notes"]
 
     # —— SSE 只有正文：交单、起手单内容、抽牌指令都不在流里 ——
     assert all(set(e) == {"content"} for e in events)
@@ -275,9 +273,10 @@ def test_opening_submits_brief_then_draws_straight_from_it(
     assert tail[0].content == TRANSITION and tail[0].tool_calls[0].name == "submit_reading_brief"
     assert tail[1].tool_call_id == tail[0].tool_calls[0].id
     # 抽牌调用停在会话末尾，前端据此显示抽牌按钮；/draw 用同一个 id 写结果。
-    # 牌阵参数逐字取自起手单（positions 是 list，个数即张数）
+    # 牌阵位置由起手单上那个牌阵 ID 展开（positions 是 list，个数即张数）
     assert tail[2].tool_calls[0].name == "draw_tarot_cards"
-    assert tail[2].tool_calls[0].args == {"spread_type": "three_card", "positions": ["过去", "现在", "未来"]}
+    assert tail[2].tool_calls[0].args == {
+        "spread_type": "three_card_timeline", "positions": BRIEF_POSITIONS}
 
 
 # ---------------------------------------------------------------------------
@@ -348,7 +347,7 @@ def test_model_line_streams_through_untouched(env, monkeypatch, session_type, en
 def test_opening_clarifying_turn_stays_in_opening_and_persists_reply(env, monkeypatch):
     """前置 Agent 不交单、只追问一句 → 留在开场相位，回复照常落库，绝不误翻相位。
 
-    这是追问预算的**正常路径**（守卫尚未触发）。
+    信息不够时追问是正常路径：追问不落库策略单、不翻相位。
     """
     conv = _seed_conversation("opening", [
         Message(role=MessageRole.ASSISTANT, content="坐吧，阿岚。今天想聊些什么？"),
@@ -366,10 +365,9 @@ def test_opening_clarifying_turn_stays_in_opening_and_persists_reply(env, monkey
 
     # —— 单 session：没交单就没有移交 ——
     assert len(prov.sessions) == 1
-    # 仍是开场工具集，且守卫未上膛（预算没用尽，不该强制交单）
+    # 仍是开场工具集
     assert tool_names(prov.sessions[0].tools) == [
-        "submit_reading_brief", "request_user_profile"]
-    assert prov.sessions[0].force_tool is None
+        "submit_reading_brief", "request_user_profile", "read_divination_notes"]
 
     # —— 追问正常流式吐给用户，且没有任何工具事件外泄 ——
     assert _sse_text(events) == question
@@ -393,9 +391,9 @@ def test_opening_clarifying_turn_stays_in_opening_and_persists_reply(env, monkey
     assert resp2.status_code == 200
 
     assert tool_names(prov2.sessions[0].tools) == [
-        "submit_reading_brief", "request_user_profile"]
+        "submit_reading_brief", "request_user_profile", "read_divination_notes"]
     system_text = prov2.sessions[0].system
-    assert "关系上下文" in system_text          # 开场幕提示词（含关系块）
+    assert "称呼与来访次数" in system_text       # 开场幕提示词（含来访那一块）
     assert "本场起手" not in system_text        # 而不是解读相位那份
     assert _get_conversation(conv.conversation_id).phase == "opening"
 
@@ -432,7 +430,6 @@ def test_reading_phase_never_hands_off(env, monkeypatch):
     from services.llm import tools
     assert tool_names(prov.sessions[0].tools) == tools.READING_TOOL_NAMES
     assert "draw_tarot_cards" in tools.READING_TOOL_NAMES
-    assert prov.sessions[0].force_tool is None  # 解读相位绝不带强制交单守卫
 
     assert done
     # 抽牌调用落在末尾，等用户抽
@@ -521,147 +518,23 @@ def test_handoff_history_has_no_two_consecutive_user_turns(env, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 3b. 守卫第 2 层（router 侧接线）：澄清预算用尽 → 本轮 force_tool 强制交单
+# 7. 牌阵 ID 是模型唯一要交的牌阵信息，位置与张数由目录展开
 # ---------------------------------------------------------------------------
 
-def test_force_brief_guard_reaches_model_as_force_tool(env, monkeypatch):
-    """用户连发含糊消息到预算上限 → 传给 provider 的 force_tool 必须是 submit_reading_brief。
+@pytest.mark.parametrize("spread_id", spread_service.SPREAD_IDS)
+def test_every_spread_id_expands_into_its_own_positions(env, monkeypatch, spread_id):
+    """开场交一个 ID，抽牌器就收到那副阵的位置，抽牌就抽那么多张。
 
-    补测理由：should_force_brief 有单测、GeminiProvider 的 mode=ANY 编码有单测，但
-    「router 真的把 force_brief 传下去、opening session 因此拿到 force_tool」这段**接线**
-    此前只在第 3 层（hard_exit）上做过 e2e。第 2 层是防「开场幕无限澄清」的主闸门。
+    这里锁的是「一个事实只有一份」：位置写在牌阵自己那份 .md 的文件头里，起手单、
+    抽牌调用、真正抽出来的张数全从那一份来。模型不再自拟位置——它填五个位置却说这是
+    凯尔特十字、或者填 5 张却只给 3 个位置的那条路，从数据形状上就不存在了。
     """
-    import config
-
-    # 库里已有 (FORCE_BRIEF - 1) 条含糊的用户消息，加上本轮这条正好把预算用尽
-    history = _greeting_and_user(
-        *[f"不知道欸{i}" for i in range(config.OPENING_FORCE_BRIEF_AFTER_USER_MSGS - 1)]
-    )
-    conv = _seed_conversation("opening", history, session_type=SessionType.ASTROLOGY)
-
-    scripts = [
-        # 守卫上膛后，模型在解码层已无法输出纯文本 —— 只能交单
-        # 走星盘路线，这样移交后的解读 session 会被开出来，能一并验它没被守卫污染
-        [_call("submit_reading_brief", BRIEF_ASTRO)],
-        [_text(TRANSITION)],
-    ]
-    prov = _install_gemini(monkeypatch, scripts)
-
-    resp = env.post("/api/astrology/message", json={
-        "conversation_id": conv.conversation_id,
-        "content": "还是说不上来",
-    })
-    assert resp.status_code == 200
-
-    # —— 核心断言：守卫真的到达了 provider（不是只在 service 里算了个 bool） ——
-    assert prov.sessions[0].force_tool == "submit_reading_brief"
-    # 允许的函数必须真在本轮工具集里，否则 mode=ANY 指名一个不存在的函数 = API 报错
-    assert "submit_reading_brief" in tool_names(prov.sessions[0].tools)
-
-    # —— 移交后的解读 session 绝不能继续带着守卫（否则解读 Agent 也被逼着只能交单） ——
-    assert prov.sessions[1].force_tool is None
-    assert "draw_tarot_cards" in tool_names(prov.sessions[1].tools)
-
-    # —— 守卫达成了它的目的：本轮收到策略单，会话离开开场幕 ——
-    saved = _get_conversation(conv.conversation_id)
-    assert saved.phase == "reading"
-    assert saved.strategy == BRIEF_ASTRO
-
-
-def test_forced_brief_speaks_for_the_model_before_the_drawer(env, monkeypatch):
-    """守卫上膛（mode=ANY）+ 塔罗路线 → 抽牌器前面补一句。
-
-    这是整条链路上唯一需要 harness 代言的地方：force 上膛时模型在解码层只能输出
-    函数调用，一个字也发不出来 —— 那个沉默不是它的选择。别的路径一律不补。
-    """
-    import config
-
-    history = _greeting_and_user(
-        *[f"不知道欸{i}" for i in range(config.OPENING_FORCE_BRIEF_AFTER_USER_MSGS - 1)]
-    )
-    conv = _seed_conversation("opening", history)
-    prov = _install_gemini(monkeypatch, [[_call("submit_reading_brief", BRIEF_ARGS)]])
-
-    resp = env.post("/api/tarot/message", json={
-        "conversation_id": conv.conversation_id,
-        "content": "还是说不上来",
-    })
-    assert resp.status_code == 200
-    events, done = _sse(resp.text)
-    assert done
-
-    # 守卫确实上膛了（否则这个测试测的是别的东西）
-    assert prov.sessions[0].force_tool == "submit_reading_brief"
-
-    # 代言的那句话流式推给用户，并和抽牌调用落在同一条 assistant 上
-    assert _sse_text(events) == context_service.forced_brief_handoff_line()
-    saved = _get_conversation(conv.conversation_id)
-    assert saved.messages[-1].role == MessageRole.ASSISTANT
-    assert saved.messages[-1].content == context_service.forced_brief_handoff_line()
-    assert saved.messages[-1].tool_calls[0].name == "draw_tarot_cards"
-
-
-# ---------------------------------------------------------------------------
-# 4. 守卫第 3 层（router 侧接线）：开场超预算 → 兜底翻相位，不卡死
-# ---------------------------------------------------------------------------
-
-@pytest.mark.parametrize("session_type,endpoint", ROUTES)
-def test_hard_exit_guard_forces_reading_phase_when_opening_overruns(
-    env, monkeypatch, session_type, endpoint
-):
-    """澄清轮数超硬上限 → router 兜底翻 phase：本轮直接拿完整解读工具集，绝不再困在开场。
-
-    补测理由：守卫的判定函数有单测，但「router 真的调用它并因此改变了本轮工具集/相位」
-    这段接线此前无人覆盖 —— 它是「会话永久卡死在开场幕」的唯一防线。
-    """
-    import config
-
-    # 库里已有 (HARD_EXIT - 1) 条用户消息，加上本轮这条正好触顶
-    history = _greeting_and_user(
-        *[f"第{i}句" for i in range(config.OPENING_HARD_EXIT_AFTER_USER_MSGS - 1)]
-    )
-    conv = _seed_conversation("opening", history, session_type=session_type)
-
-    prov = _install_gemini(monkeypatch, [[_text("好，我们直接开始。")]])
-
-    resp = env.post(endpoint, json={
-        "conversation_id": conv.conversation_id,
-        "content": "就这样吧",
-    })
-    assert resp.status_code == 200
-
-    # 本轮已按解读相位建 session：拿到抽牌工具，且没有强制交单守卫
-    assert "draw_tarot_cards" in tool_names(prov.sessions[0].tools)
-    assert prov.sessions[0].force_tool is None
-
-    saved = _get_conversation(conv.conversation_id)
-    assert saved.phase == "reading"
-    assert saved.strategy is None  # 兜底不伪造假策略单
-
-
-# ---------------------------------------------------------------------------
-# 7. 张数完全由 positions 决定——没有单独的张数字段可以和它对不上
-# ---------------------------------------------------------------------------
-
-@pytest.mark.parametrize("positions", [
-    pytest.param(["今日指引"], id="1张"),
-    pytest.param(["现状", "阻碍", "流向"], id="3张"),
-    pytest.param(["现状", "A 的走向", "A 的代价", "B 的走向", "B 的代价"], id="5张"),
-    pytest.param([f"第{i}位" for i in range(1, 11)], id="10张·凯尔特十字"),
-])
-def test_any_number_of_positions_survives_the_whole_round_trip(env, monkeypatch, positions):
-    """起手单写几个位置，前端就收到几个位置，抽牌就抽几张。
-
-    这里锁的是「一个事实只有一份」：牌阵由位置定义，张数是它的长度。曾经张数是独立
-    字段，模型填 5 张却只给 3 个位置时，前端会画出 5 个槽位配「位置4 / 位置5」，
-    落库之后每次重放历史还会按位置索引越界 —— 那条路现在从数据形状上就不存在了。
-    """
-    from services.tarot_service import TarotService
     from models import DrawCardsRequest
+    from services.tarot_service import TarotService
 
+    spread = spread_service.require(spread_id)
     conv = _seed_conversation("opening", _greeting_and_user("想问问这件事"))
-    brief = {"question": "他还会回头吗", "route": "tarot",
-             "spread_type": "custom", "positions": positions}
+    brief = {"question": "他还会回头吗", "route": "tarot", "spread_type": spread_id}
     _install_gemini(monkeypatch, [[_call("submit_reading_brief", brief)]])
 
     resp = env.post("/api/tarot/message", json={
@@ -670,19 +543,51 @@ def test_any_number_of_positions_survives_the_whole_round_trip(env, monkeypatch,
     })
     assert resp.status_code == 200
 
-    # 落库的抽牌调用（前端据此画槽位）= 起手单里的位置，逐字一致
+    # 落库的抽牌调用（前端据此画槽位）= 这副阵的位置，逐字一致
     draw = _get_conversation(conv.conversation_id).messages[-1].tool_calls[0]
     assert draw.name == "draw_tarot_cards"
-    assert draw.args["positions"] == positions
+    assert draw.args == {"spread_type": spread_id, "positions": list(spread.positions)}
 
     # 真正抽牌时张数也随之而来，不需要任何地方再声明一次
     cards = TarotService.draw_cards(DrawCardsRequest(**draw.args))
-    assert len(cards) == len(positions)
+    assert len(cards) == spread.card_count
 
-    # 落库的起手单同样只有位置
+    # 落库的起手单是展开过的：模型交的 ID + 目录补上的牌阵名和位置
     saved = _get_conversation(conv.conversation_id)
-    assert saved.strategy["positions"] == positions
+    assert saved.strategy["spread_type"] == spread_id
+    assert saved.strategy["spread_name"] == spread.name
+    assert saved.strategy["positions"] == list(spread.positions)
     assert "card_count" not in saved.strategy
+
+
+def test_unknown_spread_id_is_sent_back_for_a_retry(env, monkeypatch):
+    """牌阵 ID 不在目录里 → 不落库、不翻相位，把可选值回给模型让它重选。
+
+    随便拿一副阵去顶替它选的那副，整场牌都会按错的位置解读；重选一次便宜得多。
+    """
+    conv = _seed_conversation("opening", _greeting_and_user("想问问这件事"))
+    bad = {"question": "他还会回头吗", "route": "tarot", "spread_type": "celtic_cross"}
+    good = dict(bad, spread_type="three_card_state")
+    _install_gemini(monkeypatch, [[
+        _call("submit_reading_brief", bad),
+        _call("submit_reading_brief", good),
+    ]])
+
+    resp = env.post("/api/tarot/message", json={
+        "conversation_id": conv.conversation_id,
+        "content": "上周三他突然不回我消息了",
+    })
+    assert resp.status_code == 200
+
+    # 第一次交单的结果是一条失败 + 可选值，模型据此重交；第二次才翻相位
+    saved = _get_conversation(conv.conversation_id)
+    failed = json.loads(saved.messages[-4].content)
+    assert failed["success"] is False
+    assert "three_card_state" in failed["error"]
+    assert saved.phase == "reading"
+    assert saved.strategy["spread_type"] == "three_card_state"
+    assert saved.messages[-1].tool_calls[0].args["positions"] == list(
+        spread_service.require("three_card_state").positions)
 
 
 # ---------------------------------------------------------------------------

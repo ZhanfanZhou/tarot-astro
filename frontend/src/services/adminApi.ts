@@ -68,12 +68,15 @@ export interface AdminMessage {
   tarot_cards?: Array<{ card_id: number; card_name: string; reversed: boolean }> | null;
 }
 
-// 前置占卜师交单产出的起手单（六字段，均可选：字段缺失即当场未产出该项）。
+// 前置占卜师交单产出的起手单（均可选：字段缺失即当场未产出该项）。
+// 开场只交牌阵 ID（spread_type），spread_name / positions 是交单时按 ID 从牌阵目录
+// 展开补上的；存量会话只有当时模型自拟的 spread_type 和 positions。
 export interface ReadingBrief {
   question?: string;
   context?: string;
   route?: string;
   spread_type?: string;
+  spread_name?: string;
   positions?: string[];
 }
 
@@ -152,7 +155,6 @@ export interface PromptCallSite {
   delivery: string;
   parts: PromptPart[];
   tools: PromptTool[];
-  force_tool: { name: string; when: string; supported: boolean } | null;
   after: string;
 }
 
@@ -173,8 +175,6 @@ export const displayName = (u: {
 export interface LlmModelOption {
   id: string;
   label: string;
-  /** 是否支持「指定函数的强制调用」——守卫第 2 层要用 */
-  forced_tool: boolean;
 }
 
 export interface LlmProviderOption {
@@ -193,7 +193,6 @@ export interface LlmAgentState {
   env_provider: string;
   env_model: string;
   key_ready: boolean;
-  forced_tool: boolean;
   in_catalog: boolean;
 }
 

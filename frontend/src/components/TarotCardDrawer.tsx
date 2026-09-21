@@ -14,8 +14,6 @@ interface TarotCardDrawerProps {
   title?: string;
   /** 洗牌前副标题,默认「静心凝神，准备开启命运之门」 */
   subtitle?: string;
-  /** false 时确认后不在抽牌器内翻面展示——真实牌面由调用方揭示(daily 用),默认 true */
-  revealOnConfirm?: boolean;
   /** 固定洗牌花式,只给本地预览页用;正常抽牌不传=随机 */
   shuffleVariant?: ShuffleVariant;
 }
@@ -37,13 +35,11 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
   onCardsDrawn,
   title = '抽取塔罗牌',
   subtitle = '静心凝神，准备开启命运之门',
-  revealOnConfirm = true,
   shuffleVariant,
 }) => {
   const [isShuffling, setIsShuffling] = useState(false);
   const [isSpread, setIsSpread] = useState(false);
   const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
-  const [confirmedCards, setConfirmedCards] = useState<TarotCard[]>([]);
   const [showConfirm, setShowConfirm] = useState(false);
   const [rotationOffset, setRotationOffset] = useState(0); // 记录旋转偏移量
   const [shuffleConfig, setShuffleConfig] = useState<ShuffleCardConfig[]>([]);
@@ -138,7 +134,6 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
     setIsShuffling(true);
     setIsSpread(false);
     setSelectedIndices([]);
-    setConfirmedCards([]);
     setShowConfirm(false);
     setRotationOffset(0);
 
@@ -182,7 +177,7 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
   const finishSelection = (indices: number[]) => {
     if (finishedRef.current) return;
     finishedRef.current = true;
-    // 模拟抽牌结果(仪式用;daily 等场景的真实牌面由服务端决定)
+    // 模拟抽牌结果(仪式用;线上真实牌面由服务端决定)
     const drawnCards: TarotCard[] = indices.map((idx) => {
       const cardInfo = getCardInfo(idx);
       return {
@@ -192,19 +187,9 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
       };
     });
 
-    if (!revealOnConfirm) {
-      onCardsDrawn(drawnCards);
-      onClose();
-      return;
-    }
-
-    setConfirmedCards(drawnCards);
-
-    // 延迟后关闭并返回结果
-    setTimeout(() => {
-      onCardsDrawn(drawnCards);
-      onClose();
-    }, 2000);
+    // 选完就收场:揭牌是抽牌之后的另一幕,由调用方在对话界面上演(CardRevealOverlay)
+    onCardsDrawn(drawnCards);
+    onClose();
   };
 
   const handleConfirm = () => finishSelection(selectedIndices);
@@ -333,20 +318,7 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
                         />
                       )}
 
-                      {confirmedCards[idx] ? (
-                        <motion.div
-                          initial={{ scale: 0, rotateY: 180 }}
-                          animate={{ scale: 1, rotateY: 0 }}
-                          className="relative text-center"
-                        >
-                          <div className={`${isCompactSlots ? 'text-3xl mb-1' : 'text-5xl mb-2'}`}>
-                            {confirmedCards[idx].reversed ? '🔮' : '✨'}
-                          </div>
-                          <div className="text-xs text-white font-display font-medium">
-                            {confirmedCards[idx].reversed ? '逆位' : '正位'}
-                          </div>
-                        </motion.div>
-                      ) : selectedIndices[idx] !== undefined ? (
+                      {selectedIndices[idx] !== undefined ? (
                         <motion.div
                           initial={{ scale: 0 }}
                           animate={{ scale: 1 }}
@@ -619,7 +591,7 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
             </motion.div>
 
             {/* Confirm Button */}
-            {showConfirm && confirmedCards.length === 0 && (
+            {showConfirm && (
               <motion.div
                 initial={{ opacity: 0, y: 30, scale: 0.9 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -649,37 +621,6 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
                     <Sparkles size={24} />
                   </span>
                 </motion.button>
-              </motion.div>
-            )}
-
-            {/* 抽牌完成提示 */}
-            {confirmedCards.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="absolute inset-0 flex items-center justify-center bg-black/85 z-30"
-              >
-                <div className="text-center">
-                  <motion.div
-                    animate={{
-                      rotate: 360,
-                      scale: [1, 1.2, 1],
-                    }}
-                    transition={{
-                      duration: 2,
-                      repeat: Infinity,
-                    }}
-                    className="text-8xl mb-6"
-                  >
-                    ✨
-                  </motion.div>
-                  <h3 className="text-3xl font-display font-bold text-mystic-gold mb-4">
-                    命运之牌已就位
-                  </h3>
-                  <p className="text-gray-400 font-display">
-                    正在为您解读...
-                  </p>
-                </div>
               </motion.div>
             )}
           </motion.div>

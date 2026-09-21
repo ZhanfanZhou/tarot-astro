@@ -1,11 +1,9 @@
-"""Agent 的 provider/model 在线配置 + 「不支持强制调用就不用」的降级。
+"""Agent 的 provider/model 在线配置。
 
-锁三件事：
+锁两件事：
   1. 覆盖层优先于 .env，且只存改过的 Agent（没改的仍跟着 .env 走）
   2. 写入前校验：未知 provider / 清单外模型 / 没配 key 的 provider，一律拒绝——
      管理页不该能把线上聊天配挂
-  3. 模型不支持指定函数的强制调用时，force_tool 被静默丢弃而不是报错；
-     守卫第 3 层还在，代价至多多两轮追问
 """
 import json
 import sys
@@ -109,48 +107,6 @@ def test_rejects_unknown_provider_and_agent(store):
         agent_config.set_agent("reading", "bogus", "x")
     with pytest.raises(ValueError):
         agent_config.set_agent("bogus_agent", "gemini", "gemini-3-pro")
-
-
-# ── 强制调用能力 ────────────────────────────────────────────────────────────
-
-def test_catalog_knows_which_models_can_force_a_named_tool():
-    from services.llm import catalog
-
-    # Kimi 全系不支持：k3 关不掉思考，而 named tool_choice 与思考态互斥（真 key 实测）
-    assert catalog.supports_forced_tool("kimi", "kimi-k3") is False
-    assert catalog.supports_forced_tool("kimi", "kimi-k2.6") is False
-    assert catalog.supports_forced_tool("gemini", "gemini-3-pro") is True
-    assert catalog.supports_forced_tool("deepseek", "deepseek-flash") is True
-    # 清单外的一律保守：少一层守卫无害，传给不支持的模型会直接报错
-    assert catalog.supports_forced_tool("kimi", "kimi-k9-未来款") is False
-
-
-def test_incapable_model_drops_force_tool_instead_of_erroring(store, monkeypatch):
-    """Kimi 收到 named tool_choice 会 400，所以这一层干脆不上膛——静默丢弃，不抛异常。"""
-    import config
-    from services.llm import agent_config
-    from services import llm
-
-    with patch.object(config, "KIMI_API_KEY", "k"):
-        agent_config.set_agent("opening", "kimi", "kimi-k3")
-        provider = llm.get_provider("opening")
-        session = provider.open_session("SYS", [], tools=None,
-                                        force_tool="submit_reading_brief")
-    assert session._force is None
-
-
-def test_capable_model_still_forces(store):
-    import config
-    from services.llm import agent_config
-    from services import llm
-
-    with patch.object(config, "DEEPSEEK_API_KEY", "k"):
-        agent_config.set_agent("opening", "deepseek", "deepseek-flash")
-        provider = llm.get_provider("opening")
-        session = provider.open_session("SYS", [], tools=None,
-                                        force_tool="submit_reading_brief")
-    assert session._force == {"type": "function",
-                              "function": {"name": "submit_reading_brief"}}
 
 
 def test_get_provider_honours_the_override(store):

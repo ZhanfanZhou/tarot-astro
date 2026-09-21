@@ -126,7 +126,6 @@ def describe() -> dict:
             "env_provider": getattr(config, prov_attr),
             "env_model": getattr(config, model_attr),
             "key_ready": bool(getattr(config, meta["key_attr"], "")) if meta else False,
-            "forced_tool": catalog.supports_forced_tool(provider, model),
             "in_catalog": meta is not None and model in catalog.model_ids(provider),
         })
     return {"agents": agents, "providers": catalog.as_options()}

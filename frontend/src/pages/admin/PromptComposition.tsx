@@ -110,12 +110,6 @@ function CallSite({ site, blocks, ctl, expand }: {
             : <CodePart key={i} part={block.parts[0]} />
         ))}
       </ol>
-      {site.force_tool && (
-        <p className="cs-meta">
-          强制调用 <code>{site.force_tool.name}</code>：{site.force_tool.when}
-          {!site.force_tool.supported && '（当前模型不支持强制调用，这一层会跳过）'}
-        </p>
-      )}
       {site.tools.length > 0 && <Tools tools={site.tools} />}
       {site.after && <p className="cs-after">↓ {site.after}</p>}
     </section>
@@ -161,7 +155,7 @@ function FileBlock({ block, ctl, expand }: { block: Block; ctl: FileCtl; expand:
 
   const variables = block.parts.filter((p) => p.variable);
   const used = block.parts.map((p) => p.text).join('');
-  // 只取文件里的一节（强制交单那份文件两节分给两处调用），其余就是整份原样发出去
+  // 只取文件里的一节（牌阵详解那几份的文件头是给代码读的，不发给模型），其余整份原样发出去
   const section = !variables.length && used.trim() !== content.trim() ? block.parts[0].label : '';
 
   const [open, setOpen] = useState(!block.repeat && content.length <= AUTO_EXPAND_CHARS);

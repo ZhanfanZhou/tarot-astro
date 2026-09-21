@@ -69,17 +69,16 @@ async def stream_turn(
     for msg in appended:
         conversation = await ConversationService.append_message(conversation_id, msg)
 
-    # 开场幕上下文：守卫兜底 + 相位 + 强制交单 + 关系上下文（conversation 可能被就地翻相位）
-    phase, force_brief, relationship_block = await opening_service.prepare_opening_context(
+    # 开场幕上下文：相位 + <称呼与来访次数>
+    phase, relationship_block = await opening_service.prepare_opening_context(
         conversation, user
     )
 
     async def execute_function(func_name: str, func_args: dict) -> dict:
         print(f"\n[Function Executor] 执行函数: {func_name} {func_args}")
         if func_name == "submit_reading_brief":
-            # 纯后台工具：落库策略单 + 翻相位，不产生任何前端事件
-            await opening_service.save_strategy(conversation, dict(func_args))
-            return {"success": True}
+            # 纯后台工具：按牌阵 ID 展开起手单、落库、翻相位，不产生任何前端事件
+            return await opening_service.submit_brief(conversation, dict(func_args))
         if func_name == "get_astrology_chart":
             return await _fetch_chart(user)
         if func_name == "read_divination_notes":
@@ -101,7 +100,6 @@ async def stream_turn(
             phase=phase,
             strategy=conversation.strategy,
             relationship_block=relationship_block,
-            force_brief=force_brief,
         ):
             if "content" in event:
                 yield f"data: {json.dumps({'content': event['content']})}\n\n"

@@ -10,12 +10,13 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 // 起手单字段固定顺序 + 中文标签，与 backend/services/context_service.py 的
-// _BRIEF_LABELS 保持一致。
+// _BRIEF_LABELS 保持一致。牌阵展开后有名字，存量会话只有 ID，两种都要显示得出来。
 const BRIEF_LABELS: Array<[keyof ReadingBrief, string]> = [
   ['question', '问题'],
   ['context', '背景'],
   ['route', '起手'],
-  ['spread_type', '牌阵'],
+  ['spread_name', '牌阵'],
+  ['spread_type', '牌阵 ID'],
   ['positions', '位置'],
 ];
 

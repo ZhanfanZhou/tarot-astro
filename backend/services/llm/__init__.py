@@ -27,20 +27,15 @@ def get_provider(agent: str) -> LLMProvider:
             f"请在 .env 里填 {meta['key_attr']}，或在管理页换一家。"
         )
 
-    # 守卫第 2 层要「指定函数的强制调用」，不是每个模型都有。没有就不用这一层——
-    # 提示词里的 <本轮强制> 照发，守卫第 3 层照样兜底，代价至多多两轮追问。
-    # 只有 opening 会真的请求强制，所以日志留给 provider 在丢弃那一刻打。
-    forced_tool = catalog.supports_forced_tool(provider, model)
-
     if provider == "gemini":
-        return GeminiProvider(model, supports_forced_tool=forced_tool)
+        return GeminiProvider(model)
 
-    # 思考强度只有 Kimi 有（reasoning_effort ∈ low/high/max，默认 max）。DeepSeek 用的是
-    # 另一套字段（见 openai_provider._NO_THINKING），发过去只会多一个它不认识的参数，不发。
+    # 思考强度只有 Kimi 有（reasoning_effort ∈ low/high/max，默认 max）。DeepSeek 不认
+    # 这个字段，发过去只会多一个它不认识的参数，不发。
     effort = agent_config.reasoning_effort(agent) if provider == "kimi" else ""
     return OpenAICompatProvider(
         model, getattr(config, meta["base_url_attr"]), api_key, provider,
-        supports_forced_tool=forced_tool, reasoning_effort=effort,
+        reasoning_effort=effort,
     )
 
 

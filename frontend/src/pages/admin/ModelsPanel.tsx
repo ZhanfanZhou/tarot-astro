@@ -8,7 +8,7 @@ import {
  * 三个 Agent 各自选 provider + model。
  *
  * 改完下一次对话即生效（后端每次实时读盘），不用重启、也不用再去改 .env。
- * 模型清单由后端给，不在前端写死——「能不能强制交单」这类能力标注和后端是同一份数据。
+ * 模型清单由后端给（catalog.py），不在前端写死。
  */
 export default function ModelsPanel() {
   const [config, setConfig] = useState<LlmConfig | null>(null);
@@ -68,8 +68,8 @@ export default function ModelsPanel() {
 
       <p className="models-intro">
         每个 Agent 独立选模型。<strong>记忆</strong>只产 JSON、不调工具，挑便宜的即可；
-        <strong>解读</strong>要工具调用；<strong>前置</strong>额外需要「强制交单」能力，
-        不支持的模型会自动跳过这一层守卫（至多多两轮追问，不影响主流程）。
+        <strong>解读</strong>与<strong>前置</strong>都要工具调用，前置还要读得懂一段
+        对话该不该交单，模型太小会一直追问。
       </p>
 
       <div className="models-grid">
@@ -98,7 +98,6 @@ function AgentCard({
   onReset: (a: LlmAgentState) => void;
 }) {
   const current = providers.find((p) => p.provider === agent.provider);
-  const needsForcedTool = agent.agent === 'opening';
 
   return (
     <section className="models-card">
@@ -144,12 +143,6 @@ function AgentCard({
         </select>
       </label>
 
-      {needsForcedTool && !agent.forced_tool && (
-        <p className="models-warn">
-          这个模型不支持强制交单（Kimi 全系如此），守卫第 2 层自动降级。开场追问最多到
-          第 5 句会由守卫第 3 层强制进入解读，不会卡住——代价至多多两轮追问。
-        </p>
-      )}
       {!agent.key_ready && (
         <p className="models-warn">该 provider 的 API key 没配，当前对话会直接报错。</p>
       )}

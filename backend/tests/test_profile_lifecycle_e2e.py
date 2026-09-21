@@ -255,7 +255,8 @@ def test_opening_can_ask_for_the_profile_and_resume_in_the_same_phase(env, monke
     }).status_code == 200
 
     # 开场的工具集里确实有它；这一轮看到的资料是「什么都没有」
-    assert tool_names(prov.sessions[0].tools) == ["submit_reading_brief", "request_user_profile"]
+    assert tool_names(prov.sessions[0].tools) == ["submit_reading_brief", "request_user_profile",
+                                                  "read_divination_notes"]
     assert "尚未完善" in _profile_block(prov.sessions[0].system)
 
     # interrupt 收口：调用停在会话末尾（前端据此显示填资料按钮），相位没动
@@ -263,11 +264,12 @@ def test_opening_can_ask_for_the_profile_and_resume_in_the_same_phase(env, monke
     assert conv.phase == "opening"
     assert conv.messages[-1].tool_calls[0].name == "request_user_profile"
 
-    # 填完 → resume：还在开场相位（工具集仍是开场那两个），固定位置已是新值
+    # 填完 → resume：还在开场相位（工具集仍是开场那几个），固定位置已是新值
     assert env.put(f"/api/users/{USER_ID}/profile", json=PROFILE_FULL).status_code == 200
     assert env.post("/api/astrology/resume", json={"conversation_id": "conv_opening"}).status_code == 200
 
-    assert tool_names(prov.sessions[1].tools) == ["submit_reading_brief", "request_user_profile"]
+    assert tool_names(prov.sessions[1].tools) == ["submit_reading_brief", "request_user_profile",
+                                                  "read_divination_notes"]
     assert "生日：1996年3月12日 08:30" in _profile_block(prov.sessions[1].system)
     conv = _get_conversation("conv_opening")
     assert conv.phase == "opening"

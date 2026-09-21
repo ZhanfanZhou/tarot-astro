@@ -12,7 +12,7 @@ const PERSONA = '你是一位占卜师。\n说话克制。';
 const site = (title: string, parts: PromptPart[]): PromptCallSite => ({
   title, stage: 'opening', agent: 'opening', agent_label: '开场 Agent',
   provider: 'gemini', model: 'gemini-x', delivery: '系统提示词',
-  parts, tools: [], force_tool: null, after: '',
+  parts, tools: [], after: '',
 });
 
 const STAGE: PromptStage = {
