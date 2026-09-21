@@ -7,6 +7,7 @@ import { getCardInfo } from '@/config/tarotCards';
 import { useDeckWallet } from '@/stores/useDeckWallet';
 import { resolveActiveCardImage } from '@/data/activeDeckImage';
 import Markdown from './Markdown';
+import ChatInvite from './ChatInvite';
 
 interface ChatMessageProps {
   message: Message;
@@ -20,6 +21,7 @@ interface ChatMessageProps {
   isThinking?: boolean;
   sessionType?: SessionType;
   showDrawButton?: boolean; // 是否显示抽牌按钮
+  drawPositions?: string[]; // 等着抽的那副牌阵的位置，写在抽牌按钮上
   onReadyToDraw?: () => void; // 点击抽牌按钮的回调
   showProfileButton?: boolean; // 是否显示补充资料按钮
   onReadyToFillProfile?: () => void; // 点击补充资料按钮的回调
@@ -44,6 +46,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   isThinking = false,
   sessionType,
   showDrawButton = false,
+  drawPositions,
   onReadyToDraw,
   showProfileButton = false,
   onReadyToFillProfile,
@@ -178,41 +181,25 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
               <Markdown content={message.content} />
             ))}
 
-          {/* 抽牌按钮 — 主行动，金色 */}
+          {/* 抽牌 — 金色，说明那一行写出牌阵的位置 */}
           {!isUser && showDrawButton && onReadyToDraw && (
-            <motion.button
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
+            <ChatInvite
+              kind="draw"
+              title={trimmedContent ? '我准备好了' : '抽牌'}
+              positions={drawPositions}
+              afterText={Boolean(trimmedContent)}
               onClick={onReadyToDraw}
-              className={`${trimmedContent ? 'mt-5' : ''} group relative mx-auto flex items-center gap-3 px-7 py-3 rounded-full
-                         font-display tracking-[0.16em] text-sm overflow-hidden transition-colors duration-300
-                         border border-mystic-gold/55 text-mystic-gold hover:text-dark-bg`}
-            >
-              <span className="absolute inset-0 -z-0 translate-y-full group-hover:translate-y-0 transition-transform duration-300 bg-gold-gradient" />
-              <span className="relative z-10">✦</span>
-              <span className="relative z-10">{trimmedContent ? '我准备好了' : '抽 牌'}</span>
-              <span className="relative z-10">✦</span>
-            </motion.button>
+            />
           )}
 
-          {/* 补充资料按钮 — 次行动，月光银蓝 */}
+          {/* 补充资料 — 月光银蓝 */}
           {!isUser && showProfileButton && onReadyToFillProfile && (
-            <motion.button
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
+            <ChatInvite
+              kind="profile"
+              title="补充资料"
+              afterText={Boolean(trimmedContent)}
               onClick={onReadyToFillProfile}
-              className={`${trimmedContent ? 'mt-5' : ''} mx-auto flex items-center gap-3 px-7 py-3 rounded-full
-                         font-display tracking-[0.16em] text-sm transition-colors duration-300
-                         border border-secondary/50 text-secondary hover:bg-secondary/12`}
-            >
-              <span>☽</span>
-              补充资料
-              <span>☽</span>
-            </motion.button>
+            />
           )}
 
           {/* 抽到的牌 */}

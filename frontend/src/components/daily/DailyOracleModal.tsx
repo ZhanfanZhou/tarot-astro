@@ -367,6 +367,7 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
         onClose={() => setShowDrawer(false)}
         onCardsDrawn={handleCardsDrawn}
         title="每日一签"
+        eyebrow="Daily Oracle"
         subtitle="静心凝神,为今天抽取一张指引"
       />
     </>

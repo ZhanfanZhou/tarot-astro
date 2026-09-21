@@ -671,6 +671,7 @@ const App: React.FC = () => {
                       drawnRequest={cards?.draw_request}
                       sessionType={currentConversation.session_type}
                       showDrawButton={isLast && pendingDrawRequest !== null}
+                      drawPositions={pendingDrawRequest?.positions}
                       onReadyToDraw={handleReadyToDraw}
                       showProfileButton={isLast && needsProfile}
                       onReadyToFillProfile={handleReadyToFillProfile}
@@ -684,6 +685,7 @@ const App: React.FC = () => {
                     message={{ role: MessageRole.ASSISTANT, content: '', timestamp: new Date().toISOString() }}
                     sessionType={currentConversation.session_type}
                     showDrawButton={pendingDrawRequest !== null}
+                    drawPositions={pendingDrawRequest?.positions}
                     onReadyToDraw={handleReadyToDraw}
                     showProfileButton={needsProfile}
                     onReadyToFillProfile={handleReadyToFillProfile}

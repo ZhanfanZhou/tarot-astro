@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { X, User, Lock, Loader2 } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { User, Lock, ChevronRight } from 'lucide-react';
 import { UserProfile } from '../types';
+import { ModalShell, ModalHeader, FieldLabel, TextField, FormError, PrimaryButton, GhostButton } from './ui/form';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -88,169 +89,219 @@ const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
+  const header = {
+    choice: { eyebrow: 'Welcome', subtitle: '选一种方式入殿' },
+    guest: { eyebrow: 'Guest · 游客模式', subtitle: '快速开始，但不保存历史记录' },
+    register: { eyebrow: 'Register · 注册账号', subtitle: '保存历史记录，随时查看' },
+    login: { eyebrow: 'Sign in · 登录', subtitle: '回到你的占卜记录' },
+  }[mode];
+
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
-        >
-          <motion.div
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.9, opacity: 0 }}
-            className="relative w-full max-w-md bg-dark-surface rounded-2xl shadow-2xl p-6"
-          >
-            <button
-              onClick={onClose}
-              className="absolute top-4 right-4 p-2 hover:bg-dark-hover rounded-lg transition-colors"
-            >
-              <X size={20} />
-            </button>
+    <ModalShell isOpen={isOpen} onClose={onClose}>
+      <ModalHeader portrait="/assets/icon.webp" eyebrow={header.eyebrow} title={'欢迎来到小 x 的秘密圣殿'} subtitle={header.subtitle} />
 
-            <h2 className="text-2xl font-bold mb-6">欢迎来到塔罗占卜</h2>
-
-            {mode === 'choice' && (
-              <div className="space-y-4">
-                <button
-                  onClick={() => handleModeChange('guest')}
-                  className="w-full px-6 py-4 bg-dark-hover hover:bg-dark-border rounded-xl transition-colors text-left"
-                >
-                  <div className="font-semibold mb-1">游客模式</div>
-                  <div className="text-sm text-gray-400">快速开始，但不保存历史记录</div>
-                </button>
-                <button
-                  onClick={() => handleModeChange('register')}
-                  className="w-full px-6 py-4 bg-primary hover:bg-primary/90 rounded-xl transition-colors text-left"
-                >
-                  <div className="font-semibold mb-1">注册账号</div>
-                  <div className="text-sm text-white/80">保存历史记录，随时查看</div>
-                </button>
-                <button
-                  onClick={() => handleModeChange('login')}
-                  className="w-full px-6 py-4 bg-dark-hover hover:bg-dark-border rounded-xl transition-colors"
-                >
-                  已有账号？立即登录
-                </button>
-              </div>
-            )}
-
-            {mode === 'guest' && (
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm mb-2">昵称（可选）</label>
-                  <input
-                    type="text"
-                    value={profile.nickname || ''}
-                    onChange={(e) => setProfile({ ...profile, nickname: e.target.value })}
-                    className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg focus:outline-none focus:border-primary"
-                    placeholder="希望占卜师如何称呼你"
-                  />
-                </div>
-                <div className="flex gap-4">
-                  <button
-                    onClick={() => handleModeChange('choice')}
-                    className="flex-1 px-6 py-3 bg-dark-hover hover:bg-dark-border rounded-xl transition-colors"
-                  >
-                    返回
-                  </button>
-                  <button
-                    onClick={handleGuestSubmit}
-                    className="flex-1 px-6 py-3 bg-primary hover:bg-primary/90 rounded-xl transition-colors"
-                  >
-                    开始占卜
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {(mode === 'register' || mode === 'login') && (
-              <div className="space-y-4">
-                {error && (
-                  <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
-                    {error}
-                  </div>
-                )}
-                <div>
-                  <label className="block text-sm mb-2">用户名</label>
-                  <div className="relative">
-                    <User size={20} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input
-                      type="text"
-                      value={username}
-                      onChange={(e) => {
-                        setUsername(e.target.value);
-                        setError('');
-                      }}
-                      className="w-full pl-10 pr-4 py-3 bg-dark-bg border border-dark-border rounded-lg focus:outline-none focus:border-primary"
-                      placeholder="输入用户名"
-                      disabled={isLoading}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm mb-2">密码</label>
-                  <div className="relative">
-                    <Lock size={20} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input
-                      type="password"
-                      value={password}
-                      onChange={(e) => {
-                        setPassword(e.target.value);
-                        setError('');
-                      }}
-                      className="w-full pl-10 pr-4 py-3 bg-dark-bg border border-dark-border rounded-lg focus:outline-none focus:border-primary"
-                      placeholder="输入密码"
-                      disabled={isLoading}
-                    />
-                  </div>
-                </div>
-                {mode === 'register' && (
-                  <div>
-                    <label className="block text-sm mb-2">昵称（可选）</label>
-                    <input
-                      type="text"
-                      value={profile.nickname || ''}
-                      onChange={(e) => setProfile({ ...profile, nickname: e.target.value })}
-                      className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg focus:outline-none focus:border-primary"
-                      placeholder="希望占卜师如何称呼你"
-                      disabled={isLoading}
-                    />
-                  </div>
-                )}
-                <div className="flex gap-4">
-                  <button
-                    onClick={() => handleModeChange('choice')}
-                    disabled={isLoading}
-                    className="flex-1 px-6 py-3 bg-dark-hover hover:bg-dark-border rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    返回
-                  </button>
-                  <button
-                    onClick={mode === 'register' ? handleRegisterSubmit : handleLoginSubmit}
-                    disabled={!username || !password || isLoading}
-                    className="flex-1 px-6 py-3 bg-primary hover:bg-primary/90 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                  >
-                    {isLoading && <Loader2 className="animate-spin" size={18} />}
-                    {isLoading 
-                      ? (mode === 'register' ? '注册中...' : '登录中...') 
-                      : (mode === 'register' ? '注册' : '登录')
-                    }
-                  </button>
-                </div>
-              </div>
-            )}
-          </motion.div>
-        </motion.div>
+      {mode === 'choice' && (
+        <div className="space-y-3">
+          <Door
+            en="Guest"
+            title="游客模式"
+            line="快速开始，但不保存历史记录"
+            visual={<GuestGlyph />}
+            onClick={() => handleModeChange('guest')}
+          />
+          <Door
+            en="Register"
+            title="注册账号"
+            line="保存历史记录，随时查看"
+            visual={<RegisterGlyph />}
+            featured
+            onClick={() => handleModeChange('register')}
+          />
+          <GhostButton onClick={() => handleModeChange('login')} className="w-full !h-11 !text-[13px] !tracking-[0.16em]">
+            已有账号？<span style={{ color: 'var(--gold)' }}>立即登录 ›</span>
+          </GhostButton>
+        </div>
       )}
-    </AnimatePresence>
+
+      {mode === 'guest' && (
+        <div className="space-y-5">
+          <div>
+            <FieldLabel>昵称（可选）</FieldLabel>
+            <TextField
+              type="text"
+              value={profile.nickname || ''}
+              onChange={(e) => setProfile({ ...profile, nickname: e.target.value })}
+              placeholder="希望占卜师如何称呼你"
+            />
+          </div>
+          <div className="flex gap-3 pt-1">
+            <GhostButton onClick={() => handleModeChange('choice')} className="flex-1">
+              返回
+            </GhostButton>
+            <PrimaryButton onClick={handleGuestSubmit} className="flex-1">
+              开始占卜
+            </PrimaryButton>
+          </div>
+        </div>
+      )}
+
+      {(mode === 'register' || mode === 'login') && (
+        <div className="space-y-5">
+          {error && <FormError>{error}</FormError>}
+          <div>
+            <FieldLabel>用户名</FieldLabel>
+            <TextField
+              icon={<User size={17} />}
+              type="text"
+              value={username}
+              onChange={(e) => {
+                setUsername(e.target.value);
+                setError('');
+              }}
+              placeholder="输入用户名"
+              disabled={isLoading}
+            />
+          </div>
+          <div>
+            <FieldLabel>密码</FieldLabel>
+            <TextField
+              icon={<Lock size={17} />}
+              type="password"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setError('');
+              }}
+              placeholder="输入密码"
+              disabled={isLoading}
+            />
+          </div>
+          {mode === 'register' && (
+            <div>
+              <FieldLabel>昵称（可选）</FieldLabel>
+              <TextField
+                type="text"
+                value={profile.nickname || ''}
+                onChange={(e) => setProfile({ ...profile, nickname: e.target.value })}
+                placeholder="希望占卜师如何称呼你"
+                disabled={isLoading}
+              />
+            </div>
+          )}
+          <div className="flex gap-3 pt-1">
+            <GhostButton onClick={() => handleModeChange('choice')} disabled={isLoading} className="flex-1">
+              返回
+            </GhostButton>
+            <PrimaryButton
+              onClick={mode === 'register' ? handleRegisterSubmit : handleLoginSubmit}
+              disabled={!username || !password || isLoading}
+              loading={isLoading}
+              className="flex-1"
+            >
+              {isLoading
+                ? (mode === 'register' ? '注册中...' : '登录中...')
+                : (mode === 'register' ? '注册' : '登录')
+              }
+            </PrimaryButton>
+          </div>
+        </div>
+      )}
+    </ModalShell>
   );
 };
 
+/**
+ * 入殿的一扇门：左边小图，右边眉题 + 标题 + 一行说明，最右一枚发丝圆里的 ›。
+ * 和殿堂那排次级入口、对话里的抽牌邀请同一套写法。featured = 推荐的那一扇，金边更亮。
+ */
+const Door: React.FC<{
+  en: string;
+  title: string;
+  line: string;
+  visual: React.ReactNode;
+  featured?: boolean;
+  onClick: () => void;
+}> = ({ en, title, line, visual, featured = false, onClick }) => (
+  <motion.button
+    type="button"
+    onClick={onClick}
+    whileHover={{ y: -2 }}
+    whileTap={{ scale: 0.985 }}
+    className="group relative w-full flex items-center gap-4 pl-3 pr-3.5 py-3.5 rounded-2xl text-left"
+  >
+    <span
+      aria-hidden
+      className={`absolute left-0 top-1/2 -translate-y-1/2 w-28 h-28 rounded-full blur-2xl pointer-events-none transition-opacity duration-700 ${
+        featured ? 'opacity-50' : 'opacity-0'
+      } group-hover:opacity-100`}
+      style={{ background: 'radial-gradient(closest-side, rgba(201,169,110,0.25), transparent)' }}
+    />
+    <span
+      aria-hidden
+      className="absolute inset-0 rounded-2xl pointer-events-none"
+      style={
+        featured
+          ? { border: '1px solid rgba(201,169,110,0.45)', background: 'linear-gradient(100deg, rgba(201,169,110,0.08), rgba(201,169,110,0.015) 60%)' }
+          : { border: '1px solid var(--line-soft)', background: 'rgba(255,255,255,0.015)' }
+      }
+    />
+    <span
+      aria-hidden
+      className="absolute inset-0 rounded-2xl pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+      style={{ border: '1px solid rgba(201,169,110,0.7)', boxShadow: '0 0 26px rgba(201,169,110,0.14), inset 0 1px 0 rgba(201,169,110,0.2)' }}
+    />
+    <span className="relative flex-shrink-0 w-14 h-12 grid place-items-center">{visual}</span>
+    <span className="relative flex-1 min-w-0">
+      <span className="eyebrow block" style={{ fontSize: '9px', letterSpacing: '0.3em', color: featured ? 'var(--gold)' : 'var(--ivory-faint)' }}>
+        {en}
+      </span>
+      <span className="block font-display text-[15px] tracking-[0.14em] mt-1" style={{ color: 'var(--ivory)' }}>
+        {title}
+      </span>
+      <span className="block text-[11px] mt-0.5 tracking-[0.04em]" style={{ color: 'var(--ivory-faint)' }}>
+        {line}
+      </span>
+    </span>
+    <span
+      className="relative flex-shrink-0 w-8 h-8 rounded-full grid place-items-center transition-transform duration-300 group-hover:translate-x-0.5"
+      style={
+        featured
+          ? { border: '1px solid rgba(201,169,110,0.45)', color: 'var(--gold)', background: 'rgba(201,169,110,0.06)' }
+          : { border: '1px solid var(--line-soft)', color: 'var(--ivory-dim)' }
+      }
+    >
+      <ChevronRight size={15} />
+    </span>
+  </motion.button>
+);
+
+/** 游客：一弯月亮和一颗远星——路过的夜行人 */
+const GuestGlyph: React.FC = () => (
+  <svg width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden>
+    <path
+      d="M24 9a11 11 0 1 0 7.5 18.8A9 9 0 0 1 24 9z"
+      stroke="var(--moon)"
+      strokeOpacity="0.75"
+      strokeWidth="1.1"
+      strokeLinejoin="round"
+    />
+    <circle cx="31" cy="11" r="1.3" fill="var(--moon-bright)" fillOpacity="0.8" />
+  </svg>
+);
+
+/** 注册：几颗星连成一段路——占卜一场场记下来，串得起来 */
+const RegisterGlyph: React.FC = () => (
+  <svg width="46" height="30" viewBox="0 0 46 30" fill="none" aria-hidden>
+    <path d="M4 22 L16 9 L29 19 L42 6" stroke="var(--gold)" strokeOpacity="0.55" strokeWidth="1" strokeLinecap="round" />
+    {[
+      [4, 22, 1.8],
+      [16, 9, 2.6],
+      [29, 19, 1.8],
+      [42, 6, 2.2],
+    ].map(([cx, cy, r], i) => (
+      <circle key={i} cx={cx} cy={cy} r={r} fill="var(--gold-bright)" />
+    ))}
+  </svg>
+);
+
 export default AuthModal;
-
-
-
-

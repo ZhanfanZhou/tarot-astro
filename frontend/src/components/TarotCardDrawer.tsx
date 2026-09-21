@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence, PanInfo } from 'framer-motion';
-import { X, Sparkles } from 'lucide-react';
+import { X } from 'lucide-react';
 import type { DrawCardsRequest, TarotCard } from '@/types';
 import { getCardInfo, CARD_BACK_IMAGE, TABLE_BACKGROUND_IMAGE } from '@/config/tarotCards';
 import { createShuffleRun, type ShuffleCardConfig, type ShuffleVariant } from './shufflePatterns';
+import ArchPortrait from './ui/ArchPortrait';
 
 interface TarotCardDrawerProps {
   isOpen: boolean;
@@ -12,11 +13,16 @@ interface TarotCardDrawerProps {
   onCardsDrawn: (cards: TarotCard[]) => void;
   /** 弹层标题,默认「抽取塔罗牌」(日运场景定制) */
   title?: string;
+  /** 标题上方的英文眉题,默认「The Draw」 */
+  eyebrow?: string;
   /** 洗牌前副标题,默认「静心凝神，准备开启命运之门」 */
   subtitle?: string;
   /** 固定洗牌花式,只给本地预览页用;正常抽牌不传=随机 */
   shuffleVariant?: ShuffleVariant;
 }
+
+// 牌阵位置的序号：槽位里、选中那张牌头上都写它，一眼对上「这张落在哪个位置」
+const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
 
 // 装饰星点：坐标和节奏在模块加载时定死一次。原先是在 render 里现摇 Math.random()，
 // 拖动扇形时每帧重渲染都会给所有星点换一遍坐标（每帧重排重绘），
@@ -34,6 +40,7 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
   onClose,
   onCardsDrawn,
   title = '抽取塔罗牌',
+  eyebrow = 'The Draw',
   subtitle = '静心凝神，准备开启命运之门',
   shuffleVariant,
 }) => {
@@ -201,7 +208,7 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 isolate"
+          className="fixed inset-0 z-50 flex items-center justify-center px-3 sm:px-6 bg-black/95 isolate"
           onClick={(e) => {
             if (e.target === e.currentTarget && !isShuffling) {
               onClose();
@@ -229,13 +236,19 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
           </div>
 
           <motion.div
-            initial={{ scale: 0.9, opacity: 0 }}
+            initial={{ scale: 0.96, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.9, opacity: 0 }}
-            className="relative w-full max-w-7xl h-[85vh] glass-morphism rounded-3xl shadow-2xl overflow-hidden border border-mystic-gold/30 flex flex-col"
+            exit={{ scale: 0.96, opacity: 0 }}
+            transition={{ duration: 0.45, ease: [0.2, 0.8, 0.2, 1] }}
+            className="relative w-full max-w-7xl h-[85vh] rounded-[28px] overflow-hidden flex flex-col"
+            style={{
+              background: 'var(--void)',
+              border: '1px solid rgba(201,169,110,0.24)',
+              boxShadow: '0 30px 90px rgba(0,0,0,0.65)',
+            }}
           >
-            {/* 牌桌底图：铺满整个弹层（头部/槽位也压在它上面），z-0 垫底 */}
-            <div className="absolute inset-4 z-0 rounded-[36px] overflow-hidden pointer-events-none">
+            {/* 牌桌：铺满整个弹层，压暗后四周往底色收（同殿堂拱窗的暗角），z-0 垫底 */}
+            <div className="absolute inset-0 z-0 pointer-events-none">
               <div
                 className="absolute inset-0"
                 style={{
@@ -247,97 +260,119 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
               />
               <div className="absolute inset-0 bg-[#06060f]/78" />
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,228,185,0.18),transparent_78%)] mix-blend-screen" />
+              <div
+                className="absolute inset-0"
+                style={{ background: 'radial-gradient(ellipse 85% 80% at 50% 58%, transparent 52%, rgba(6,6,15,0.82) 100%)' }}
+              />
+              <div className="absolute inset-x-0 top-0 h-52 bg-gradient-to-b from-[#06060f]/75 to-transparent" />
+              {/* 离外沿 10px 再描一圈淡金发丝，像画框里的衬边 */}
+              <div className="absolute inset-2.5 rounded-[20px]" style={{ border: '1px solid var(--line)' }} />
             </div>
 
-            {/* Header */}
-            <div className="relative z-20 shrink-0 p-6 bg-gradient-to-b from-dark-bg/90 to-transparent backdrop-blur-sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <motion.div
-                    className="w-12 h-12 rounded-full bg-mystic-gradient flex items-center justify-center shadow-mystic"
-                    animate={{
-                      boxShadow: [
-                        '0 0 20px rgba(201, 169, 110, 0.4)',
-                        '0 0 38px rgba(201, 169, 110, 0.7)',
-                        '0 0 20px rgba(201, 169, 110, 0.4)',
-                      ],
-                    }}
-                    transition={{
-                      duration: 2.4,
-                      repeat: Infinity,
-                    }}
-                  >
-                    <Sparkles size={22} style={{ color: '#1a1407' }} />
-                  </motion.div>
-                  <div>
-                    <h2 className="text-2xl font-display font-semibold mystic-text">
-                      {title}
-                    </h2>
-                    <p className="text-gray-400 font-display mt-1">
-                      {isSpread
-                        ? `请选择 ${cardCount} 张牌 (已选${selectedIndices.length}/${cardCount})`
-                        : subtitle}
-                    </p>
+            {/* 头部：拱窗小立绘 + 眉题 / 标题 / 进度，居中；关闭在右上 */}
+            <div className="relative z-20 shrink-0 px-6 pt-6 pb-3 flex justify-center">
+              <div className="flex items-center gap-4">
+                <ArchPortrait src="/assets/avatar-tarot.webp" className="w-10 h-[50px]" />
+                <div className="min-w-0">
+                  <div className="eyebrow" style={{ fontSize: '9px', letterSpacing: '0.34em', color: 'var(--gold)' }}>
+                    {eyebrow}
                   </div>
+                  <h2 className="mt-1 font-display font-semibold text-[22px] sm:text-2xl tracking-[0.2em] leading-tight mystic-text">
+                    {title}
+                  </h2>
+                  <p className="mt-1.5 text-[12px] sm:text-[13px] tracking-[0.14em] font-display" style={{ color: 'var(--ivory-dim)' }}>
+                    {isSpread ? (
+                      <>
+                        {selectedIndices.length < cardCount ? `凭直觉选出 ${cardCount} 张牌` : '牌已选定'}
+                        <span className="ml-2.5 tracking-[0.2em]" style={{ color: 'var(--gold)' }}>
+                          {selectedIndices.length} / {cardCount}
+                        </span>
+                      </>
+                    ) : (
+                      subtitle
+                    )}
+                  </p>
                 </div>
-                <motion.button
-                  onClick={onClose}
-                  disabled={isShuffling}
-                  whileHover={{ scale: 1.1, rotate: 90 }}
-                  whileTap={{ scale: 0.9 }}
-                  className="p-3 hover:bg-dark-elevated rounded-xl transition-colors disabled:opacity-50"
-                >
-                  <X size={24} />
-                </motion.button>
               </div>
+              <motion.button
+                onClick={onClose}
+                disabled={isShuffling}
+                whileTap={{ scale: 0.92 }}
+                className="absolute top-5 right-5 w-10 h-10 rounded-full grid place-items-center transition-colors hover:bg-white/[0.06] disabled:opacity-40"
+                style={{ border: '1px solid var(--line)', background: 'rgba(6,6,15,0.55)', color: 'var(--ivory-dim)' }}
+                aria-label="关闭"
+              >
+                <X size={17} />
+              </motion.button>
             </div>
 
-            {/* Card Slots (选牌展示位置 - 在扇形牌阵正上方) */}
+            {/* 槽位：牌阵的每个位置一格，在扇形牌阵正上方。位置名写在格子上面——
+                选中的牌抬起来会顶进这一行的下沿，写在下面会被牌面压住 */}
             {isSpread && (
-              <div className="relative z-20 shrink-0 px-6 pb-2">
-                <div className="flex gap-3 justify-center flex-wrap max-w-5xl mx-auto">
-                  {positions.map((position, idx) => (
-                    <motion.div
-                      key={idx}
-                      initial={{ opacity: 0, y: 30, scale: 0.8 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      transition={{ delay: idx * 0.1 }}
-                      className={`relative ${isCompactSlots ? 'w-14 h-24' : 'w-20 h-32'} rounded-lg border-2 border-dashed border-mystic-gold/40 flex flex-col items-center justify-center bg-dark-bg/50 backdrop-blur-sm overflow-hidden`}
-                    >
-                      {/* 背景光效 */}
-                      {selectedIndices[idx] !== undefined && (
-                        <motion.div
-                          className="absolute inset-0 bg-mystic-gradient opacity-20"
-                          animate={{
-                            opacity: [0.1, 0.3, 0.1],
-                          }}
-                          transition={{
-                            duration: 2,
-                            repeat: Infinity,
-                          }}
-                        />
-                      )}
-
-                      {selectedIndices[idx] !== undefined ? (
-                        <motion.div
-                          initial={{ scale: 0 }}
-                          animate={{ scale: 1 }}
-                          className="text-3xl"
+              <div className="relative z-20 shrink-0 px-4 sm:px-6 pb-2">
+                <div className={`flex ${isCompactSlots ? 'gap-x-1.5 gap-y-2' : 'gap-x-2 gap-y-3'} justify-center flex-wrap max-w-5xl mx-auto`}>
+                  {positions.map((position, idx) => {
+                    const filled = selectedIndices[idx] !== undefined;
+                    const isNext = idx === selectedIndices.length; // 下一张牌落在这一格
+                    return (
+                      <motion.div
+                        key={idx}
+                        initial={{ opacity: 0, y: 18 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: idx * 0.08, duration: 0.5, ease: [0.2, 0.8, 0.2, 1] }}
+                        className={`flex flex-col items-center justify-end ${isCompactSlots ? 'w-14' : 'w-[84px]'}`}
+                      >
+                        <span
+                          className={`mb-1.5 w-full text-center font-display leading-snug line-clamp-2 transition-colors duration-500 ${
+                            isCompactSlots ? 'text-[9px] tracking-[0.04em]' : 'text-[11px] tracking-[0.1em]'
+                          }`}
+                          style={{ color: filled ? 'var(--ivory)' : isNext ? 'var(--gold)' : 'var(--ivory-faint)' }}
                         >
-                          ✨
-                        </motion.div>
-                      ) : (
-                        <div className="text-center px-1">
-                          <div className={`${isCompactSlots ? 'text-[10px] leading-tight' : 'text-sm mb-1'} text-gray-500 font-display font-medium`}>
-                            {position}
-                          </div>
-                          {!isCompactSlots && (
-                            <div className="w-8 h-8 mx-auto border border-mystic-gold/30 rounded-lg" />
-                          )}
+                          {position}
+                        </span>
+                        <div className={`relative ${isCompactSlots ? 'w-12 h-[84px]' : 'w-16 h-28'}`}>
+                          {/* 空位：一方暗色的牌位，发丝金边 + 内框，正中写序号；下一张要落的那一格亮着 */}
+                          <div
+                            className="absolute inset-0 rounded-lg transition-[border-color,box-shadow] duration-500"
+                            style={{
+                              background: 'rgba(6,6,15,0.6)',
+                              border: `1px solid ${isNext ? 'rgba(201,169,110,0.65)' : 'rgba(201,169,110,0.24)'}`,
+                              boxShadow: isNext ? '0 0 18px rgba(201,169,110,0.25), inset 0 0 14px rgba(201,169,110,0.1)' : 'none',
+                            }}
+                          />
+                          <div className="absolute inset-[5px] rounded-[5px]" style={{ border: '1px solid rgba(201,169,110,0.12)' }} />
+                          <span
+                            className={`absolute inset-0 grid place-items-center font-display tracking-[0.08em] transition-colors duration-500 ${
+                              isCompactSlots ? 'text-[11px]' : 'text-[13px]'
+                            }`}
+                            style={{ color: isNext ? 'var(--gold)' : 'rgba(201,169,110,0.38)' }}
+                          >
+                            {ROMAN[idx] ?? idx + 1}
+                          </span>
+
+                          {/* 选中：一张牌背落进这一格 */}
+                          <AnimatePresence>
+                            {filled && (
+                              <motion.div
+                                key="card"
+                                initial={{ opacity: 0, y: -16, scale: 1.1 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, y: -10, scale: 1.05 }}
+                                transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+                                className="absolute inset-0 rounded-lg overflow-hidden"
+                                style={{
+                                  border: '1px solid rgba(240,208,144,0.75)',
+                                  boxShadow: '0 0 16px rgba(201,169,110,0.4), 0 8px 18px rgba(0,0,0,0.5)',
+                                }}
+                              >
+                                <img src={CARD_BACK_IMAGE} alt="" aria-hidden className="w-full h-full object-cover" draggable={false} />
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </div>
-                      )}
-                    </motion.div>
-                  ))}
+                      </motion.div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -502,13 +537,13 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
                                     className={`
                                       absolute -top-8 left-1/2 -translate-x-1/2 z-20
                                       w-8 h-8 rounded-full flex items-center justify-center
-                                      font-display font-bold text-xs shadow-lg
+                                      font-display text-[11px] tracking-[0.04em]
                                       ${isSelected
-                                        ? 'bg-mystic-gold text-dark-bg ring-2 ring-mystic-gold/50'
-                                        : 'bg-dark-elevated/90 text-gray-300 border-2 border-mystic-gold/30'}
+                                        ? 'bg-gold-gradient text-dark-bg font-semibold shadow-[0_0_14px_rgba(201,169,110,0.65)]'
+                                        : 'bg-[#06060f]/85 text-[color:var(--ivory-dim)] border border-mystic-gold/35 shadow-[0_4px_10px_rgba(0,0,0,0.5)]'}
                                     `}
                                   >
-                                    {selectionOrder >= 0 ? `✨${selectionOrder + 1}` : cardId + 1}
+                                    {selectionOrder >= 0 ? ROMAN[selectionOrder] ?? selectionOrder + 1 : cardId + 1}
                                   </motion.div>
 
                                   <motion.div
@@ -517,8 +552,8 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
                                       transition-all duration-300
                                       ${
                                         isSelected
-                                          ? 'ring-4 ring-mystic-gold shadow-mystic-gold'
-                                          : 'ring-2 ring-white/25 hover:ring-mystic-gold/60'
+                                          ? 'ring-2 ring-mystic-gold-light'
+                                          : 'ring-1 ring-mystic-gold/30 hover:ring-mystic-gold/70'
                                       }
                                     `}
                                   >
@@ -567,9 +602,10 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
                           onDrag={handleDrag}
                           whileHover={{ scale: 1.03 }}
                           whileDrag={{ scale: 1.08, cursor: 'grabbing' }}
-                          className="relative w-[210px] h-2 rounded-full bg-dark-elevated/80 backdrop-blur-sm border border-mystic-gold/30 shadow-lg cursor-grab"
+                          className="relative w-[210px] h-2 rounded-full bg-[#06060f]/60 cursor-grab"
                         >
-                          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-mystic-gold/15 to-transparent pointer-events-none" />
+                          {/* 一道发丝金线当轨道，两端淡出 */}
+                          <div className="absolute inset-x-0 top-1/2 h-px bg-gradient-to-r from-transparent via-mystic-gold/60 to-transparent pointer-events-none" />
 
                           <motion.div
                             className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 pointer-events-none"
@@ -578,8 +614,17 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
                             }}
                             transition={{ type: 'spring', stiffness: 200, damping: 24 }}
                           >
-                            <div className="relative w-6 h-6 rounded-full bg-mystic-gold shadow-[0_0_18px_rgba(251,191,36,0.8)] border-2 border-dark-elevated/80">
-                              <div className="absolute inset-1 rounded-full bg-dark-elevated/90" />
+                            {/* 滑块：同「最近的占卜」起点那枚节点——暗底、金发丝圈、正中一颗 ✦ */}
+                            <div
+                              className="w-[22px] h-[22px] rounded-full grid place-items-center text-[9px] leading-none"
+                              style={{
+                                background: 'var(--void)',
+                                border: '1px solid rgba(201,169,110,0.75)',
+                                boxShadow: '0 0 14px rgba(201,169,110,0.45)',
+                                color: 'var(--gold)',
+                              }}
+                            >
+                              ✦
                             </div>
                           </motion.div>
                         </motion.div>
@@ -590,37 +635,48 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
               </div>
             </motion.div>
 
-            {/* Confirm Button */}
+            {/* 确认：暗底发丝金边的胶囊，背后一团慢慢呼吸的金光；悬停时框线亮起、底色透出一层金 */}
             {showConfirm && (
               <motion.div
-                initial={{ opacity: 0, y: 30, scale: 0.9 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                className="absolute bottom-8 left-0 right-0 flex justify-center z-20"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, ease: [0.2, 0.8, 0.2, 1] }}
+                className="absolute bottom-8 left-0 right-0 flex justify-center z-20 pointer-events-none"
               >
-                <motion.button
-                  onClick={handleConfirm}
-                  whileHover={{ scale: 1.05, y: -3 }}
-                  whileTap={{ scale: 0.95 }}
-                  className="px-10 py-4 bg-gold-gradient rounded-2xl text-xl font-display font-bold shadow-2xl shadow-gold text-dark-bg relative overflow-hidden group"
-                >
-                  {/* 按钮光效 */}
-                  <motion.div
-                    className="absolute inset-0 bg-white/30"
-                    animate={{
-                      x: ['-100%', '200%'],
-                    }}
-                    transition={{
-                      duration: 1.5,
-                      repeat: Infinity,
-                      repeatDelay: 0.5,
-                    }}
+                <div className="relative pointer-events-auto">
+                  <motion.span
+                    aria-hidden
+                    className="absolute -inset-5 rounded-full blur-2xl pointer-events-none"
+                    style={{ background: 'radial-gradient(closest-side, rgba(201,169,110,0.55), transparent)' }}
+                    animate={{ opacity: [0.45, 0.95, 0.45] }}
+                    transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }}
                   />
-                  <span className="relative z-10 flex items-center gap-3">
-                    <Sparkles size={24} />
-                    确认抽牌
-                    <Sparkles size={24} />
-                  </span>
-                </motion.button>
+                  <motion.button
+                    onClick={handleConfirm}
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.97 }}
+                    className="group relative flex items-center gap-4 h-14 px-9 rounded-full font-display text-base tracking-[0.36em]"
+                    style={{
+                      color: 'var(--gold-bright)',
+                      background: 'rgba(6,6,15,0.8)',
+                      border: '1px solid rgba(201,169,110,0.7)',
+                      backdropFilter: 'blur(10px)',
+                      WebkitBackdropFilter: 'blur(10px)',
+                    }}
+                  >
+                    <span
+                      aria-hidden
+                      className="absolute inset-0 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                      style={{
+                        background: 'linear-gradient(120deg, rgba(201,169,110,0.2), rgba(240,208,144,0.1))',
+                        boxShadow: 'inset 0 0 0 1px rgba(240,208,144,0.85), 0 0 26px rgba(201,169,110,0.35)',
+                      }}
+                    />
+                    <span aria-hidden className="relative text-[10px]">✦</span>
+                    <span className="relative pl-[0.36em]">确认抽牌</span>
+                    <span aria-hidden className="relative text-[10px]">✦</span>
+                  </motion.button>
+                </div>
               </motion.div>
             )}
           </motion.div>

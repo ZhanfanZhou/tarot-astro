@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { X, Calendar, Clock, MapPin, Loader2 } from 'lucide-react';
+import { Calendar, Clock, MapPin } from 'lucide-react';
 import type { UserProfile, Gender } from '@/types';
+import { ModalShell, ModalHeader, FieldLabel, SelectField, ChoicePill, FormError, FormHint, PrimaryButton, GhostButton } from './ui/form';
 
 interface AstrologyProfileModalProps {
   isOpen: boolean;
@@ -89,247 +89,179 @@ const AstrologyProfileModal: React.FC<AstrologyProfileModalProps> = ({
   const minuteOptions = Array.from({ length: 60 }, (_, i) => i);
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              onClose();
-            }
-          }}
-        >
-          <motion.div
-            initial={{ scale: 0.94, opacity: 0, y: 16 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.94, opacity: 0, y: 16 }}
-            transition={{ type: 'spring', damping: 24, stiffness: 300 }}
-            className="relative w-full max-w-2xl bg-dark-surface border border-mystic-gold/20 rounded-2xl shadow-cosmic p-8 max-h-[90vh] overflow-y-auto"
-          >
-            {/* Header */}
-            <div className="flex items-start justify-between mb-6">
-              <div>
-                <div className="eyebrow mb-1.5" style={{ fontSize: '10px', letterSpacing: '0.28em' }}>ASTROLOGY · 星盘资料</div>
-                <h2 className="text-2xl font-display font-semibold mystic-text">完善星盘资料</h2>
-                <p className="text-sm mt-1.5" style={{ color: 'var(--ivory-dim)' }}>
-                  提供准确的出生信息，获取更精准的星盘解读
-                </p>
-              </div>
-              <button
-                onClick={onClose}
-                className="p-2 hover:bg-white/[0.05] rounded-lg transition-colors"
-                style={{ color: 'var(--ivory-dim)' }}
+    <ModalShell isOpen={isOpen} onClose={onClose} onBackdropClick={onClose} widthClass="max-w-2xl">
+      <ModalHeader
+        portrait="/assets/avatar-astrology.webp"
+        accent="moon"
+        eyebrow="Astrology · 星盘资料"
+        title="完善星盘资料"
+        subtitle="提供准确的出生信息，获取更精准的星盘解读"
+      />
+
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {/* 错误提示 */}
+        {error && <FormError>{error}</FormError>}
+
+        {/* 性别 */}
+        <div>
+          <FieldLabel>性别</FieldLabel>
+          <div className="grid grid-cols-4 gap-2">
+            {[
+              { value: 'male' as Gender, label: '男' },
+              { value: 'female' as Gender, label: '女' },
+              { value: 'other' as Gender, label: '其他' },
+              { value: 'prefer_not_say' as Gender, label: '保密' },
+            ].map((option) => (
+              <ChoicePill
+                key={option.value}
+                selected={gender === option.value}
+                onClick={() => {
+                  setGender(option.value);
+                  setError('');
+                }}
+                disabled={isSubmitting}
               >
-                <X size={22} />
-              </button>
-            </div>
+                {option.label}
+              </ChoicePill>
+            ))}
+          </div>
+        </div>
 
-            {/* Form */}
-            <form onSubmit={handleSubmit} className="space-y-6">
-              {/* 错误提示 */}
-              {error && (
-                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
-                  {error}
-                </div>
-              )}
+        {/* 出生日期 */}
+        <div>
+          <FieldLabel icon={<Calendar size={15} />} required>
+            出生日期
+          </FieldLabel>
+          <div className="grid grid-cols-3 gap-2">
+            <SelectField
+              value={birthYear || ''}
+              onChange={(e) => {
+                setBirthYear(Number(e.target.value));
+                setError('');
+              }}
+              disabled={isSubmitting}
+              required
+            >
+              <option value="">年份</option>
+              {yearOptions.map((year) => (
+                <option key={year} value={year}>
+                  {year}年
+                </option>
+              ))}
+            </SelectField>
+            <SelectField
+              value={birthMonth || ''}
+              onChange={(e) => {
+                setBirthMonth(Number(e.target.value));
+                setError('');
+              }}
+              disabled={isSubmitting}
+              required
+            >
+              <option value="">月份</option>
+              {monthOptions.map((month) => (
+                <option key={month} value={month}>
+                  {month}月
+                </option>
+              ))}
+            </SelectField>
+            <SelectField
+              value={birthDay || ''}
+              onChange={(e) => {
+                setBirthDay(Number(e.target.value));
+                setError('');
+              }}
+              disabled={isSubmitting}
+              required
+            >
+              <option value="">日期</option>
+              {dayOptions.map((day) => (
+                <option key={day} value={day}>
+                  {day}日
+                </option>
+              ))}
+            </SelectField>
+          </div>
+        </div>
 
-              {/* 性别 */}
-              <div>
-                <label className="block text-sm font-medium mb-2">性别</label>
-                <div className="grid grid-cols-4 gap-2">
-                  {[
-                    { value: 'male' as Gender, label: '男' },
-                    { value: 'female' as Gender, label: '女' },
-                    { value: 'other' as Gender, label: '其他' },
-                    { value: 'prefer_not_say' as Gender, label: '保密' },
-                  ].map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => {
-                        setGender(option.value);
-                        setError('');
-                      }}
-                      disabled={isSubmitting}
-                      className={`px-4 py-2 rounded-lg text-sm border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                        gender === option.value
-                          ? 'bg-gold-gradient text-dark-bg border-transparent font-medium'
-                          : 'bg-white/[0.02] border-mystic-gold/15 hover:border-mystic-gold/40'
-                      }`}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+        {/* 出生时间 */}
+        <div>
+          <FieldLabel icon={<Clock size={15} />} required>
+            出生时间
+          </FieldLabel>
+          <div className="grid grid-cols-2 gap-2">
+            <SelectField
+              value={birthHour !== undefined ? birthHour : ''}
+              onChange={(e) => {
+                setBirthHour(Number(e.target.value));
+                setError('');
+              }}
+              disabled={isSubmitting}
+              required
+            >
+              <option value="">小时</option>
+              {hourOptions.map((hour) => (
+                <option key={hour} value={hour}>
+                  {hour.toString().padStart(2, '0')}时
+                </option>
+              ))}
+            </SelectField>
+            <SelectField
+              value={birthMinute !== undefined ? birthMinute : ''}
+              onChange={(e) => {
+                setBirthMinute(Number(e.target.value));
+                setError('');
+              }}
+              disabled={isSubmitting}
+              required
+            >
+              <option value="">分钟</option>
+              {minuteOptions.map((minute) => (
+                <option key={minute} value={minute}>
+                  {minute.toString().padStart(2, '0')}分
+                </option>
+              ))}
+            </SelectField>
+          </div>
+          <FormHint>准确的出生时间对星盘解读非常重要</FormHint>
+        </div>
 
-              {/* 出生日期 */}
-              <div>
-                <label className="block text-sm font-medium mb-2 flex items-center gap-2">
-                  <Calendar size={16} className="text-mystic-gold/70" />
-                  出生日期 <span className="text-mystic-gold">*</span>
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  <select
-                    value={birthYear || ''}
-                    onChange={(e) => {
-                      setBirthYear(Number(e.target.value));
-                      setError('');
-                    }}
-                    className="px-4 py-2 bg-dark-bg rounded-lg border border-mystic-gold/15 focus:border-mystic-gold/55 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={isSubmitting}
-                    required
-                  >
-                    <option value="">年份</option>
-                    {yearOptions.map((year) => (
-                      <option key={year} value={year}>
-                        {year}年
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={birthMonth || ''}
-                    onChange={(e) => {
-                      setBirthMonth(Number(e.target.value));
-                      setError('');
-                    }}
-                    className="px-4 py-2 bg-dark-bg rounded-lg border border-mystic-gold/15 focus:border-mystic-gold/55 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={isSubmitting}
-                    required
-                  >
-                    <option value="">月份</option>
-                    {monthOptions.map((month) => (
-                      <option key={month} value={month}>
-                        {month}月
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={birthDay || ''}
-                    onChange={(e) => {
-                      setBirthDay(Number(e.target.value));
-                      setError('');
-                    }}
-                    className="px-4 py-2 bg-dark-bg rounded-lg border border-mystic-gold/15 focus:border-mystic-gold/55 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={isSubmitting}
-                    required
-                  >
-                    <option value="">日期</option>
-                    {dayOptions.map((day) => (
-                      <option key={day} value={day}>
-                        {day}日
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+        {/* 出生城市 */}
+        <div>
+          <FieldLabel icon={<MapPin size={15} />} required>
+            出生城市
+          </FieldLabel>
+          <SelectField
+            value={birthCity || ''}
+            onChange={(e) => {
+              setBirthCity(e.target.value);
+              setError('');
+            }}
+            disabled={isSubmitting}
+            required
+          >
+            <option value="">请选择城市</option>
+            {MAJOR_CITIES.map((city) => (
+              <option key={city} value={city}>
+                {city}
+              </option>
+            ))}
+          </SelectField>
+          <FormHint>如果您的城市不在列表中，请选择最近的主要城市</FormHint>
+        </div>
 
-              {/* 出生时间 */}
-              <div>
-                <label className="block text-sm font-medium mb-2 flex items-center gap-2">
-                  <Clock size={16} className="text-mystic-gold/70" />
-                  出生时间 <span className="text-mystic-gold">*</span>
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <select
-                    value={birthHour !== undefined ? birthHour : ''}
-                    onChange={(e) => {
-                      setBirthHour(Number(e.target.value));
-                      setError('');
-                    }}
-                    className="px-4 py-2 bg-dark-bg rounded-lg border border-mystic-gold/15 focus:border-mystic-gold/55 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={isSubmitting}
-                    required
-                  >
-                    <option value="">小时</option>
-                    {hourOptions.map((hour) => (
-                      <option key={hour} value={hour}>
-                        {hour.toString().padStart(2, '0')}时
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={birthMinute !== undefined ? birthMinute : ''}
-                    onChange={(e) => {
-                      setBirthMinute(Number(e.target.value));
-                      setError('');
-                    }}
-                    className="px-4 py-2 bg-dark-bg rounded-lg border border-mystic-gold/15 focus:border-mystic-gold/55 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={isSubmitting}
-                    required
-                  >
-                    <option value="">分钟</option>
-                    {minuteOptions.map((minute) => (
-                      <option key={minute} value={minute}>
-                        {minute.toString().padStart(2, '0')}分
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  准确的出生时间对星盘解读非常重要
-                </p>
-              </div>
-
-              {/* 出生城市 */}
-              <div>
-                <label className="block text-sm font-medium mb-2 flex items-center gap-2">
-                  <MapPin size={16} className="text-mystic-gold/70" />
-                  出生城市 <span className="text-mystic-gold">*</span>
-                </label>
-                <select
-                  value={birthCity || ''}
-                  onChange={(e) => {
-                    setBirthCity(e.target.value);
-                    setError('');
-                  }}
-                  className="w-full px-4 py-2 bg-dark-bg rounded-lg border border-mystic-gold/15 focus:border-mystic-gold/55 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                  disabled={isSubmitting}
-                  required
-                >
-                  <option value="">请选择城市</option>
-                  {MAJOR_CITIES.map((city) => (
-                    <option key={city} value={city}>
-                      {city}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-500 mt-1">
-                  如果您的城市不在列表中，请选择最近的主要城市
-                </p>
-              </div>
-
-              {/* 按钮 */}
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="flex-1 px-6 py-3 bg-gold-gradient text-dark-bg rounded-xl font-semibold tracking-wide hover:scale-[1.03] transition-transform disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-2"
-                >
-                  {isSubmitting && <Loader2 className="animate-spin" size={18} />}
-                  {isSubmitting ? '保存中...' : '保存并继续'}
-                </button>
-                <button
-                  type="button"
-                  onClick={onSkip}
-                  disabled={isSubmitting}
-                  className="flex-1 px-6 py-3 rounded-xl tracking-wide border border-mystic-gold/20 hover:bg-white/[0.04] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ color: 'var(--ivory-dim)' }}
-                >
-                  暂时跳过
-                </button>
-              </div>
-            </form>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+        {/* 按钮：次要在左、主要在右，和其它弹窗一致 */}
+        <div className="flex gap-3 pt-2">
+          <GhostButton type="button" onClick={onSkip} disabled={isSubmitting} className="flex-1">
+            暂时跳过
+          </GhostButton>
+          <PrimaryButton type="submit" disabled={isSubmitting} loading={isSubmitting} className="flex-1">
+            {isSubmitting ? '保存中...' : '保存并继续'}
+          </PrimaryButton>
+        </div>
+      </form>
+    </ModalShell>
   );
 };
 
 export default AstrologyProfileModal;
-
-
