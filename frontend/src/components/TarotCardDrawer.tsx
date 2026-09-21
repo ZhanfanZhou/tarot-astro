@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence, PanInfo } from 'framer-motion';
-import { X, Shuffle, Sparkles } from 'lucide-react';
+import { X, Sparkles } from 'lucide-react';
 import type { DrawCardsRequest, TarotCard } from '@/types';
 import { getCardInfo, CARD_BACK_IMAGE, TABLE_BACKGROUND_IMAGE } from '@/config/tarotCards';
+import { createShuffleRun, type ShuffleCardConfig, type ShuffleVariant } from './shufflePatterns';
 
 interface TarotCardDrawerProps {
   isOpen: boolean;
@@ -15,6 +16,8 @@ interface TarotCardDrawerProps {
   subtitle?: string;
   /** false 时确认后不在抽牌器内翻面展示——真实牌面由调用方揭示(daily 用),默认 true */
   revealOnConfirm?: boolean;
+  /** 固定洗牌花式,只给本地预览页用;正常抽牌不传=随机 */
+  shuffleVariant?: ShuffleVariant;
 }
 
 // 装饰星点：坐标和节奏在模块加载时定死一次。原先是在 render 里现摇 Math.random()，
@@ -27,19 +30,6 @@ const AMBIENT_STARS = Array.from({ length: 18 }, () => ({
   delay: Math.random() * 2,
 }));
 
-type ShufflePatternType = 'orbital' | 'cascade' | 'burst';
-
-interface ShuffleCardConfig {
-  id: number;
-  pathX: number[];
-  pathY: number[];
-  rotate: number[];
-  scale: number[];
-  duration: number;
-  delay: number;
-  zIndex: number;
-}
-
 const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
   isOpen,
   drawRequest,
@@ -48,6 +38,7 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
   title = '抽取塔罗牌',
   subtitle = '静心凝神，准备开启命运之门',
   revealOnConfirm = true,
+  shuffleVariant,
 }) => {
   const [isShuffling, setIsShuffling] = useState(false);
   const [isSpread, setIsSpread] = useState(false);
@@ -112,22 +103,12 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
   const rawSliderProgress = (normalizedRotation / TOTAL_CARDS + 0.5) % 1;
   const sliderProgress = rawSliderProgress < 0 ? rawSliderProgress + 1 : rawSliderProgress;
 
+  // 打开即洗牌:调用方那一下「抽牌」就是开始洗牌的动作,不再多一颗按钮。
+  // startShuffle 自己会把上一轮的选牌/扇形/计时器全部清掉。
   useEffect(() => {
-    if (isOpen) {
-      setIsShuffling(false);
-      setIsSpread(false);
-      setSelectedIndices([]);
-      setConfirmedCards([]);
-      setShowConfirm(false);
-      setRotationOffset(0);
-      setShuffleConfig([]);
-      setShuffleRunId(0);
-      finishedRef.current = false;
-      if (shuffleTimeoutRef.current) {
-        window.clearTimeout(shuffleTimeoutRef.current);
-        shuffleTimeoutRef.current = null;
-      }
-    }
+    if (!isOpen) return;
+    finishedRef.current = false;
+    startShuffle();
   }, [isOpen]);
 
   useEffect(() => {
@@ -149,98 +130,10 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
     return () => ro.disconnect();
   }, [isOpen, isSpread]);
 
-  const handleShuffle = () => {
-    if (isShuffling) return;
+  const startShuffle = () => {
+    const run = createShuffleRun(shuffleVariant);
 
-    const cardCount = 14 + Math.floor(Math.random() * 7); // 14 ~ 20
-    const patternRoll = Math.random();
-    const patternType: ShufflePatternType =
-      patternRoll < 0.34 ? 'orbital' : patternRoll < 0.67 ? 'cascade' : 'burst';
-    const runSeed = Math.random() * Math.PI * 2;
-
-    const createOrbitalConfig = (idx: number): ShuffleCardConfig => {
-      const direction = Math.random() > 0.5 ? 1 : -1;
-      const orbitRadius = 150 + Math.random() * 120;
-      const lift = 140 + Math.random() * 120;
-      const entryAngle = runSeed + (idx / cardCount) * Math.PI * 1.6 * direction;
-      const midAngle = entryAngle + direction * (Math.PI / 2 + Math.random() * 0.6);
-      const x1 = Math.cos(entryAngle) * orbitRadius;
-      const y1 = Math.sin(entryAngle) * orbitRadius * 0.5 - lift;
-      const x2 = Math.cos(midAngle) * orbitRadius * 0.65 + direction * (20 + Math.random() * 40);
-      const y2 = Math.sin(midAngle) * orbitRadius * 0.35 + (Math.random() - 0.5) * 140;
-      const firstSpin = direction * (130 + Math.random() * 70);
-      const secondSpin = firstSpin + direction * (160 + Math.random() * 120);
-      const finalSpin = direction * (360 + Math.random() * 90);
-      return {
-        id: idx,
-        pathX: [0, x1, x2, 0],
-        pathY: [0, y1, y2, 0],
-        rotate: [0, firstSpin, secondSpin, finalSpin],
-        scale: [0.96, 1.24 + Math.random() * 0.12, 1.1 + Math.random() * 0.06, 1.02],
-        duration: 2.4 + Math.random() * 1.25,
-        delay: idx * 0.05 + Math.random() * 0.18,
-        zIndex: 60 + Math.floor(Math.random() * 60),
-      };
-    };
-
-    const createCascadeConfig = (idx: number): ShuffleCardConfig => {
-      const offsetFromCenter = idx - cardCount / 2;
-      const direction = offsetFromCenter >= 0 ? 1 : -1;
-      const laneOffset = offsetFromCenter * (28 + Math.random() * 14);
-      const peakHeight = 150 + Math.random() * 120;
-      const x1 = laneOffset * 0.6;
-      const x2 = laneOffset * (1 + Math.random() * 0.25);
-      const y1 = -peakHeight;
-      const y2 = peakHeight * 0.25 * direction;
-      const firstSpin = direction * (110 + Math.random() * 60);
-      const secondSpin = firstSpin + direction * (170 + Math.random() * 90);
-      const finalSpin = direction * (360 + Math.random() * 70);
-      return {
-        id: idx,
-        pathX: [0, x1, x2, 0],
-        pathY: [0, y1, y2, 0],
-        rotate: [0, firstSpin, secondSpin, finalSpin],
-        scale: [0.94, 1.2 + Math.random() * 0.12, 1.08 + Math.random() * 0.05, 1.01],
-        duration: 2.1 + Math.random() * 0.85,
-        delay: idx * 0.06 + Math.random() * 0.16,
-        zIndex: 50 + Math.floor(Math.random() * 55),
-      };
-    };
-
-    const createBurstConfig = (idx: number): ShuffleCardConfig => {
-      const direction = Math.random() > 0.5 ? 1 : -1;
-      const burstReach = (Math.random() - 0.5) * 360;
-      const lift = 120 + Math.random() * 160;
-      const rebound = (Math.random() - 0.5) * 180;
-      const firstSpin = direction * (150 + Math.random() * 90);
-      const secondSpin = firstSpin + direction * (200 + Math.random() * 130);
-      const finalSpin = direction * (360 + Math.random() * 140);
-      return {
-        id: idx,
-        pathX: [0, burstReach * 0.7, rebound, 0],
-        pathY: [0, -lift, lift * 0.3 * (Math.random() - 0.5), 0],
-        rotate: [0, firstSpin, secondSpin, finalSpin],
-        scale: [0.98, 1.26 + Math.random() * 0.12, 1.12 + Math.random() * 0.08, 1.03],
-        duration: 1.9 + Math.random() * 0.8,
-        delay: idx * 0.04 + Math.random() * 0.2,
-        zIndex: 55 + Math.floor(Math.random() * 70),
-      };
-    };
-
-    const generator: ((idx: number) => ShuffleCardConfig) =
-      patternType === 'orbital'
-        ? createOrbitalConfig
-        : patternType === 'cascade'
-          ? createCascadeConfig
-          : createBurstConfig;
-
-    const configs: ShuffleCardConfig[] = Array.from({ length: cardCount }, (_, idx) =>
-      generator(idx)
-    );
-
-    const longest = Math.max(...configs.map((c) => c.duration + c.delay));
-
-    setShuffleConfig(configs);
+    setShuffleConfig(run.cards);
     setShuffleRunId((prev) => prev + 1);
     setIsShuffling(true);
     setIsSpread(false);
@@ -253,10 +146,11 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
       window.clearTimeout(shuffleTimeoutRef.current);
     }
 
+    // 最后一张牌落定 + 一点收尾停顿,然后展扇形
     shuffleTimeoutRef.current = window.setTimeout(() => {
       setIsShuffling(false);
       setIsSpread(true);
-    }, (longest + 0.35) * 1000);
+    }, (run.settleAt + 0.35) * 1000);
   };
 
   const handleDrag = (_: any, info: PanInfo) => {
@@ -479,47 +373,6 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
             {/* Cards Display */}
             <motion.div className="relative flex-1 min-h-0 w-full flex items-center justify-center px-6 pb-4">
               <div ref={stageRef} className="relative z-10 w-full h-full flex items-center justify-center">
-                {/* 洗牌按钮 */}
-                {!isSpread && !isShuffling && (
-                  <motion.div
-                    initial={{ scale: 0, rotate: -180 }}
-                    animate={{ scale: 1, rotate: 0 }}
-                    transition={{ type: 'spring', stiffness: 100 }}
-                    className="text-center"
-                  >
-                    <motion.button
-                      onClick={handleShuffle}
-                      whileHover={{ scale: 1.05, y: -5 }}
-                      whileTap={{ scale: 0.95 }}
-                      className="px-10 py-5 bg-mystic-gradient rounded-2xl text-xl font-display font-bold flex items-center gap-4 shadow-2xl shadow-mystic relative overflow-hidden group"
-                    >
-                      {/* 按钮光效 */}
-                      <motion.div
-                        className="absolute inset-0 bg-white/20"
-                        animate={{
-                          x: ['-100%', '200%'],
-                        }}
-                        transition={{
-                          duration: 2,
-                          repeat: Infinity,
-                          repeatDelay: 1,
-                        }}
-                      />
-                      <Shuffle size={28} />
-                      <span className="relative z-10">开始洗牌</span>
-                    </motion.button>
-
-                    <motion.p
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      transition={{ delay: 0.5 }}
-                      className="mt-6 text-gray-300 font-display"
-                    >
-                      🌟 深呼吸，让心灵与牌阵共鸣
-                    </motion.p>
-                  </motion.div>
-                )}
-
                 {/* 洗牌动画 */}
                 {isShuffling && (
                   <div className="relative w-full max-w-4xl h-[360px] flex items-center justify-center">

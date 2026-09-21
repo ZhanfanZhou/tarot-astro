@@ -81,3 +81,6 @@ sync-assets.sh
 Makefile
 tools/
 .claude/
+
+# 本地调洗牌动画用的预览页(/lab/shuffle);main.tsx 用 glob 挂载,文件不在也不影响构建
+frontend/src/pages/ShuffleLab.tsx
