@@ -4,6 +4,7 @@ import { ChevronLeft, MoreHorizontal, Copy, ArrowDownToLine, Trash2 } from 'luci
 import WalletChip from './wallet/WalletChip';
 import AccountMenu from './AccountMenu';
 import type { Conversation, User } from '@/types';
+import { canDelete } from '@/utils/conversation';
 
 interface TopBarProps {
   /** 当前会话；null = 在殿堂 */
@@ -39,7 +40,10 @@ const TopBar: React.FC<TopBarProps> = ({
   const items = [
     { label: '复制全部解读', icon: <Copy size={15} />, action: onCopyAll },
     { label: '回到最新', icon: <ArrowDownToLine size={15} />, action: onScrollToLatest },
-    { label: '删除对话', icon: <Trash2 size={15} />, action: onDelete, danger: true },
+    // 没接着聊过的日签不给删
+    ...(conversation && canDelete(conversation)
+      ? [{ label: '删除对话', icon: <Trash2 size={15} />, action: onDelete, danger: true }]
+      : []),
   ];
 
   return (

@@ -2,6 +2,7 @@ import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } f
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, Trash2 } from 'lucide-react';
 import type { Conversation, SessionType } from '@/types';
+import { canDelete } from '@/utils/conversation';
 
 /**
  * 最近的占卜：殿堂与对话页左侧页边上的一条右括号形弧线轨迹（代替原来的侧栏）。
@@ -347,17 +348,19 @@ const RecentArc: React.FC<RecentArcProps> = ({ conversations, currentId, height,
                   {TYPE_LABEL[c.session_type] ?? ''} · {relTime(c.updated_at)}
                   {c.has_drawn_cards && <span style={{ color: 'var(--gold)' }}> ✦</span>}
                 </span>
-                {/* 删除：悬停时压在时间那一行的右端，不另占宽度 */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDelete(c.conversation_id);
-                  }}
-                  className="absolute right-0 bottom-[3px] p-1 rounded opacity-0 group-hover:opacity-60 hover:!opacity-100 focus-visible:opacity-100 transition-opacity"
-                  aria-label="删除对话"
-                >
-                  <Trash2 size={12} className="text-red-300/80" />
-                </button>
+                {/* 删除：悬停时压在时间那一行的右端，不另占宽度；没接着聊过的日签不给删 */}
+                {canDelete(c) && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(c.conversation_id);
+                    }}
+                    className="absolute right-0 bottom-[3px] p-1 rounded opacity-0 group-hover:opacity-60 hover:!opacity-100 focus-visible:opacity-100 transition-opacity"
+                    aria-label="删除对话"
+                  >
+                    <Trash2 size={12} className="text-red-300/80" />
+                  </button>
+                )}
               </span>
             </div>
           );
