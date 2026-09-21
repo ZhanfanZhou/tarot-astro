@@ -127,18 +127,10 @@ def test_deletes(StorageService):
             await StorageService.save_conversation(
                 Conversation(conversation_id=cid, user_id="u1",
                              session_type=SessionType.DAILY))
-        await StorageService.save_conversation(
-            Conversation(conversation_id="keep", user_id="u2",
-                         session_type=SessionType.DAILY))
 
         await StorageService.delete_conversation("x")
         assert await StorageService.get_conversation("x") is None
         assert len(await StorageService.get_user_conversations("u1")) == 2
-
-        await StorageService.delete_user_conversations("u1")
-        assert await StorageService.get_user_conversations("u1") == []
-        # 不误删他人
-        assert await StorageService.get_conversation("keep") is not None
 
         await StorageService.delete_user("u1")
         assert await StorageService.get_user("u1") is None

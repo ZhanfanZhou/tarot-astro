@@ -140,15 +140,6 @@ class StorageService:
                 row = await cur.fetchone()
         return (Conversation(**json.loads(row["data"])), row["archived_at"]) if row else None
 
-    @staticmethod
-    async def delete_user_conversations(user_id: str):
-        """删除用户的所有对话"""
-        async with get_db() as db:
-            await db.execute(
-                "DELETE FROM conversations WHERE user_id=?", (user_id,)
-            )
-            await db.commit()
-
     # ── 后台管理只读查询 ──────────────────────────────────────────────────
     @staticmethod
     async def get_admin_stats() -> dict:

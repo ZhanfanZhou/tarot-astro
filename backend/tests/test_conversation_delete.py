@@ -157,3 +157,30 @@ def test_a_conversation_the_user_never_spoke_in_is_erased(env):
     assert env.delete("/api/conversations/conv_silent").status_code == 200
     assert env.get("/api/conversations/conv_silent").status_code == 404
     assert _archived("conv_silent") is None
+
+
+def test_guest_permanent_delete_archives_what_they_spoke_in(env):
+    """游客退出选「永久删除」：人删掉；对话按同一条规则——说过话的进归档，没说过的直接删。
+    别人的对话不动。"""
+    from services.auth_service import create_access_token
+    from services.storage_service import StorageService
+
+    guest_id = "guest_leaving"
+    asyncio.run(StorageService.save_user(User(user_id=guest_id, user_type=UserType.GUEST)))
+    for conv_id, messages in (
+        ("guest_talked", [Message(role=MessageRole.USER, content="最近好累")]),
+        ("guest_silent", [Message(role=MessageRole.ASSISTANT, content="来了。坐吧。")]),
+    ):
+        asyncio.run(StorageService.save_conversation(Conversation(
+            conversation_id=conv_id, user_id=guest_id, session_type=SessionType.TAROT, messages=messages,
+        )))
+    _save("someone_else", [Message(role=MessageRole.USER, content="想问问工作")])
+
+    headers = {"Authorization": f"Bearer {create_access_token(guest_id, UserType.GUEST)}"}
+    assert env.delete(f"/api/users/{guest_id}", headers=headers).status_code == 200
+
+    assert asyncio.run(StorageService.get_user(guest_id)) is None
+    assert asyncio.run(StorageService.get_user_conversations(guest_id)) == []
+    assert _archived("guest_talked") is not None
+    assert _archived("guest_silent") is None
+    assert asyncio.run(StorageService.get_conversation("someone_else")) is not None

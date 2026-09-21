@@ -3,6 +3,7 @@ from passlib.context import CryptContext
 from models import User, UserType, UserProfile, UserRegister
 from services.storage_service import StorageService
 from services.notebook_service import notebook_service
+from services.conversation_service import ConversationService
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -119,8 +120,9 @@ class UserService:
         # 获取用户信息
         user = await StorageService.get_user(user_id)
         
-        # 删除用户的所有对话
-        await StorageService.delete_user_conversations(user_id)
+        # 对话逐场按用户删对话的同一条规则：说过话的挪进归档表（后台还看得到），没说过话的直接删
+        for conversation in await StorageService.get_user_conversations(user_id):
+            await ConversationService.delete_conversation(conversation)
         
         # 如果是游客用户，删除其笔记本
         if user and user.user_type == UserType.GUEST:
