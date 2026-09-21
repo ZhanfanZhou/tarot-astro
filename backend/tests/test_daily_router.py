@@ -220,3 +220,43 @@ def test_journeys_flag_today_conversations_not_yet_archived(env, monkeypatch):
     asyncio.run(ConversationService.append_message(
         conv_id, Message(role=MessageRole.USER, content="今天确实有点累")))
     assert env.get(f"/api/daily/{USER_ID}/journeys", params={"date": today}).json()["pending_today"] is True
+
+
+def test_journey_counts_readings_that_drew_cards(env, monkeypatch):
+    """门槛是日运记录加上抽过牌的普通占卜，合起来满 3 条；没抽牌的对话不算。
+    写出来的提示词里，每场占卜一行，列出抽到的牌。"""
+    from models import Conversation, Message, SessionType, TarotCard
+    from services.storage_service import StorageService
+
+    monkeypatch.setattr(notebook_service, "get_notes", lambda user_id: [])
+    today = date.today().isoformat()
+
+    def ready():
+        overview = env.get(f"/api/daily/{USER_ID}/overview", params={"date": today}).json()
+        listed = env.get(f"/api/daily/{USER_ID}/journeys", params={"date": today}).json()
+        assert overview["journey_ready"] == listed["ready"]   # 首页入口和卷宗页说的是同一件事
+        return listed["ready"]
+
+    def save(conv_id, cards):
+        asyncio.run(StorageService.save_conversation(Conversation(
+            conversation_id=conv_id, user_id=USER_ID, session_type=SessionType.TAROT,
+            created_at=f"{today}T12:00:00", has_drawn_cards=bool(cards),
+            messages=[Message(role=MessageRole.USER, content="想问问工作")]
+            + ([Message(role=MessageRole.TOOL, content="{}", tool_call_id="c1", tarot_cards=cards)]
+               if cards else []),
+        )))
+
+    _install(monkeypatch, "星星在今夜为你点灯。")
+    env.post(f"/api/daily/{USER_ID}/draw", json={"effective_date": today})
+    save("tarot_1", [TarotCard(card_id=0, card_name="愚者")])
+    save("no_cards", [])
+    assert ready() is False      # 1 签 + 1 场抽过牌的占卜；没抽牌那场不算
+
+    save("tarot_2", [TarotCard(card_id=3, card_name="女皇", reversed=True)])
+    assert ready() is True
+
+    prov = _install(monkeypatch, "这两周……")
+    assert env.post(f"/api/daily/{USER_ID}/journey", params={"date": today}).status_code == 200
+    prompt = prov.prompts[0]
+    assert "| 塔罗 | 抽到:愚者·正位" in prompt
+    assert "| 塔罗 | 抽到:女皇·逆位" in prompt

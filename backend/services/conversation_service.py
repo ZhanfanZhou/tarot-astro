@@ -132,6 +132,14 @@ class ConversationService:
         return conversation
     
     @staticmethod
+    def deletable(conversation: Conversation) -> bool:
+        """每日一签的对话不能删；接着聊过（用户发过言）就是普通对话了，可以删。
+        删掉的只是对话，那天的日运记录（牌面、印证）照样留着。"""
+        return conversation.session_type != SessionType.DAILY or any(
+            m.role == MessageRole.USER for m in conversation.messages
+        )
+
+    @staticmethod
     async def delete_conversation(conversation_id: str):
         """删除对话"""
         await StorageService.delete_conversation(conversation_id)

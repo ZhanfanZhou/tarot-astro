@@ -6,8 +6,11 @@ import pytest
 from models import Conversation, DailyDrawRecord, DailyFeedback, Message, MessageRole, SessionType, TarotCard
 from services.daily_service import (
     build_history_block,
+    build_journey_block,
     compute_streak,
     extract_tagline,
+    journey_date_range,
+    journey_window_readings,
     note_summaries,
     select_history_records,
 )
@@ -116,6 +119,63 @@ class TestNoteSummaries:
     def test_skips_empty_summary(self):
         history = [make_record("2026-06-10", conversation_id="conv_a")]
         assert note_summaries([{"conversation_id": "conv_a", "summary": ""}], history) == {}
+
+
+def make_reading(conversation_id: str, created_at: str, cards: List[TarotCard],
+                 session_type: SessionType = SessionType.TAROT) -> Conversation:
+    """一场普通占卜：抽过牌的话，牌挂在抽牌那条 TOOL 记录上。"""
+    messages = [Message(role=MessageRole.USER, content="想问问工作")]
+    if cards:
+        messages.append(Message(role=MessageRole.TOOL, content="{}", tool_call_id="c1", tarot_cards=cards))
+    return Conversation(
+        conversation_id=conversation_id, user_id="u1", session_type=session_type,
+        messages=messages, created_at=created_at, has_drawn_cards=bool(cards),
+    )
+
+
+FOOL = TarotCard(card_id=0, card_name="愚者")
+EMPRESS = TarotCard(card_id=3, card_name="女皇", reversed=True)
+
+
+class TestJourneyWindowReadings:
+    def test_only_readings_that_drew_cards_within_fourteen_days(self):
+        anchor = date(2026, 6, 20)
+        drew = make_reading("drew", "2026-06-10T09:00:00", [FOOL])
+        astro = make_reading("astro", "2026-06-12T09:00:00", [FOOL], SessionType.ASTROLOGY)
+        no_cards = make_reading("no_cards", "2026-06-11T09:00:00", [])
+        too_old = make_reading("too_old", "2026-06-05T09:00:00", [FOOL])      # 距 6/20 已 15 天
+        later = make_reading("later", "2026-06-21T09:00:00", [FOOL])          # 晚于锚点
+        daily = make_reading("daily", "2026-06-13T09:00:00", [FOOL], SessionType.DAILY)  # 由日运记录代表
+        picked = journey_window_readings([astro, no_cards, too_old, later, daily, drew], anchor)
+        assert [c.conversation_id for c in picked] == ["drew", "astro"]
+
+    def test_date_range_spans_records_and_readings(self):
+        records = [make_record("2026-06-12"), make_record("2026-06-15")]
+        readings = [make_reading("r", "2026-06-10T09:00:00", [FOOL])]
+        assert journey_date_range(records, readings) == "2026-06-10 ~ 2026-06-15"
+
+
+class TestBuildJourneyBlock:
+    def test_records_and_readings_in_one_timeline_notes_follow_their_line(self):
+        """日签和占卜排成一张表；哪一场有笔记，下面就跟一行笔记，别的只有那一行。"""
+        records = [
+            make_record("2026-06-09", card_name="宝剑三", verdict="hit", conversation_id="d9"),
+            make_record("2026-06-11", conversation_id="d11"),
+        ]
+        readings = [make_reading("r10", "2026-06-10T13:00:00", [FOOL, EMPRESS])]
+        block = build_journey_block(records, readings, {"r10": "纠结要不要换工作。", "d11": "想放个假。"})
+        assert block.split("\n") == [
+            "6月9日 | 宝剑三·正位 | 印证:应验了",
+            "6月10日 | 塔罗 | 抽到:愚者·正位、女皇·逆位",
+            "  笔记:纠结要不要换工作。",
+            "6月11日 | 星星 (The Star)·正位 | 未印证",
+            "  笔记:想放个假。",
+        ]
+
+    def test_note_summaries_cover_readings_too(self):
+        readings = [make_reading("r10", "2026-06-10T13:00:00", [FOOL])]
+        notes = [{"conversation_id": "r10", "summary": "这一场"}, {"conversation_id": "other", "summary": "别的"}]
+        assert note_summaries(notes, readings) == {"r10": "这一场"}
 
 
 def make_conversation(messages: List[Message]) -> Conversation:

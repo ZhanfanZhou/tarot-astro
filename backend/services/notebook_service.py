@@ -483,6 +483,15 @@ class NotebookService:
         
         return check_result
     
+    def delete_note(self, user_id: str, conversation_id: str):
+        """删掉这场对话的那条笔记（对话被删除时用）；没有就不动文件。
+        画像不跟着回退——它是按字段覆盖写的，分不出哪一句来自这一场。"""
+        entries = self._load_notes(user_id)
+        kept = [e for e in entries if e.conversation_id != conversation_id]
+        if len(kept) != len(entries):
+            self._save_notes(user_id, kept)
+            print(f"[Notebook] 删除条目: {conversation_id}")
+
     def delete_notebook(self, user_id: str):
         """
         删除用户的笔记本：笔记和画像（游客登出时使用）

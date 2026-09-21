@@ -157,6 +157,11 @@ def _call_sites() -> List[dict]:
     ]
     notes = [{"conversation_id": "sample-daily-1", "summary": "聊到想给自己放个假，[圣杯六（正位）]像在提醒她回头看看老朋友。"}]
     daily_parts = daily_oracle_prompt_parts(_USER, own, history, today, notes)
+    # 心灵奇旅还收这几天抽过牌的普通占卜：前天那一场塔罗，已经写成了笔记
+    reading = _sample_conversation().model_copy(
+        update={"created_at": f"{(today - timedelta(days=2)).isoformat()}T13:00:00"})
+    reading_notes = notes + [{"conversation_id": reading.conversation_id,
+                              "summary": "纠结要不要接杭州的 offer，看完牌说心里其实已经想去了。"}]
 
     reading_tools = tool_names(SessionType.TAROT, opening=False, has_override=False)
     return [
@@ -186,7 +191,7 @@ def _call_sites() -> List[dict]:
         _site("每日一签 · 之后接着聊", "daily", "reading", _SYSTEM, daily_parts,
               tools=tool_names(SessionType.DAILY, opening=False, has_override=True), after=_HISTORY),
         _site("心灵奇旅", "daily", "reading", _SINGLE,
-              journey_prompt_parts(_USER, history + [own], notes)),
+              journey_prompt_parts(_USER, history + [own], [reading], reading_notes)),
         _site("笔记本（会话结束后生成这场的占卜笔记 + 用户画像的改动，要求输出 JSON）",
               "notebook", "memory", _SINGLE,
               notebook_prompt_parts(_sample_conversation(), _sample_portrait())),

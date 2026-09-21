@@ -319,7 +319,7 @@ const JourneyChronicle: React.FC<JourneyChronicleProps> = ({
               >
                 <p className="text-[11px] leading-relaxed" style={{ color: 'var(--ivory-faint)' }}>
                   {pendingToday
-                    ? '今天的对话还在占卜师案头,要等他下班后归档成笔记,才会走进旅程——所以这一篇里多半看不到今天。'
+                    ? '今天的对话还在占卜师案头,要等他下班后归档成笔记——这一篇写得到今天抽了哪些牌,聊了些什么还写不进来。'
                     : '这些日子又攒下新的牌,可以再写一篇。'}
                 </p>
                 {ready && !hasToday && !writing && (
