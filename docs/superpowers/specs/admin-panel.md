@@ -20,10 +20,10 @@ UI 从简，不做视觉投入。
 | 接口 | 作用 |
 |---|---|
 | `POST /login` | 密码换 admin token |
-| `GET /stats` | 概览指标 |
-| `GET /conversations?limit&offset&type` | 全局会话分页（倒序，可按类型过滤，带开场幕相位） |
-| `GET /conversations/{id}` | 完整会话（含 messages），供详情渲染 |
-| `GET /users?limit&offset` | 用户列表 + 每人会话数 + 最后活跃时间 |
+| `GET /stats` | 概览指标（只算正常会话，不含已归档） |
+| `GET /conversations?limit&offset&type` | 全局会话分页（倒序，可按类型过滤，带开场幕相位）。用户删掉后归档的也在里面，和正常会话同一个顺序，带 `archived_at` |
+| `GET /conversations/{id}` | 完整会话（含 messages），供详情渲染；已归档的也能取，带 `archived_at` |
+| `GET /users?limit&offset` | 用户列表 + 每人会话数 + 最后活跃时间（不含已归档） |
 | `GET /usage` · `DELETE /usage/{user_id}` | 今日各身份已用 LLM 次数 + 限额；按人清零 |
 | `GET /prompts` | 整页一次取全：`items`（每份的生效内容 / 是否覆盖 / 更新时间 / 字符数）+ `stages`（按阶段分组的全部调用点） |
 | `PUT /prompts/{name}` · `DELETE /prompts/{name}` | 保存覆盖（原子写 + `.bak`）· 重置为默认 |
@@ -95,7 +95,7 @@ UI 从简，不做视觉投入。
 |---|---|
 | 登录 | 单密码输入框 |
 | 概览 | 指标数字一排 |
-| 会话 | 左列表（倒序 / 类型筛选 / 分页）+ 右详情（气泡区分角色，塔罗牌消息显示牌名 + 正逆位，开场幕会话带起手单卡片）；窄屏堆叠 |
+| 会话 | 左列表（倒序 / 类型筛选 / 分页）+ 右详情（气泡区分角色，塔罗牌消息显示牌名 + 正逆位，开场幕会话带起手单卡片）；用户删掉的会话在列表和详情里标「已归档」；窄屏堆叠 |
 | Prompt | §3 的单一视图 |
 | 模型 | 三个 Agent 各自选 provider / model，可撤销回 `.env` |
 | 用量 | 今日计数表，可按人清零 |
@@ -104,7 +104,7 @@ UI 从简，不做视觉投入。
 
 ## 6. 明确不做
 
-删除用户 / 会话、prompt 多版本历史与 diff、prompt 在线试跑、每日一签与钱包的运营面板、操作审计日志。
+删除用户 / 会话、恢复已归档会话、prompt 多版本历史与 diff、prompt 在线试跑、每日一签与钱包的运营面板、操作审计日志。
 
 ---
 

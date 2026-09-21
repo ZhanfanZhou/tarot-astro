@@ -140,9 +140,13 @@ class ConversationService:
         )
 
     @staticmethod
-    async def delete_conversation(conversation_id: str):
-        """删除对话"""
-        await StorageService.delete_conversation(conversation_id)
+    async def delete_conversation(conversation: Conversation):
+        """用户删对话：用户那边从此查不到。他在里面说过话的，挪进归档表，后台管理还看得到；
+        一句没说过的（只有开场白之类）直接删掉。"""
+        if any(m.role == MessageRole.USER for m in conversation.messages):
+            await StorageService.archive_conversation(conversation.conversation_id)
+        else:
+            await StorageService.delete_conversation(conversation.conversation_id)
     
 
 

@@ -104,10 +104,15 @@ async def admin_conversations(
 async def admin_conversation_detail(
     conversation_id: str, _: None = Depends(require_admin)
 ):
+    """会话全文。用户删掉后归档的也能看，带 archived_at（正常会话为 None）。"""
     conversation = await StorageService.get_conversation(conversation_id)
+    archived_at = None
     if not conversation:
-        raise HTTPException(status_code=404, detail="对话不存在")
-    return conversation
+        archived = await StorageService.get_archived_conversation(conversation_id)
+        if not archived:
+            raise HTTPException(status_code=404, detail="对话不存在")
+        conversation, archived_at = archived
+    return {**conversation.model_dump(), "archived_at": archived_at}
 
 
 @router.get("/users")

@@ -147,7 +147,10 @@ SSE 形状与 `/message` 一致，前端的等待体验因此和等一轮回复�
 `POST /api/conversations/{id}/exit` 登记一个笔记任务，12 小时后生成（仅注册用户）。
 机制见 [笔记本](notebook.md)。
 
-`DELETE /api/conversations/{id}` 删掉这场对话，这一场写过的占卜笔记跟着删（画像不回退）。
+`DELETE /api/conversations/{id}` 让这场对话从用户那边消失，这一场写过的占卜笔记跟着删（画像不回退）。
+用户在里面说过话的，整行挪进 `archived_conversations` 表，后台管理还看得到、标「已归档」；
+一句没说过的（只有开场白之类）直接删掉。用户那边的代码只读 `conversations`，
+所以归档和删掉在用户看来是一样的。
 **没接着聊过的每日一签不能删**（400）：用户在里面发过言，它才算普通对话、才能删；
 删掉的只是对话，那天的日运记录（牌面、印证）留着。
 前端的删除入口按同一条规则显示或隐藏（`utils/conversation.ts` 的 `canDelete`，
@@ -159,7 +162,7 @@ SSE 形状与 `/message` 一致，前端的等待体验因此和等一轮回复�
 
 | 数据 | 存哪 |
 |---|---|
-| 用户、会话 | `backend/data/app.db`（SQLite / WAL，aiosqlite） |
+| 用户、会话、用户删掉的会话（`archived_conversations`） | `backend/data/app.db`（SQLite / WAL，aiosqlite） |
 | 日运、钱包、支付、用量、笔记本 | `backend/data/*.json`、`data/notebooks/` |
 
 `backend/data/` 全部是实时数据，gitignored、无备份。**测试一律指向临时库或 mock，不碰它。**

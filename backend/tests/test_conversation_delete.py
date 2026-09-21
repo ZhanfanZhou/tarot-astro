@@ -2,6 +2,7 @@
 
   · 没接着聊过的每日一签不能删；用户发过言就是普通对话，可以删，那天的日运记录照样留着
   · 删掉的对话如果写过占卜笔记，那一条跟着删，同一个人别的笔记不动
+  · 用户在里面说过话的，挪进归档表（后台管理还看得到）；一句没说过的直接删掉
 
 走真实 HTTP + 临时库 + 临时日运文件 + 临时笔记本目录；LLM 换成替身。
 """
@@ -122,3 +123,37 @@ def test_deleting_a_conversation_without_a_note_leaves_the_notebook_alone(env):
 
     assert env.delete("/api/conversations/conv_gone").status_code == 200
     assert (notebook_service.NOTEBOOK_DIR / f"note_{USER_ID}.log").read_text(encoding="utf-8") == before
+
+
+def _save(conv_id: str, messages):
+    from services.storage_service import StorageService
+    asyncio.run(StorageService.save_conversation(Conversation(
+        conversation_id=conv_id, user_id=USER_ID, session_type=SessionType.TAROT, messages=messages,
+    )))
+
+
+def _archived(conv_id: str):
+    from services.storage_service import StorageService
+    return asyncio.run(StorageService.get_archived_conversation(conv_id))
+
+
+def test_a_conversation_the_user_spoke_in_is_archived_not_erased(env):
+    """用户那边：查不到、列表里也没有；归档表里原样留着，带归档时间。"""
+    _save("conv_talked", [Message(role=MessageRole.ASSISTANT, content="来了。坐吧。"),
+                          Message(role=MessageRole.USER, content="想问问工作")])
+
+    assert env.delete("/api/conversations/conv_talked").status_code == 200
+    assert env.get("/api/conversations/conv_talked").status_code == 404
+    assert "conv_talked" not in [c["conversation_id"] for c in env.get(f"/api/conversations/user/{USER_ID}").json()]
+
+    conversation, archived_at = _archived("conv_talked")
+    assert [m.content for m in conversation.messages] == ["来了。坐吧。", "想问问工作"]
+    assert archived_at
+
+
+def test_a_conversation_the_user_never_spoke_in_is_erased(env):
+    _save("conv_silent", [Message(role=MessageRole.ASSISTANT, content="来了。坐吧。")])
+
+    assert env.delete("/api/conversations/conv_silent").status_code == 200
+    assert env.get("/api/conversations/conv_silent").status_code == 404
+    assert _archived("conv_silent") is None

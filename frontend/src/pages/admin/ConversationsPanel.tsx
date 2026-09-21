@@ -90,6 +90,9 @@ export default function ConversationsPanel() {
               <div className="row1">
                 <span className="title">{c.title}</span>
                 <span className="row1-tags">
+                  {c.archived_at && (
+                    <span className="archived-badge" title={`用户于 ${fmtTime(c.archived_at)} 删除`}>已归档</span>
+                  )}
                   {c.phase === 'opening' && <span className="phase-badge">开场幕</span>}
                   <span className="admin-dim">{TYPE_LABELS[c.session_type] || c.session_type}</span>
                 </span>
@@ -112,6 +115,9 @@ export default function ConversationsPanel() {
           <div className="admin-toolbar">
             <button onClick={() => setDetail(null)}>← 返回</button>
             <span className="title">{detail.title}</span>
+            {detail.archived_at && (
+              <span className="archived-badge">已归档 · 用户于 {fmtTime(detail.archived_at)} 删除</span>
+            )}
             <span className="admin-dim">{fmtTime(detail.created_at)}</span>
           </div>
           {detail.strategy && (

@@ -1,5 +1,6 @@
 import json
-from typing import List, Optional
+from datetime import datetime
+from typing import List, Optional, Tuple
 
 from models import User, Conversation
 from services.db import get_db
@@ -109,6 +110,37 @@ class StorageService:
             await db.commit()
 
     @staticmethod
+    async def archive_conversation(conversation_id: str):
+        """用户删掉的对话挪进归档表：用户那边从此查不到，后台管理还看得到。
+        同一个事务里先抄过去再删，不会两边都有或两边都没有。"""
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO archived_conversations"
+                "(conversation_id, user_id, updated_at, archived_at, data) "
+                "SELECT conversation_id, user_id, updated_at, ?, data "
+                "FROM conversations WHERE conversation_id=?",
+                (datetime.utcnow().isoformat(), conversation_id),
+            )
+            await db.execute(
+                "DELETE FROM conversations WHERE conversation_id=?",
+                (conversation_id,),
+            )
+            await db.commit()
+
+    @staticmethod
+    async def get_archived_conversation(
+        conversation_id: str,
+    ) -> Optional[Tuple[Conversation, str]]:
+        """归档表里的一场对话和它的归档时间（仅后台管理用）。"""
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT data, archived_at FROM archived_conversations WHERE conversation_id=?",
+                (conversation_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        return (Conversation(**json.loads(row["data"])), row["archived_at"]) if row else None
+
+    @staticmethod
     async def delete_user_conversations(user_id: str):
         """删除用户的所有对话"""
         async with get_db() as db:
@@ -157,7 +189,9 @@ class StorageService:
         limit: int = 20, offset: int = 0,
         session_type: Optional[str] = None, user_id: Optional[str] = None,
     ) -> tuple:
-        """全局会话摘要（不含消息全文），updated_at 倒序。返回 (items, total)。"""
+        """全局会话摘要（不含消息全文），updated_at 倒序。返回 (items, total)。
+
+        用户删掉后归档的也在里面，和正常会话按同一个顺序排，带 archived_at（正常会话为 None）。"""
         where, params = [], []
         if session_type:
             where.append("json_extract(data,'$.session_type')=?")
@@ -166,19 +200,24 @@ class StorageService:
             where.append("user_id=?")
             params.append(user_id)
         w = ("WHERE " + " AND ".join(where)) if where else ""
+        src = """(SELECT conversation_id, user_id, updated_at, data, NULL AS archived_at
+                    FROM conversations
+                  UNION ALL
+                  SELECT conversation_id, user_id, updated_at, data, archived_at
+                    FROM archived_conversations)"""
         async with get_db() as db:
             async with db.execute(
-                f"SELECT COUNT(*) FROM conversations {w}", params
+                f"SELECT COUNT(*) FROM {src} {w}", params
             ) as cur:
                 total = (await cur.fetchone())[0]
             async with db.execute(
-                f"""SELECT conversation_id, user_id, updated_at,
+                f"""SELECT conversation_id, user_id, updated_at, archived_at,
                            json_extract(data,'$.session_type') AS session_type,
                            json_extract(data,'$.title')        AS title,
                            json_extract(data,'$.created_at')   AS created_at,
                            COALESCE(json_array_length(data,'$.messages'),0) AS message_count,
                            COALESCE(json_extract(data,'$.phase'),'reading') AS phase
-                    FROM conversations {w}
+                    FROM {src} {w}
                     ORDER BY updated_at DESC LIMIT ? OFFSET ?""",
                 params + [limit, offset],
             ) as cur:

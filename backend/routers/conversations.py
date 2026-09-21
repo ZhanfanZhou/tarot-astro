@@ -137,7 +137,7 @@ async def delete_conversation(
     if not ConversationService.deletable(conversation):
         raise HTTPException(status_code=400, detail="每日一签的对话不能删除")
     try:
-        await ConversationService.delete_conversation(conversation_id)
+        await ConversationService.delete_conversation(conversation)
         notebook_service.delete_note(conversation.user_id, conversation_id)
         return {"message": "对话已删除"}
     except Exception as e:

@@ -356,6 +356,24 @@ class TestAdminDataSafety:
         assert by_id["c_opening"]["phase"] == "opening"
         assert by_id["c_reading"]["phase"] == "reading"
 
+    def test_archived_conversations_stay_in_the_list_with_a_mark(self, client):
+        """用户删掉后归档的会话照样在列表里、按原来的 updated_at 排，带 archived_at；详情也能看。"""
+        _seed(client)
+        asyncio.run(StorageService.archive_conversation("c3"))
+        h = _admin_headers(client)
+
+        r = client.get("/api/admin/conversations", headers=h).json()
+        assert r["total"] == 3
+        assert [c["conversation_id"] for c in r["items"]] == ["c2", "c3", "c1"]   # 顺序不变
+        by_id = {c["conversation_id"]: c for c in r["items"]}
+        assert by_id["c3"]["archived_at"] and by_id["c2"]["archived_at"] is None
+        assert by_id["c3"]["username"] == "alice"                                # 用户信息照样联查
+        assert client.get("/api/admin/conversations?session_type=tarot", headers=h).json()["total"] == 2
+
+        d = client.get("/api/admin/conversations/c3", headers=h).json()
+        assert d["title"] == "塔罗C" and d["archived_at"]
+        assert client.get("/api/admin/conversations/c1", headers=h).json()["archived_at"] is None
+
 
 class TestAdminPrompts:
     def test_list_prompts(self, client):

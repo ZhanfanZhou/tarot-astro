@@ -35,6 +35,16 @@ CREATE TABLE IF NOT EXISTS conversations (
 );
 CREATE INDEX IF NOT EXISTS idx_conv_user_updated
     ON conversations(user_id, updated_at);
+
+-- 用户删掉的对话（他在里面说过话的）原样挪到这里：用户那边的代码只读 conversations，
+-- 挪走就等于删了；只有后台管理还读这张表，列表里标「已归档」。
+CREATE TABLE IF NOT EXISTS archived_conversations (
+    conversation_id TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    archived_at     TEXT NOT NULL,
+    data            TEXT NOT NULL
+);
 """
 
 _initialized = False

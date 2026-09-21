@@ -59,6 +59,7 @@ export interface AdminConvSummary {
   nickname: string | null;
   user_type: string | null;
   phase?: 'opening' | 'reading';
+  archived_at: string | null;   // 用户删掉后归档的时间；正常会话为 null
 }
 
 export interface AdminMessage {
@@ -90,6 +91,7 @@ export interface AdminConversation {
   messages: AdminMessage[];
   phase?: 'opening' | 'reading';
   strategy?: ReadingBrief | null;
+  archived_at: string | null;
 }
 
 export interface AdminUser {

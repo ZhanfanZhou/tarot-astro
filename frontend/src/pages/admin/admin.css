@@ -75,6 +75,11 @@
   font-size: 11px; color: #cfa94a; border: 1px solid #6b5a2a;
   border-radius: 4px; padding: 0 5px; line-height: 1.6; white-space: nowrap;
 }
+/* 用户删掉后归档的会话:灰调,和开场幕的金色区分开 */
+.archived-badge {
+  font-size: 11px; color: #a39a91; border: 1px solid #55504a;
+  border-radius: 4px; padding: 0 5px; line-height: 1.6; white-space: nowrap;
+}
 /* 策略单卡片:开场读人交付物,古董金调,克制,置于消息列表之前 */
 .strategy-brief {
   background: #1c1926; border: 1px solid #4a4358; border-radius: 8px;
