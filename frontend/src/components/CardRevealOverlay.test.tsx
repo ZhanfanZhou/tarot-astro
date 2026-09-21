@@ -11,7 +11,7 @@ describe('CardRevealOverlay', () => {
 
     expect(screen.getByText('牌阵落位')).toBeTruthy();
     expect(screen.getByText('过去')).toBeTruthy();
-    expect(document.querySelectorAll('img[src="/tarot-images/card-back.png"]').length).toBe(3);
+    expect(document.querySelectorAll('img[src="/tarot-images/decks/classic-rws/card-back.webp"]').length).toBe(3);
     expect(screen.queryByText('命运之牌已就位')).toBeNull();
   });
 
@@ -47,7 +47,7 @@ describe('CardRevealOverlay', () => {
       const { rerender } = render(
         <CardRevealOverlay cards={null} positions={positions} onDone={() => {}} />
       );
-      expect(document.querySelectorAll('img[src="/tarot-images/card-back.png"]').length).toBe(1);
+      expect(document.querySelectorAll('img[src="/tarot-images/decks/classic-rws/card-back.webp"]').length).toBe(1);
 
       rerender(
         <CardRevealOverlay

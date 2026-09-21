@@ -15,7 +15,7 @@ const TopBar: React.FC<TopBarProps> = ({ conversation, onToggleSidebar, onCopyAl
   const [menuOpen, setMenuOpen] = useState(false);
   const isTarot = conversation.session_type === 'tarot' || conversation.session_type === 'daily';
   const accent = isTarot ? 'var(--gold)' : 'var(--moon)';
-  const avatar = isTarot ? '/assets/avatar_tarot.png' : '/assets/avatar.png';
+  const avatar = isTarot ? '/assets/avatar-tarot.webp' : '/assets/avatar-astrology.webp';
 
   const items = [
     { label: '复制全部解读', icon: <Copy size={15} />, action: onCopyAll },

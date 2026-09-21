@@ -2,10 +2,11 @@
 
 ```
 tarot-images/
-├── card-back.png      shared UI assets (used by the chat app)
 └── decks/
     └── <deck-id>/                a single tarot deck (one art style, 78 cards)
         ├── deck.json             deck metadata (see below)
+        ├── card-back.png         card back source (classic-rws only; local, not synced)
+        ├── card-back.webp        the card back the chat app shows (tools/gen-thumbnails.sh)
         ├── major/                22 Major Arcana
         ├── cups/  wands/         14 each of the four Minor suits
         ├── swords/ pentacles/

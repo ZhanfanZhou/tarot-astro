@@ -46,7 +46,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [query, setQuery] = useState('');
 
   const accentFor = (s: SessionType) => (s === 'tarot' || s === 'daily' ? 'var(--gold)' : 'var(--moon)');
-  const iconFor = (s: SessionType) => (s === 'tarot' || s === 'daily' ? '/assets/avatar_tarot.png' : '/assets/avatar.png');
+  const iconFor = (s: SessionType) => (s === 'tarot' || s === 'daily' ? '/assets/avatar-tarot.webp' : '/assets/avatar-astrology.webp');
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -72,13 +72,10 @@ const Sidebar: React.FC<SidebarProps> = ({
             className="group flex items-center gap-3 -ml-1 pr-2 py-1 rounded-lg transition-colors hover:bg-white/[0.03]"
             aria-label="返回殿堂"
           >
-            <span className="w-9 h-9 rounded-full overflow-hidden ring-1 ring-mystic-gold/45 ring-offset-2 ring-offset-dark-bg transition-shadow group-hover:shadow-[0_0_16px_rgba(201,169,110,0.35)]">
-              <img src="/assets/icon.png" alt="Logo" className="w-full h-full object-cover" />
+            <span className="w-10 h-10 rounded-full overflow-hidden ring-1 ring-mystic-gold/45 ring-offset-2 ring-offset-dark-bg transition-shadow group-hover:shadow-[0_0_16px_rgba(201,169,110,0.35)]">
+              <img src="/assets/icon.webp" alt="Logo" className="w-full h-full object-cover" />
             </span>
-            <span className="text-left">
-              <span className="block font-display font-semibold text-[15px] mystic-text tracking-wide leading-none">小x的秘密圣殿</span>
-              <span className="block eyebrow mt-1" style={{ fontSize: '8px', letterSpacing: '0.3em' }}>SECRET SANCTUM</span>
-            </span>
+            <span className="font-display font-semibold text-[17px] mystic-text tracking-wider leading-none">小x的秘密圣殿</span>
           </button>
           {onClose && (
             <button
