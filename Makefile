@@ -1,6 +1,7 @@
 SHELL := /bin/bash
+PROXY ?= http://127.0.0.1:7890
 PYTHON ?= python3
-## 需要代理访问 LLM 时：PROXY=http://127.0.0.1:7890 make dev（或在 shell 里 export PROXY）
+export PROXY
 
 .PHONY: dev backend frontend install clean
 

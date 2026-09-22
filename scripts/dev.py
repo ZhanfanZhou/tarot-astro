@@ -90,9 +90,8 @@ def run(names):
     try:
         clean(names)
         env = os.environ.copy()
-        # Route outbound LLM/API calls through a proxy only when PROXY is set.
-        if env.get('PROXY'):
-            env.update(http_proxy=env['PROXY'], https_proxy=env['PROXY'])
+        proxy = env.get('PROXY', 'http://127.0.0.1:7890')
+        env.update(http_proxy=proxy, https_proxy=proxy)
         for name in names:
             _, command, cwd = SERVICES[name]
             # Block shutdown signals across spawn + registration so no child is lost.

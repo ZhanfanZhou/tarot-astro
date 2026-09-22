@@ -152,7 +152,7 @@ venv/bin/python backend/scripts/check_providers.py
 make dev          # 同时启动后端 :8000 和前端 :5173，Ctrl+C 一起停止
 ```
 
-前端的 `/api` 请求由 Vite 转发到 :8000。也可以用 `make backend` / `make frontend` 只起一端。访问 LLM 需要走代理时，用 `PROXY=http://127.0.0.1:7890 make dev`。
+前端的 `/api` 请求由 Vite 转发到 :8000。也可以用 `make backend` / `make frontend` 只起一端。注意 `make dev` 默认给后端配了代理 `http://127.0.0.1:7890`（作者本机的配置）：不用代理时运行 `PROXY= make dev`，代理地址不同时运行 `PROXY=<你的代理地址> make dev`。
 
 浏览器打开 http://localhost:5173 ，选「游客模式」就能开始占卜。后端接口文档在 http://localhost:8000/docs 。
 
