@@ -65,6 +65,10 @@ SSE 端点不走 axios，用 `authHeaders()` 手动拼 header。
   注册账号可获得更好的占卜体验和更多使用额度，现在注册会保留你的对话，今天就能接着聊。」，
   按钮「明天再来」「注册账号」（打开转为注册用户）；注册用户「今日次数已用完 / 明天再来吧。」，只有「知道了」。
 - 登录弹窗里注册那一项（以及注册表单的副标题）写「更好的占卜体验 · 更多使用额度」。
+- **能量剩余**：顶栏账户按钮和设置面板里显示今日额度还剩的百分比（`utils/quota.ts` 的 `energyPercent`，
+  用超了按 0）。不求实时、不轮询：落到殿堂时查一次（打开页面也是先落在殿堂），之后每回到殿堂再查一次，
+  游客转正换了上限也查一次（在对话里转的也当场查）；对话里别的时候不查。另外不多发请求地顺手更新两次：
+  `ensureQuota` 查到的结果，发消息被拒（429）时置 0。所以对话里显示的是进来时的数，回殿堂才跟上。
 
 ---
 
@@ -79,6 +83,7 @@ SSE 端点不走 axios，用 `authHeaders()` 手动拼 header。
 | `services/user_service.py` | 用户、密码、游客转正 |
 | `stores/useAuthStore.ts` · `services/api.ts` | 前端持久化与拦截器 |
 | `App.tsx`（`ensureQuota` / `showQuotaPrompt` / `runTurn` 的 429）· `utils/quota.ts` · `Composer` | 前端额度提示 |
+| `App.tsx`（`energy`）· `AccountMenu` | 能量剩余 |
 
 ---
 

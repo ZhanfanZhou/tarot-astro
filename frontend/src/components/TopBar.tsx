@@ -10,6 +10,8 @@ interface TopBarProps {
   /** 当前会话；null = 在殿堂 */
   conversation: Conversation | null;
   user: User | null;
+  /** 能量剩余百分比，交给账户那一枚 */
+  energy: number | null;
   onHome: () => void;
   onCopyAll: () => void;
   onScrollToLatest: () => void;
@@ -26,6 +28,7 @@ interface TopBarProps {
 const TopBar: React.FC<TopBarProps> = ({
   conversation,
   user,
+  energy,
   onHome,
   onCopyAll,
   onScrollToLatest,
@@ -156,7 +159,7 @@ const TopBar: React.FC<TopBarProps> = ({
         </div>
       )}
 
-      {user && <AccountMenu user={user} onConvert={onConvertAccount} onLogout={onLogout} />}
+      {user && <AccountMenu user={user} energy={energy} onConvert={onConvertAccount} onLogout={onLogout} />}
     </header>
   );
 };

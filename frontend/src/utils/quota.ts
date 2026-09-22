@@ -1,4 +1,12 @@
 import { UserType } from '@/types';
+import type { Quota } from '@/types';
+
+/**
+ * 能量条的百分比：今日还剩多少额度。
+ * 只计数不拦的调用（抽牌后的解读、日签、心灵奇旅）用完了也照样计，used 可以超过 limit，按 0 算。
+ */
+export const energyPercent = ({ used, limit }: Quota): number =>
+  Math.round((Math.max(0, limit - used) / limit) * 100);
 
 export interface QuotaNotice {
   title: string;

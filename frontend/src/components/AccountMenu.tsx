@@ -6,12 +6,31 @@ import type { User } from '@/types';
 
 interface AccountMenuProps {
   user: User;
+  /** 能量剩余（今日额度还剩的百分比）；null = 还没查到，不画 */
+  energy: number | null;
   onConvert: () => void;
   onLogout: () => void;
 }
 
-/** 右上角的账户 + 设置：头像、名字和一枚齿轮，点开是原来设置弹窗里的全部内容 */
-const AccountMenu: React.FC<AccountMenuProps> = ({ user, onConvert, onLogout }) => {
+/** 能量条：一道细金线，长度是剩下的百分比 */
+const EnergyBar: React.FC<{ percent: number }> = ({ percent }) => (
+  <span className="block h-[3px] rounded-full overflow-hidden" style={{ background: 'var(--line-soft)' }}>
+    <span
+      className="block h-full rounded-full transition-[width] duration-700"
+      style={{
+        width: `${percent}%`,
+        background: 'linear-gradient(90deg, var(--gold-deep), var(--gold) 60%, var(--gold-bright))',
+        boxShadow: '0 0 6px rgba(201,169,110,0.45)',
+      }}
+    />
+  </span>
+);
+
+/**
+ * 右上角的账户 + 设置：头像、名字、能量剩余和一枚齿轮，点开是原来设置弹窗里的全部内容。
+ * 窄屏只留头像和齿轮，名字和能量剩余都在点开的面板里。
+ */
+const AccountMenu: React.FC<AccountMenuProps> = ({ user, energy, onConvert, onLogout }) => {
   const [open, setOpen] = useState(false);
   const name = user.profile?.nickname || user.username || '访客';
   const isGuest = user.user_type === UserType.GUEST;
@@ -47,6 +66,19 @@ const AccountMenu: React.FC<AccountMenuProps> = ({ user, onConvert, onLogout }) 
         <span className="hidden sm:inline max-w-[8rem] truncate font-display text-sm tracking-[0.06em]" style={{ color: 'var(--ivory-dim)' }}>
           {name}
         </span>
+        {energy !== null && (
+          <span
+            aria-hidden
+            className="hidden sm:flex flex-col gap-[5px] w-[88px] pl-2.5"
+            style={{ borderLeft: '1px solid var(--line-soft)' }}
+          >
+            <span className="flex items-baseline justify-between leading-none">
+              <span className="text-[10px] tracking-[0.14em]" style={{ color: 'var(--ivory-faint)' }}>能量剩余</span>
+              <span className="font-display text-[11px]" style={{ color: 'var(--gold)' }}>{energy}%</span>
+            </span>
+            <EnergyBar percent={energy} />
+          </span>
+        )}
         <span className="grid place-items-center w-6 h-6" style={{ color: 'var(--ivory-dim)' }}>
           <Settings size={15} className="transition-transform duration-500 group-hover:rotate-45" />
         </span>
@@ -69,6 +101,22 @@ const AccountMenu: React.FC<AccountMenuProps> = ({ user, onConvert, onLogout }) 
                 <div className="eyebrow mb-1.5" style={{ fontSize: '9px', letterSpacing: '0.26em' }}>Settings · 设置</div>
                 <div className="font-display truncate" style={{ color: 'var(--ivory)' }}>{name}</div>
                 <div className="text-xs mt-0.5" style={{ color: 'var(--ivory-faint)' }}>{isGuest ? '游客模式' : '注册用户'}</div>
+                {energy !== null && (
+                  <div
+                    role="meter"
+                    aria-label="能量剩余"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={energy}
+                    className="mt-3"
+                  >
+                    <div className="flex items-baseline justify-between mb-1.5 leading-none">
+                      <span className="text-xs tracking-[0.12em]" style={{ color: 'var(--ivory-dim)' }}>能量剩余</span>
+                      <span className="font-display text-sm" style={{ color: 'var(--gold)' }}>{energy}%</span>
+                    </div>
+                    <EnergyBar percent={energy} />
+                  </div>
+                )}
               </div>
               {isGuest && (
                 <button

@@ -9,6 +9,7 @@ import type {
   DailyOverview,
   DailyDrawRecord,
   JourneyList,
+  Quota,
 } from '@/types';
 import { useAuthStore } from '@/stores/useAuthStore';
 
@@ -101,8 +102,8 @@ export const userApi = {
     return response.data;
   },
 
-  /** 今日额度：已用 / 上限。用户要对话时当场查 */
-  getQuota: async (userId: string): Promise<{ used: number; limit: number }> => {
+  /** 今日额度：已用 / 上限。用户要对话时当场查；回到殿堂时查一次给能量条 */
+  getQuota: async (userId: string): Promise<Quota> => {
     const response = await api.get(`/api/users/${userId}/quota`);
     return response.data;
   },

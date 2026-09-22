@@ -29,6 +29,12 @@ export interface User {
   created_at: string;
 }
 
+/** 今日额度：已用 / 上限（GET /api/users/{id}/quota） */
+export interface Quota {
+  used: number;
+  limit: number;
+}
+
 export enum MessageRole {
   USER = 'user',
   ASSISTANT = 'assistant',

@@ -24,9 +24,9 @@ import { useAuthStore } from './stores/useAuthStore';
 import { useConversationStore } from './stores/useConversationStore';
 import { userApi, conversationApi, tarotApi, astrologyApi, dailyApi } from './services/api';
 import { getEffectiveDate } from './utils/dailyDate';
-import { quotaNotice } from './utils/quota';
+import { energyPercent, quotaNotice } from './utils/quota';
 import { MessageRole, UserType } from './types';
-import type { Conversation, SessionType, DrawCardsRequest, Message, TarotCard, ToolCallRecord, UserProfile, DailyOverview } from './types';
+import type { Conversation, SessionType, DrawCardsRequest, Message, TarotCard, ToolCallRecord, UserProfile, DailyOverview, Quota } from './types';
 
 /** 会话末尾是一次还在等用户动手的调用（抽牌 / 补资料）→ 返回它。和后端 tool_turns.pending_interrupt 同一个判据。 */
 const INTERRUPT_TOOLS = new Set(['draw_tarot_cards', 'request_user_profile']);
@@ -85,6 +85,20 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // 能量剩余：今日额度还剩的百分比，顶栏账户那一枚上显示。null = 还没查到
+  const [energy, setEnergy] = useState<number | null>(null);
+  const atHub = !currentConversation;
+
+  const refreshEnergy = React.useCallback(async () => {
+    const uid = useAuthStore.getState().user?.user_id;
+    if (!uid) return;
+    try {
+      setEnergy(energyPercent(await userApi.getQuota(uid)));
+    } catch (error) {
+      console.error('查询额度失败:', error);
+    }
+  }, []);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // 旧会话迁移：localStorage 有 user 但无 token（首次部署 JWT 后），静默换取 token
@@ -123,6 +137,12 @@ const App: React.FC = () => {
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [refreshDailyOverview]);
+
+  // 能量剩余：落到殿堂时查一次（打开页面也是先落在殿堂），之后每回到殿堂再查一次；对话里不查，也不轮询
+  useEffect(() => {
+    if (!user?.user_id) setEnergy(null);
+    else if (atHub) refreshEnergy();
+  }, [user?.user_id, atHub, refreshEnergy]);
 
   // 自动滚动到底部
   useEffect(() => {
@@ -346,7 +366,7 @@ const App: React.FC = () => {
    */
   const ensureQuota = async (): Promise<boolean> => {
     if (!user) return false;
-    let quota: { used: number; limit: number };
+    let quota: Quota;
     try {
       quota = await userApi.getQuota(user.user_id);
     } catch (error) {
@@ -354,6 +374,7 @@ const App: React.FC = () => {
       toast.error('网络异常，请重试');
       return false;
     }
+    setEnergy(energyPercent(quota)); // 刚查到的，顺手给能量条
     if (quota.used < quota.limit) return true;
     showQuotaPrompt();
     return false;
@@ -380,6 +401,7 @@ const App: React.FC = () => {
       console.error(failMessage, error);
       if (error?.status === 429) {
         rejectTurn(id, sent);
+        setEnergy(0); // 后端说今天用完了，能量条跟弹窗对上
         showQuotaPrompt();
         return false;
       }
@@ -558,6 +580,7 @@ const App: React.FC = () => {
       const { user: updatedUser, access_token } = await userApi.convertGuestToRegistered(user.user_id, username, password);
       setAuth(updatedUser, access_token);
       setShowConvertModal(false);
+      refreshEnergy(); // 转正当场换成注册用户的上限；可能是在对话里用完额度时转的，不等回殿堂
       toast.success('转换成功！现在您可以随时登录查看历史记录了');
     } catch (error: any) {
       console.error('转换失败:', error);
@@ -614,6 +637,7 @@ const App: React.FC = () => {
       <TopBar
         conversation={currentConversation}
         user={user}
+        energy={energy}
         onHome={handleNewConversation}
         onCopyAll={handleCopyAllReadings}
         onScrollToLatest={handleScrollToLatest}
