@@ -315,13 +315,19 @@ def _entry_part(session_type: SessionType) -> Part:
                 variants="按会话入口取值：" + " / ".join(_ENTRY_LABEL.values()))
 
 
+def security_parts() -> List[Part]:
+    """opening_system.md / tarot_system.md / astrology_system.md 都以空的「安全边界」小节收尾，
+    正文是共用的 security-system.md，紧接在那个标题下面。"""
+    return [Part("\n"), prompt_service.prompt_part("security-system.md")]
+
+
 def opening_prompt_parts(
     relationship_block: str,
     session_type: SessionType,
     user_context: str = "",
     portrait_context: str = "",
 ) -> List[Part]:
-    """开场相位系统提示词 = opening_persona.md + opening_system.md + opening_spread_catalog.md
+    """开场相位系统提示词 = opening_persona.md + opening_system.md + security-system.md + opening_spread_catalog.md
     + 用户点开的入口 + 称呼与来访次数 + 用户资料 + 用户画像。
 
     <称呼与来访次数> 紧跟在入口后面：opening_persona.md 的 <迎接> 一节按它决定语气，
@@ -342,6 +348,7 @@ def opening_prompt_parts(
     parts = [prompt_service.prompt_part("opening_persona.md"),
              Part("\n\n"),
              prompt_service.prompt_part("opening_system.md"),
+             *security_parts(),
              Part("\n\n"),
              prompt_service.prompt_part("opening_spread_catalog.md"),
              _entry_part(session_type)]
@@ -418,7 +425,7 @@ def reading_prompt_parts(
     strategy: Optional[dict],
     portrait_context: str = "",
 ) -> List[Part]:
-    """解读相位系统提示词 = 塔罗/占星提示词 + 用户资料 + 用户画像 + 起手单块
+    """解读相位系统提示词 = 塔罗/占星提示词 + security-system.md + 用户资料 + 用户画像 + 起手单块
     [+ 牌阵说明] [+ 接场约束]。
 
     strategy 为空（存量会话）→ 不追加接场约束，表现与开场幕上线前一致。
@@ -428,7 +435,7 @@ def reading_prompt_parts(
     接场约束永远是最后一段：它作废的是上面塔罗/占星提示词里的「先欢迎、先澄清」，
     中间再插东西，等于让它离要压的那两条更远、离结尾更远。
     """
-    parts = [prompt_service.prompt_part(reading_base_prompt_name(session_type))]
+    parts = [prompt_service.prompt_part(reading_base_prompt_name(session_type)), *security_parts()]
     if user_context:
         parts.append(Part(f"\n\n{user_context}", label="用户资料", sample=True, variants=_PROFILE_SHAPES))
     parts += _portrait_parts(portrait_context)

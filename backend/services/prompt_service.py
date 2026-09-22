@@ -26,6 +26,7 @@ PROMPT_REGISTRY: Dict[str, str] = {
     "opening_spread_catalog.md": "牌阵选择参考（开场选阵用的简介）",
     "opening_greeting.md": "开场白那一轮的指令",
     "reading_handoff.md": "接场约束",
+    "security-system.md": "安全边界（开场 / 塔罗 / 占星三份共用，接在各自末尾）",
     # 牌阵详解：一副一份，文件名里的 id 就是牌阵 ID（见 spread_service）。
     # 顺序即 <牌阵选择参考> 的顺序，也是交单 spread_type 那个 enum 的顺序。
     "spread_three_card_state.md": "牌阵详解 · 三张无牌阵（状态／结果）",

@@ -46,7 +46,7 @@
 
 opening:
   用户消息 → 前置 Agent（OPENING provider）
-             提示词: opening_system.md + <牌阵选择参考> + <用户点开的入口>
+             提示词: opening_system.md + security-system.md + <牌阵选择参考> + <用户点开的入口>
                     + <称呼与来访次数> + <用户资料> + <用户画像>
              工具:   submit_reading_brief + request_user_profile
                     + read_divination_notes
@@ -61,7 +61,7 @@ opening:
 
 reading:
   用户消息 → 解读 Agent（READING provider）
-             提示词: tarot/astrology_system.md + <用户资料> + <用户画像>
+             提示词: tarot/astrology_system.md + security-system.md + <用户资料> + <用户画像>
                     + <本场起手> [+ <牌阵说明>] + reading_handoff.md
              工具:   draw_tarot_cards / get_astrology_chart /
                     request_user_profile / read_divination_notes
@@ -274,6 +274,7 @@ WHERE user_id = ? AND conversation_id != ?
 | `prompts/spread_*.md` | 一副阵一份：文件头（id / name / positions）+ 解读说明 |
 | `prompts/opening_persona.md` · `opening_greeting.md` | 开场白那一次发的两段 |
 | `prompts/reading_handoff.md` | 接场约束 |
+| `prompts/security-system.md` | 安全边界：接在 opening / tarot / astrology 三份系统提示词末尾的「安全边界」标题下 |
 | `services/spread_service.py` | 牌阵目录：ID → 牌阵名 / 位置 / 解读说明，文件头解析 |
 | `services/opening_service.py` | 开场白生成、开场上下文拼装、交单校验与落库 |
 | `services/context_service.py` | 相位判定、关系元数据、起手单展开与渲染、两相位提示词拼装、`first_action` |

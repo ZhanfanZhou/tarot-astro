@@ -381,7 +381,7 @@ def base_prompt(monkeypatch):
     real = prompt_service.get_prompt
     monkeypatch.setattr(
         prompt_service, "get_prompt",
-        lambda name: f"BASE:{name}" if name.endswith("_system.md") else real(name),
+        lambda name: f"BASE:{name}" if name.endswith("system.md") else real(name),
     )
 
 
@@ -505,7 +505,7 @@ def test_build_reading_prompt_legacy_conversation_has_no_handoff_constraints(bas
     assert "接场" not in prompt
     assert "不要再欢迎用户" not in prompt
     assert "submit_reading_brief" not in prompt
-    assert prompt == "BASE:astrology_system.md\n\n<用户资料>昵称：小夏"
+    assert prompt == "BASE:astrology_system.md\nBASE:security-system.md\n\n<用户资料>昵称：小夏"
 
 
 def test_both_phases_carry_the_portrait_and_its_usage_rules(base_prompt):
@@ -538,7 +538,7 @@ def test_no_portrait_leaves_both_phases_byte_identical(base_prompt):
     assert context_service.build_reading_prompt(
         session_type=SessionType.TAROT, user_context="<用户资料>昵称：小夏",
         strategy=None, portrait_context="",
-    ) == "BASE:tarot_system.md\n\n<用户资料>昵称：小夏"
+    ) == "BASE:tarot_system.md\nBASE:security-system.md\n\n<用户资料>昵称：小夏"
 
     opening = context_service.build_opening_prompt(
         relationship_block="# <称呼与来访次数>\n首次来访", session_type=SessionType.TAROT,

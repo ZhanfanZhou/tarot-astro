@@ -44,7 +44,7 @@ UI 从简，不做视觉投入。
 
 **白名单** `PROMPT_REGISTRY`（防路径穿越，新增 prompt 在此登记）：
 `tarot_system` / `astrology_system` / `opening_persona` / `opening_system` / `opening_greeting` /
-`opening_spread_catalog` / `spread_*`（一副阵一份）/ `reading_handoff` / `portrait_usage` /
+`opening_spread_catalog` / `spread_*`（一副阵一份）/ `reading_handoff` / `security-system` / `portrait_usage` /
 `notebook_system` / `daily_oracle_system` / `daily_journey`。
 
 **写入安全**：原子写（tmp + `os.replace`）、保存前旧内容存同名 `.bak`（单版本回退）、
