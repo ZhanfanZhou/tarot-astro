@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from typing import List
-from models import DrawCardsRequest, DrawCardsResponse, ResumeRequest, SendMessageRequest, User
+from models import DrawCardsResponse, ResumeRequest, SendMessageRequest, User
 from services import turn_service
 from services.tarot_service import TarotService
 from dependencies import get_current_user
@@ -28,12 +28,11 @@ async def resume(
 
 @router.post("/draw", response_model=DrawCardsResponse)
 async def draw_cards(
-    draw_request: DrawCardsRequest,
     conversation_id: str = Query(...),
     current_user: User = Depends(get_current_user),
 ):
     """抽取塔罗牌：作为模型上一轮 draw_tarot_cards 调用的结果落库。"""
-    return await turn_service.record_draw(conversation_id, current_user, draw_request)
+    return await turn_service.record_draw(conversation_id, current_user)
 
 
 @router.get("/cards", response_model=List[str])

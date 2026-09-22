@@ -13,8 +13,8 @@ import ArchPortrait from './ArchPortrait';
 
 interface ModalShellProps {
   isOpen: boolean;
-  /** 右上角关闭 */
-  onClose: () => void;
+  /** 右上角关闭；不传就没有关闭按钮（登录弹窗：没登录关掉它，页面就什么都做不了） */
+  onClose?: () => void;
   /** 点压暗的那一层；不传就不响应（比如登录弹窗不许点外面关掉） */
   onBackdropClick?: () => void;
   /** 层级，默认 z-50 */
@@ -59,7 +59,7 @@ export const ModalShell: React.FC<ModalShellProps> = ({
               boxShadow: '0 30px 80px rgba(0,0,0,0.6), inset 0 1px 0 rgba(240,208,144,0.06)',
             }}
           >
-            <button
+            {onClose && <button
               type="button"
               onClick={onClose}
               className="absolute top-4 right-4 w-9 h-9 rounded-full grid place-items-center transition-colors hover:bg-white/[0.06]"
@@ -67,7 +67,7 @@ export const ModalShell: React.FC<ModalShellProps> = ({
               aria-label="关闭"
             >
               <X size={16} />
-            </button>
+            </button>}
             {children}
           </div>
         </motion.div>

@@ -208,9 +208,10 @@ const App: React.FC = () => {
     try {
       const { user: newUser, access_token } = await userApi.createGuest(profile);
       setAuth(newUser, access_token);
-    } catch (error) {
+    } catch (error: any) {
       console.error('创建游客失败:', error);
-      toast.error('登录失败，请重试');
+      // 交回弹窗写在表单上（和注册、登录一样），弹窗不关
+      throw new Error(error.response?.data?.detail || error.message || '进入失败，请重试');
     }
   };
 
@@ -511,7 +512,7 @@ const App: React.FC = () => {
       // 真牌由后端生成，作为那次 draw_tarot_cards 调用的结果落库
       let drawn: TarotCard[];
       try {
-        drawn = await api.drawCards(conv.conversation_id, request);
+        drawn = await api.drawCards(conv.conversation_id);
       } catch {
         setReveal(null);
         throw new Error('抽牌失败，请重试');

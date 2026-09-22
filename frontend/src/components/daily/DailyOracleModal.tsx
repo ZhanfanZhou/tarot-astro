@@ -323,7 +323,8 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
                           <input
                             value={note}
                             onChange={(e) => setNote(e.target.value)}
-                            placeholder="想补一句吗?(可选)"
+                            maxLength={30}
+                            placeholder="想补一句吗?(可选,30 字以内)"
                             className="flex-1 bg-transparent text-sm px-3 py-1.5 rounded-lg outline-none placeholder:text-white/25"
                             style={{ border: '1px solid var(--line)', color: 'var(--ivory)' }}
                           />

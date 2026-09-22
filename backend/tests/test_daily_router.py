@@ -280,3 +280,20 @@ def test_journey_counts_readings_that_drew_cards(env, monkeypatch):
     prompt = prov.prompts[0]
     assert "| 塔罗 | 抽到:愚者·正位" in prompt
     assert "| 塔罗 | 抽到:女皇·逆位" in prompt
+
+
+def test_feedback_note_is_limited_to_30_chars(env, monkeypatch):
+    """附言原样进提示词：30 字以内收下，多一个字整条拒收，旧附言不被覆盖。"""
+    _install(monkeypatch, "星星在今夜为你点灯。")
+    today = date.today().isoformat()
+    env.post(f"/api/daily/{USER_ID}/draw", json={"effective_date": today})
+
+    ok = env.post(f"/api/daily/{USER_ID}/feedback",
+                  json={"effective_date": today, "verdict": "hit", "note": "准" * 30})
+    assert ok.status_code == 200 and ok.json()["feedback"]["note"] == "准" * 30
+
+    too_long = env.post(f"/api/daily/{USER_ID}/feedback",
+                        json={"effective_date": today, "verdict": "hit", "note": "准" * 31})
+    assert too_long.status_code == 422
+    days = env.get(f"/api/daily/{USER_ID}/overview", params={"date": today}).json()
+    assert days["today_record"]["feedback"]["note"] == "准" * 30

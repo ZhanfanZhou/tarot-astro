@@ -6,7 +6,6 @@ import type {
   FeedbackRating,
   SessionType,
   TarotCard,
-  DrawCardsRequest,
   DailyOverview,
   DailyDrawRecord,
   JourneyList,
@@ -242,8 +241,9 @@ async function streamTurn(url: string, body: object, onChunk: (chunk: string) =>
   }
 }
 
-async function drawCards(prefix: string, conversationId: string, drawRequest: DrawCardsRequest): Promise<TarotCard[]> {
-  const response = await api.post(`/api/${prefix}/draw`, drawRequest, {
+// 牌阵与位置由后端从那次 draw_tarot_cards 调用里取，这里不传
+async function drawCards(prefix: string, conversationId: string): Promise<TarotCard[]> {
+  const response = await api.post(`/api/${prefix}/draw`, null, {
     params: { conversation_id: conversationId },
   });
   return response.data.cards;
@@ -258,8 +258,7 @@ export const tarotApi = {
   resume: (conversationId: string, onChunk: (chunk: string) => void): Promise<void> =>
     streamTurn(`${API_BASE_URL}/api/tarot/resume`, { conversation_id: conversationId }, onChunk),
 
-  drawCards: (conversationId: string, drawRequest: DrawCardsRequest) =>
-    drawCards('tarot', conversationId, drawRequest),
+  drawCards: (conversationId: string) => drawCards('tarot', conversationId),
 
   getAllCards: async (): Promise<string[]> => {
     const response = await api.get('/api/tarot/cards');
@@ -275,8 +274,7 @@ export const astrologyApi = {
   resume: (conversationId: string, onChunk: (chunk: string) => void): Promise<void> =>
     streamTurn(`${API_BASE_URL}/api/astrology/resume`, { conversation_id: conversationId }, onChunk),
 
-  drawCards: (conversationId: string, drawRequest: DrawCardsRequest) =>
-    drawCards('astrology', conversationId, drawRequest),
+  drawCards: (conversationId: string) => drawCards('astrology', conversationId),
 
   checkProfile: async (userId: string): Promise<{
     has_complete_profile: boolean;

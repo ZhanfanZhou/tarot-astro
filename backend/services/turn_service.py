@@ -131,15 +131,17 @@ def stream_text(text: str) -> StreamingResponse:
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
-async def record_draw(
-    conversation_id: str, current_user: User, draw_request: DrawCardsRequest,
-) -> DrawCardsResponse:
-    """用户在抽牌器上抽完了：生成真牌，作为那次 draw_tarot_cards 调用的结果落库。"""
+async def record_draw(conversation_id: str, current_user: User) -> DrawCardsResponse:
+    """用户在抽牌器上抽完了：生成真牌，作为那次 draw_tarot_cards 调用的结果落库。
+
+    牌阵和位置取自那次调用的参数，不收前端传来的：位置名会原样写进工具结果发给模型，
+    由请求体决定的话，任何人都能直接调接口往里塞文字。"""
     conversation = await _load(conversation_id, current_user)
     pending = tool_turns.pending_interrupt(conversation)
     if not pending or pending.name != "draw_tarot_cards":
         raise HTTPException(status_code=409, detail="当前没有待抽的牌")
 
+    draw_request = DrawCardsRequest(**pending.args)
     cards = TarotService.draw_cards(draw_request)
     await ConversationService.append_message(
         conversation_id,

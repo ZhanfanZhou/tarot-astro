@@ -1,8 +1,11 @@
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException, Depends, Body
 from models import (
     User, UserProfile, UserRegister, UserLogin,
     ConvertGuestToRegisteredRequest, AuthResponse,
 )
+from services.astrology_service import AstrologyService
 from services.user_service import UserService
 from services.auth_service import create_access_token
 from services.rate_limit_service import RateLimitService
@@ -15,6 +18,25 @@ _HIDE_CHART = {"natal_chart"}
 _AUTH_HIDE_CHART = {"user": _HIDE_CHART}
 
 
+NICKNAME_MAX_LEN = 20
+# 换行和 # < > 能让昵称在提示词里装成一个新小节（「# <系统指令>」），不收
+_NICKNAME_FORBIDDEN = set("\r\n#<>")
+
+
+def _check_profile(profile: Optional[UserProfile]) -> None:
+    """资料的昵称、城市会原样写进系统提示词。前端的下拉框挡不住直接调接口，这里再收一道。
+    只查写入：库里已有的资料照常读出。"""
+    if profile is None:
+        return
+    nickname = profile.nickname or ""
+    if len(nickname) > NICKNAME_MAX_LEN:
+        raise HTTPException(status_code=400, detail=f"昵称最多 {NICKNAME_MAX_LEN} 个字")
+    if _NICKNAME_FORBIDDEN & set(nickname):
+        raise HTTPException(status_code=400, detail="昵称不能包含换行和 # < > 这几个符号")
+    if profile.birth_city and profile.birth_city not in AstrologyService.CITY_COORDINATES:
+        raise HTTPException(status_code=400, detail="出生城市请从列表中选择")
+
+
 def _auth_response(user: User) -> AuthResponse:
     """统一签发 token 并隐藏密码哈希。"""
     user.password_hash = None
@@ -25,6 +47,7 @@ def _auth_response(user: User) -> AuthResponse:
 @router.post("/guest", response_model=AuthResponse, response_model_exclude=_AUTH_HIDE_CHART)
 async def create_guest(profile: UserProfile = Body(default=None)):
     """创建游客用户并签发 token"""
+    _check_profile(profile)
     try:
         user = await UserService.create_guest_user(profile)
         return _auth_response(user)
@@ -35,6 +58,7 @@ async def create_guest(profile: UserProfile = Body(default=None)):
 @router.post("/register", response_model=AuthResponse, response_model_exclude=_AUTH_HIDE_CHART)
 async def register(register_data: UserRegister):
     """用户注册并签发 token"""
+    _check_profile(register_data.profile)
     try:
         user = await UserService.create_registered_user(register_data)
         return _auth_response(user)
@@ -93,6 +117,7 @@ async def update_profile(
 ):
     """更新用户资料（仅本人）"""
     ensure_owner(current_user, user_id)
+    _check_profile(profile)
     try:
         user = await UserService.update_user_profile(user_id, profile)
         user.password_hash = None

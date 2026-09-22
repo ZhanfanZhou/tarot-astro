@@ -7,7 +7,7 @@ import { ModalShell, ModalHeader, FieldLabel, TextField, FormError, PrimaryButto
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onGuestLogin: (profile?: UserProfile) => void;
+  onGuestLogin: (profile?: UserProfile) => Promise<void>;
   onRegister: (username: string, password: string, profile?: UserProfile) => Promise<void>;
   onLogin: (username: string, password: string) => Promise<void>;
 }
@@ -41,10 +41,19 @@ const AuthModal: React.FC<AuthModalProps> = ({
     setError('');
   };
 
-  const handleGuestSubmit = () => {
-    onGuestLogin(Object.keys(profile).length > 0 ? profile : undefined);
-    resetForm();
-    onClose();
+  // 等游客真的建好了再关：失败时弹窗留着、错误写在表单上，用户改完再点一次
+  const handleGuestSubmit = async () => {
+    setIsLoading(true);
+    setError('');
+    try {
+      await onGuestLogin(Object.keys(profile).length > 0 ? profile : undefined);
+      resetForm();
+      onClose();
+    } catch (err: any) {
+      setError(err.message || '进入失败，请重试');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleRegisterSubmit = async () => {
@@ -97,7 +106,8 @@ const AuthModal: React.FC<AuthModalProps> = ({
   }[mode];
 
   return (
-    <ModalShell isOpen={isOpen} onClose={onClose}>
+    // 不给 onClose：没有关闭按钮。这个弹窗只在没登录时出现，只能「返回」换一种方式进来
+    <ModalShell isOpen={isOpen}>
       <ModalHeader portrait="/assets/icon.webp" eyebrow={header.eyebrow} title={'欢迎来到小 x 的秘密圣殿'} subtitle={header.subtitle} />
 
       {mode === 'choice' && (
@@ -125,20 +135,26 @@ const AuthModal: React.FC<AuthModalProps> = ({
 
       {mode === 'guest' && (
         <div className="space-y-5">
+          {error && <FormError>{error}</FormError>}
           <div>
             <FieldLabel>昵称（可选）</FieldLabel>
             <TextField
               type="text"
               value={profile.nickname || ''}
-              onChange={(e) => setProfile({ ...profile, nickname: e.target.value })}
+              onChange={(e) => {
+                setProfile({ ...profile, nickname: e.target.value });
+                setError('');
+              }}
+              maxLength={20}
               placeholder="希望占卜师如何称呼你"
+              disabled={isLoading}
             />
           </div>
           <div className="flex gap-3 pt-1">
-            <GhostButton onClick={() => handleModeChange('choice')} className="flex-1">
+            <GhostButton onClick={() => handleModeChange('choice')} disabled={isLoading} className="flex-1">
               返回
             </GhostButton>
-            <PrimaryButton onClick={handleGuestSubmit} className="flex-1">
+            <PrimaryButton onClick={handleGuestSubmit} disabled={isLoading} className="flex-1">
               开始占卜
             </PrimaryButton>
           </div>
@@ -183,6 +199,7 @@ const AuthModal: React.FC<AuthModalProps> = ({
                 type="text"
                 value={profile.nickname || ''}
                 onChange={(e) => setProfile({ ...profile, nickname: e.target.value })}
+                maxLength={20}
                 placeholder="希望占卜师如何称呼你"
                 disabled={isLoading}
               />

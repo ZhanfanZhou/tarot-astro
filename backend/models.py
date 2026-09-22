@@ -208,7 +208,8 @@ class DailyDrawRequest(BaseModel):
 class DailyFeedbackRequest(BaseModel):
     effective_date: str
     verdict: Optional[Literal["hit", "miss"]] = None
-    note: Optional[str] = None
+    # 附言原样进每日一签/心灵奇旅的提示词，限长只在写入时：库里的旧附言照常读出
+    note: Optional[str] = Field(default=None, max_length=30)
 
 
 class DailyDayView(BaseModel):

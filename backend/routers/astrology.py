@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from models import DrawCardsRequest, DrawCardsResponse, ResumeRequest, SendMessageRequest, User
+from models import DrawCardsResponse, ResumeRequest, SendMessageRequest, User
 from services import turn_service
 from services.astrology_service import AstrologyService
 from services.user_service import UserService
@@ -28,12 +28,11 @@ async def resume(
 
 @router.post("/draw", response_model=DrawCardsResponse)
 async def draw_cards(
-    draw_request: DrawCardsRequest,
     conversation_id: str = Query(...),
     current_user: User = Depends(get_current_user),
 ):
     """抽取塔罗牌（星盘会话里的辅助牌）：作为模型上一轮 draw_tarot_cards 调用的结果落库。"""
-    return await turn_service.record_draw(conversation_id, current_user, draw_request)
+    return await turn_service.record_draw(conversation_id, current_user)
 
 
 @router.get("/check-profile/{user_id}")
