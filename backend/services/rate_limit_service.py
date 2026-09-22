@@ -4,6 +4,10 @@
 只保留当天数据，避免无限增长；写入走临时文件 + os.replace 原子替换，配合进程内
 asyncio.Lock，避免并发下计数丢失或文件损坏。
 
+每次真实 LLM 调用都计一次，但只有用户开口对话时才拦（check_and_consume）：发消息、
+新开占卜的开场白。其余调用（抽牌/补资料之后的解读、日签抽签、心灵奇旅）次数本就
+有限，只计数不拦（consume）。
+
 注意：游客身份可被清缓存重置，本层不防此类绕过（按需求暂不做 IP 限流）。它的定位是
 「每个身份的公平额度 + 账单兜底」，更强的防滥用应叠加 IP 限流 / 全局预算熔断。
 """
@@ -45,28 +49,42 @@ def _limit_for(user: User) -> int:
     return GUEST_DAILY_MESSAGE_LIMIT if user.user_type == UserType.GUEST else USER_DAILY_MESSAGE_LIMIT
 
 
+async def _count(user: User, enforce: bool) -> dict:
+    limit = _limit_for(user)
+    today = _today()
+    async with _lock:
+        data = _read()
+        day = data.get(today, {})
+        used = day.get(user.user_id, 0)
+        if enforce and used >= limit:
+            if user.user_type == UserType.GUEST:
+                detail = f"今日免费次数已用完（{limit} 次/天），明天再来，或注册账号获取更多次数。"
+            else:
+                detail = f"今日次数已达上限（{limit} 次/天），请明天再来。"
+            raise HTTPException(status_code=429, detail=detail)
+        day[user.user_id] = used + 1
+        # 只落当天，顺手丢弃历史日期，保持文件极小
+        _write_atomic({today: day})
+    return {"used": used + 1, "limit": limit}
+
+
 class RateLimitService:
     """每日次数限制。"""
 
     @staticmethod
     async def check_and_consume(user: User) -> dict:
         """额度足够则计数 +1 并返回用量；超额抛 429。"""
-        limit = _limit_for(user)
-        today = _today()
-        async with _lock:
-            data = _read()
-            day = data.get(today, {})
-            used = day.get(user.user_id, 0)
-            if used >= limit:
-                if user.user_type == UserType.GUEST:
-                    detail = f"今日免费次数已用完（{limit} 次/天），明天再来，或注册账号获取更多次数。"
-                else:
-                    detail = f"今日次数已达上限（{limit} 次/天），请明天再来。"
-                raise HTTPException(status_code=429, detail=detail)
-            day[user.user_id] = used + 1
-            # 只落当天，顺手丢弃历史日期，保持文件极小
-            _write_atomic({today: day})
-        return {"used": used + 1, "limit": limit}
+        return await _count(user, enforce=True)
+
+    @staticmethod
+    async def consume(user: User) -> dict:
+        """只计数不拦：用完额度也放行，照常记进当天用量。"""
+        return await _count(user, enforce=False)
+
+    @staticmethod
+    def get_usage(user: User) -> dict:
+        """今日已用 / 上限，只读。"""
+        return {"used": _read().get(_today(), {}).get(user.user_id, 0), "limit": _limit_for(user)}
 
 
 def get_today_usage() -> tuple:

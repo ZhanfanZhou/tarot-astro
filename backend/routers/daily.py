@@ -93,8 +93,8 @@ async def draw_daily(
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    # 解读是一次真实 LLM 调用，先扣额度
-    await RateLimitService.check_and_consume(current_user)
+    # 解读是一次真实 LLM 调用，计一次；一日一签，不拦
+    await RateLimitService.consume(current_user)
 
     draw_request = DrawCardsRequest(spread_type="single", positions=["今日指引"])
     cards = TarotService.draw_cards(draw_request)
@@ -185,22 +185,21 @@ async def list_journeys(
 async def generate_journey(
     user_id: str,
     date_param: str = Query(..., alias="date"),
-    force: bool = False,
     current_user: User = Depends(get_current_user),
 ):
-    """心灵奇旅(用户主动触发,SSE 流式)。当天那一篇已经写过且非 force 时直接回放,不花 token。"""
+    """心灵奇旅(用户主动触发,SSE 流式)。一天只写一篇:当天那一篇已经写过就直接回放,不花 token。"""
     ensure_owner(current_user, user_id)
     _parse_date(date_param)
 
     today_piece = await DailyService.get_journey_of_day(user_id, date_param)
-    if today_piece and not force:
+    if today_piece:
         async def replay():
             yield f"data: {json.dumps({'content': today_piece['text']}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
         return StreamingResponse(replay(), media_type="text/event-stream")
 
-    # 用量控制：缓存未命中、确实要调 LLM 时才扣额度
-    await RateLimitService.check_and_consume(current_user)
+    # 确实要调 LLM 时计一次；一天只写一篇，不拦
+    await RateLimitService.consume(current_user)
 
     user = await UserService.get_user(user_id)
     if not user:

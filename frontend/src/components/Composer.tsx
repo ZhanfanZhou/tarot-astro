@@ -3,7 +3,8 @@ import { ArrowUp } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 interface ComposerProps {
-  onSend: (message: string) => void;
+  /** resolve false = 这句没发出去（今日额度用完，后端没收），字回到输入框 */
+  onSend: (message: string) => void | Promise<boolean | void>;
   disabled?: boolean;
   placeholder?: string;
 }
@@ -26,10 +27,11 @@ const Composer: React.FC<ComposerProps> = ({ onSend, disabled = false, placehold
     ta.style.height = `${Math.min(ta.scrollHeight, MAX_HEIGHT)}px`;
   }, [message]);
 
-  const send = () => {
+  const send = async () => {
     if (!canSend) return;
-    onSend(message.trim());
+    const text = message.trim();
     setMessage('');
+    if ((await onSend(text)) === false) setMessage((current) => current || text);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

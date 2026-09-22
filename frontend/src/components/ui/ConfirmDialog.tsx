@@ -45,13 +45,15 @@ const ConfirmDialog: React.FC = () => {
               {request.message}
             </p>
             <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => resolve(false)}
-                className="px-5 py-2.5 rounded-xl text-sm tracking-wide transition-colors hover:bg-white/[0.05]"
-                style={{ color: 'var(--ivory-dim)', border: '1px solid var(--line-soft)' }}
-              >
-                {request.cancelText ?? '取消'}
-              </button>
+              {!request.hideCancel && (
+                <button
+                  onClick={() => resolve(false)}
+                  className="px-5 py-2.5 rounded-xl text-sm tracking-wide transition-colors hover:bg-white/[0.05]"
+                  style={{ color: 'var(--ivory-dim)', border: '1px solid var(--line-soft)' }}
+                >
+                  {request.cancelText ?? '取消'}
+                </button>
+              )}
               <button
                 onClick={() => resolve(true)}
                 className="px-5 py-2.5 rounded-xl text-sm tracking-wide font-medium transition-transform hover:scale-[1.03]"

@@ -256,6 +256,55 @@ def test_normal_message_consumes_exactly_one_quota(env, monkeypatch):
     assert _usage(env) == 1  # 一次请求只扣一次
 
 
+def test_message_rejected_when_quota_exhausted_writes_nothing(env, monkeypatch):
+    """用户开口说话时看额度：用完 → 429，不调模型，这句话也不落库。"""
+    import services.rate_limit_service as rl_mod
+    from services import gemini_service as gs
+
+    monkeypatch.setattr(rl_mod, "USER_DAILY_MESSAGE_LIMIT", 0)
+    calls = []
+
+    async def _fake_stream(self, *args, **kwargs):
+        calls.append(1)
+        yield {"done": True}
+
+    monkeypatch.setattr(gs.GeminiService, "stream_response", _fake_stream)
+    _save("conv_full", [Message(role=MessageRole.ASSISTANT, content="你想问什么？")])
+
+    resp = env.post("/api/tarot/message", json={"conversation_id": "conv_full", "content": "我该换工作吗？"})
+    assert resp.status_code == 429
+    assert calls == []
+    assert _roles("conv_full") == [MessageRole.ASSISTANT]
+    assert _usage(env) == 0
+
+
+def test_resending_after_rejection_records_the_message_once(env, monkeypatch):
+    """被拒的那句没落库，也就不进模型上下文；额度够了再发同一句，记录里只有一条。"""
+    import services.rate_limit_service as rl_mod
+    from services import gemini_service as gs
+
+    seen = []
+
+    async def _fake_stream(self, messages, *args, **kwargs):
+        seen.append([(m.role, m.content) for m in messages])
+        yield {"content": "好的。"}
+        yield {"message": tool_turns.assistant_message("好的。")}
+        yield {"done": True}
+
+    monkeypatch.setattr(gs.GeminiService, "stream_response", _fake_stream)
+    _save("conv_resend", [Message(role=MessageRole.ASSISTANT, content="你想问什么？")])
+    body = {"conversation_id": "conv_resend", "content": "我该换工作吗？"}
+
+    monkeypatch.setattr(rl_mod, "USER_DAILY_MESSAGE_LIMIT", 0)
+    assert env.post("/api/tarot/message", json=body).status_code == 429
+
+    monkeypatch.setattr(rl_mod, "USER_DAILY_MESSAGE_LIMIT", 1)
+    assert env.post("/api/tarot/message", json=body).status_code == 200
+
+    assert seen == [[(MessageRole.ASSISTANT, "你想问什么？"), (MessageRole.USER, "我该换工作吗？")]]
+    assert _roles("conv_resend") == [MessageRole.ASSISTANT, MessageRole.USER, MessageRole.ASSISTANT]
+
+
 # ---------------------------------------------------------------------------
 # 3. resume：用户在界面上做完了动作，不是一条发言
 # ---------------------------------------------------------------------------
@@ -296,6 +345,20 @@ def test_resume_after_draw_runs_a_turn_without_writing_a_user_message(env, monke
     assert _roles("conv_resume") == [
         MessageRole.USER, MessageRole.ASSISTANT, MessageRole.TOOL, MessageRole.ASSISTANT]
     assert _usage(env) == 1  # resume 也是一次 LLM 调用，照常计费
+
+
+def test_resume_is_not_blocked_when_quota_exhausted(env, monkeypatch):
+    """抽完牌的那段解读不看额度：用完了也照常解读，只是照样记一次。"""
+    import services.rate_limit_service as rl_mod
+
+    monkeypatch.setattr(rl_mod, "USER_DAILY_MESSAGE_LIMIT", 0)
+    _stub_stream(monkeypatch, "愚者提醒你……")
+    _save("conv_resume_full", [Message(role=MessageRole.USER, content="我该不该接这个 offer"), *_drawn_pair()])
+
+    resp = env.post("/api/tarot/resume", json={"conversation_id": "conv_resume_full"})
+    assert resp.status_code == 200
+    assert _roles("conv_resume_full")[-1] == MessageRole.ASSISTANT
+    assert _usage(env) == 1
 
 
 def test_draw_records_the_result_of_the_pending_call(env):

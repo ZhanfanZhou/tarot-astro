@@ -5,6 +5,7 @@ from models import (
 )
 from services.user_service import UserService
 from services.auth_service import create_access_token
+from services.rate_limit_service import RateLimitService
 from dependencies import get_current_user, ensure_owner
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -75,6 +76,13 @@ async def get_user(user_id: str, current_user: User = Depends(get_current_user))
     ensure_owner(current_user, user_id)
     current_user.password_hash = None
     return current_user
+
+
+@router.get("/{user_id}/quota")
+async def get_quota(user_id: str, current_user: User = Depends(get_current_user)):
+    """今日额度 {used, limit}（仅本人）。前端在用户要对话时查：用完就提示、禁用输入框。"""
+    ensure_owner(current_user, user_id)
+    return RateLimitService.get_usage(current_user)
 
 
 @router.put("/{user_id}/profile", response_model=User, response_model_exclude=_HIDE_CHART)

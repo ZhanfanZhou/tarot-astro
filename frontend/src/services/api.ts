@@ -101,6 +101,12 @@ export const userApi = {
     return response.data;
   },
 
+  /** 今日额度：已用 / 上限。用户要对话时当场查 */
+  getQuota: async (userId: string): Promise<{ used: number; limit: number }> => {
+    const response = await api.get(`/api/users/${userId}/quota`);
+    return response.data;
+  },
+
   updateProfile: async (userId: string, profile: UserProfile): Promise<User> => {
     const response = await api.put(`/api/users/${userId}/profile`, profile);
     return response.data;
@@ -403,15 +409,14 @@ export const dailyApi = {
     return r.data;
   },
 
-  /** 心灵奇旅(SSE 流式;解析方式与 tarotApi.sendMessage 一致) */
+  /** 心灵奇旅(SSE 流式;解析方式与 tarotApi.sendMessage 一致)。一天一篇,当天写过就是回放 */
   journey: async (
     userId: string,
     date: string,
-    force: boolean,
     onChunk: (chunk: string) => void
   ): Promise<void> => {
     const response = await fetch(
-      `${API_BASE_URL}/api/daily/${userId}/journey?date=${date}&force=${force}`,
+      `${API_BASE_URL}/api/daily/${userId}/journey?date=${date}`,
       { method: 'POST', headers: { ...authHeaders() } }
     );
     if (!response.ok) {

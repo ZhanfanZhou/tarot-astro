@@ -24,6 +24,7 @@ import { useAuthStore } from './stores/useAuthStore';
 import { useConversationStore } from './stores/useConversationStore';
 import { userApi, conversationApi, tarotApi, astrologyApi, dailyApi } from './services/api';
 import { getEffectiveDate } from './utils/dailyDate';
+import { quotaNotice } from './utils/quota';
 import { MessageRole, UserType } from './types';
 import type { Conversation, SessionType, DrawCardsRequest, Message, TarotCard, ToolCallRecord, UserProfile, DailyOverview } from './types';
 
@@ -216,6 +217,8 @@ const App: React.FC = () => {
 
     let newConv: Conversation;
     try {
+      // 新开塔罗/占星，占卜师要先开口：这就算开始对话，先看额度，用完就不建会话
+      if (OPENING_PHASE_SESSIONS.includes(sessionType) && !(await ensureQuota())) return;
       newConv = await conversationApi.create(user.user_id, sessionType);
       addConversation(newConv);
       setCurrentConversation(newConv);
@@ -323,22 +326,61 @@ const App: React.FC = () => {
 
   const turnApi = (sessionType: SessionType) => (sessionType === 'astrology' ? astrologyApi : tarotApi);
 
+  /** 今日额度用完的提示：游客可以当场注册（转正，保留对话），注册用户只能等明天 */
+  const showQuotaPrompt = async () => {
+    if (!user) return;
+    const notice = quotaNotice(user.user_type);
+    if (user.user_type === UserType.GUEST) {
+      if (await confirmDialog({ ...notice, confirmText: '注册账号', cancelText: '明天再来' })) {
+        setShowConvertModal(true);
+      }
+    } else {
+      await confirmDialog({ ...notice, confirmText: '知道了', hideCancel: true });
+    }
+  };
+
+  /**
+   * 新开塔罗/占星、从日签接着聊之前先查额度，用完就提示、不进对话。
+   * 发消息不预先查：直接发，后端拦下（429）再提示，见 runTurn。
+   */
+  const ensureQuota = async (): Promise<boolean> => {
+    if (!user) return false;
+    let quota: { used: number; limit: number };
+    try {
+      quota = await userApi.getQuota(user.user_id);
+    } catch (error) {
+      console.error('查询额度失败:', error);
+      toast.error('网络异常，请重试');
+      return false;
+    }
+    if (quota.used < quota.limit) return true;
+    showQuotaPrompt();
+    return false;
+  };
+
   /**
    * 在某场会话里跑一轮：流式正文记在这场会话名下，结束后刷新这场会话。
    * 刷新只在它仍是当前会话时替换当前视图——用户中途切走不会被拽回来。
+   * 返回 false = 今日额度用完、后端没收这一轮（什么都没落库，刷新后界面和后端一致）。
    */
   const runTurn = async (
     conv: Conversation,
     start: (onChunk: (chunk: string) => void) => Promise<void>,
     failMessage: string
-  ) => {
+  ): Promise<boolean> => {
     const id = conv.conversation_id;
+    let accepted = true;
     startTurn(id);
     try {
       await start((chunk) => appendTurn(id, chunk));
     } catch (error: any) {
       console.error(failMessage, error);
-      toast.error(error?.message || failMessage);
+      if (error?.status === 429) {
+        accepted = false;
+        showQuotaPrompt();
+      } else {
+        toast.error(error?.message || failMessage);
+      }
     }
     let refreshed: Conversation | null = null;
     try {
@@ -347,6 +389,7 @@ const App: React.FC = () => {
       console.error('刷新对话失败:', error);
     }
     finishTurn(id, refreshed);
+    return accepted;
   };
 
   const handleAstrologyProfileSubmit = async (profile: UserProfile) => {
@@ -373,7 +416,8 @@ const App: React.FC = () => {
     setShowAstrologyProfileModal(false);
   };
 
-  const handleSendMessage = async (content: string) => {
+  /** 返回 false = 今日额度用完、这句没发出去：没落库，刷新后也不在对话里，交回输入框 */
+  const handleSendMessage = async (content: string): Promise<boolean | void> => {
     const conv = currentConversation;
     if (!conv || conv.conversation_id in liveTurns) return;
 
@@ -383,7 +427,7 @@ const App: React.FC = () => {
       content,
       timestamp: new Date().toISOString(),
     });
-    await runTurn(conv, (onChunk) => turnApi(conv.session_type).sendMessage(conv.conversation_id, content, onChunk), '发送失败，请重试');
+    return runTurn(conv, (onChunk) => turnApi(conv.session_type).sendMessage(conv.conversation_id, content, onChunk), '发送失败，请重试');
   };
 
   const handleReadyToDraw = () => setShowCardDrawer(true);
@@ -431,7 +475,9 @@ const App: React.FC = () => {
   };
 
   // 「继续这段对话」:关弹窗,把 daily 对话设为当前会话(后续消息走 tarot 链路)
-  const handleContinueDailyConversation = async (conversationId: string) => {
+  // continuing = 今天的签接着聊：和新开对话一样先看额度，用完就提示、不进对话。回看往日对话不查
+  const handleContinueDailyConversation = async (conversationId: string, continuing: boolean) => {
+    if (continuing && !(await ensureQuota())) return;
     setShowDailyModal(false);
     try {
       const conv = await conversationApi.get(conversationId);

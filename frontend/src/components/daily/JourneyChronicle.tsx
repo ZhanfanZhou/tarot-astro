@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, RefreshCw, Feather } from 'lucide-react';
+import { X, Feather } from 'lucide-react';
 import Markdown from '../Markdown';
 import { dailyApi } from '@/services/api';
 import { toast } from '@/stores/useToastStore';
@@ -33,8 +33,7 @@ interface JourneyChronicleProps {
 /**
  * 心灵奇旅的卷宗:写过的每一篇都留在这里,按时间成卷。
  *
- * 只读——旅程是一次性的记述,不能续写、不能对话,写过的篇目连重生成都不给;
- * 只有今天那一篇允许重写(素材还在变)。
+ * 只读——旅程是一次性的记述,不能续写、不能对话,写过的篇目不能重写;一天只写一篇。
  */
 const JourneyChronicle: React.FC<JourneyChronicleProps> = ({
   isOpen,
@@ -73,11 +72,11 @@ const JourneyChronicle: React.FC<JourneyChronicleProps> = ({
     }
   }, [isOpen, load]);
 
-  const write = async (force: boolean) => {
+  const write = async () => {
     setWriting(true);
     setDraft('');
     try {
-      await dailyApi.journey(userId, todayDate, force, (chunk) =>
+      await dailyApi.journey(userId, todayDate, (chunk) =>
         setDraft((prev) => prev + chunk)
       );
       await load();
@@ -91,7 +90,6 @@ const JourneyChronicle: React.FC<JourneyChronicleProps> = ({
 
   const current = entries[selected];
   const total = entries.length;
-  const isToday = current?.generated_on === todayDate;
   const hasToday = entries.some((e) => e.generated_on === todayDate);
 
   return (
@@ -252,16 +250,6 @@ const JourneyChronicle: React.FC<JourneyChronicleProps> = ({
                           {formatRange(current.date_range)}
                         </span>
                       </div>
-                      {isToday && (
-                        <button
-                          onClick={() => write(true)}
-                          className="inline-flex items-center gap-1 text-[11px] transition-colors hover:text-white"
-                          style={{ color: 'var(--ivory-faint)' }}
-                        >
-                          <RefreshCw size={11} />
-                          重写今日这一篇
-                        </button>
-                      )}
                     </div>
                     <span
                       aria-hidden
@@ -296,7 +284,7 @@ const JourneyChronicle: React.FC<JourneyChronicleProps> = ({
                     </p>
                     {ready && !loading && (
                       <button
-                        onClick={() => write(false)}
+                        onClick={write}
                         className="mt-5 px-5 py-2 rounded-lg font-display text-sm tracking-[0.16em] transition-colors"
                         style={{
                           color: 'var(--gold)',
@@ -324,7 +312,7 @@ const JourneyChronicle: React.FC<JourneyChronicleProps> = ({
                 </p>
                 {ready && !hasToday && !writing && (
                   <button
-                    onClick={() => write(false)}
+                    onClick={write}
                     className="flex-shrink-0 font-display text-[11px] tracking-[0.16em] transition-colors hover:text-white"
                     style={{ color: 'var(--gold)' }}
                   >

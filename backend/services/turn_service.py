@@ -65,7 +65,11 @@ async def stream_turn(
         else:
             raise HTTPException(status_code=400, detail="没有可以继续的内容")
 
-    await RateLimitService.check_and_consume(current_user)
+    # 用户开口说话才看额度；resume 是抽牌/补资料之后的那段解读，只计数不拦
+    if user_content is not None:
+        await RateLimitService.check_and_consume(current_user)
+    else:
+        await RateLimitService.consume(current_user)
     for msg in appended:
         conversation = await ConversationService.append_message(conversation_id, msg)
 

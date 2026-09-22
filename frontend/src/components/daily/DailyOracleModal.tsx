@@ -21,7 +21,8 @@ interface DailyOracleModalProps {
   overview: DailyOverview | null;
   onClose: () => void;
   onRefreshOverview: () => Promise<void>;
-  onContinueConversation: (conversationId: string) => void;
+  /** continuing = 今天的签接着聊（要查额度）；false = 回看往日对话 */
+  onContinueConversation: (conversationId: string, continuing: boolean) => void;
   onOpenJourney: () => void;
 }
 
@@ -341,7 +342,7 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
                     {/* 继续对话 */}
                     {selectedView?.conversation_exists && reading !== undefined && reading !== null && reading !== '' && (
                       <button
-                        onClick={() => onContinueConversation(record.conversation_id)}
+                        onClick={() => onContinueConversation(record.conversation_id, isToday)}
                         className="mt-5 px-7 py-2.5 rounded-xl font-display tracking-[0.15em] text-sm transition-all hover:brightness-110"
                         style={{
                           color: '#1a1407',

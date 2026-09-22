@@ -324,7 +324,7 @@ class DailyService:
 
     @staticmethod
     async def save_journey(user_id: str, generated_on: str, text: str) -> dict:
-        """落一篇心灵奇旅。同一天重新生成就地覆盖,篇目不会越攒越多。"""
+        """落一篇心灵奇旅。一天最多一篇:同一天已有的那篇先剔掉再落。"""
         records, readings = await DailyService.journey_material(
             user_id, date.fromisoformat(generated_on))
         data = await DailyService._read_all()

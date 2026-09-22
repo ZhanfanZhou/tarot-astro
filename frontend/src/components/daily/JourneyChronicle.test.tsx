@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 
-// 卷宗只读:写过的篇目按卷排开,今天那篇之外没有任何改写入口。
+// 卷宗只读:写过的篇目按卷排开,没有任何改写入口(一天只写一篇)。
 const journeys = vi.fn();
 
 vi.mock('@/services/api', () => ({
@@ -20,7 +20,7 @@ const entry = (generated_on: string, date_range: string, text: string) => ({
 beforeEach(() => journeys.mockReset());
 
 describe('JourneyChronicle', () => {
-  it('把写过的篇目按卷排开,只有今天那篇能重写', async () => {
+  it('把写过的篇目按卷排开,哪一篇都不能重写', async () => {
     journeys.mockResolvedValue({
       entries: [
         entry(TODAY, '2026-09-05 ~ 2026-09-19', '你从一张宝剑三出发……'),
@@ -37,9 +37,9 @@ describe('JourneyChronicle', () => {
     expect(screen.getAllByText('卷二').length).toBeGreaterThan(0);
     expect(screen.getByText('卷一')).toBeInTheDocument();
     expect(screen.getAllByText('9月5日 — 9月19日').length).toBeGreaterThan(0);
-    // 只读:整个卷宗里没有输入框,改写只对今天那一篇开放
+    // 只读:整个卷宗里没有输入框,今天那一篇也不能重写
     expect(document.querySelector('textarea')).toBeNull();
-    expect(screen.getByText('重写今日这一篇')).toBeInTheDocument();
+    expect(screen.queryByText('重写今日这一篇')).toBeNull();
   });
 
   it('今天聊过但还没归档时说明一句', async () => {

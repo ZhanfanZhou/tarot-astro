@@ -173,7 +173,7 @@ def test_journey_is_a_single_generation_pushed_whole(env, monkeypatch):
 
 
 def test_journeys_are_kept_for_reading_back(env, monkeypatch):
-    """写过的每一篇都留着可回顾；同一天重新生成覆盖当天那篇，不会越攒越多。"""
+    """写过的每一篇都留着可回顾；一天只写一篇，同一天再请求就是回放，不重写。"""
     from services.daily_service import DailyService
 
     async def _prompt(*a, **k):
@@ -187,14 +187,34 @@ def test_journeys_are_kept_for_reading_back(env, monkeypatch):
     env.post(f"/api/daily/{USER_ID}/journey", params={"date": yesterday})
     _install(monkeypatch, "今天写下的那一篇。")
     env.post(f"/api/daily/{USER_ID}/journey", params={"date": today})
-    _install(monkeypatch, "今天重写的那一篇。")
-    env.post(f"/api/daily/{USER_ID}/journey", params={"date": today, "force": True})
+    prov = _install(monkeypatch, "今天重写的那一篇。")
+    again = env.post(f"/api/daily/{USER_ID}/journey", params={"date": today})
+    assert "今天写下的那一篇。" in again.text and prov.prompts == []
 
     body = env.get(f"/api/daily/{USER_ID}/journeys", params={"date": today}).json()
     assert [(e["generated_on"], e["text"]) for e in body["entries"]] == [
-        (today, "今天重写的那一篇。"),       # 新→旧，当天那篇被覆盖
+        (today, "今天写下的那一篇。"),       # 新→旧
         (yesterday, "昨天写下的那一篇。"),
     ]
+    assert _usage() == 2
+
+
+def test_draw_and_journey_are_not_blocked_when_quota_exhausted(env, monkeypatch):
+    """日签抽签、心灵奇旅都是一天一次的单次生成：额度用完也放行，只是照样记一次。"""
+    import services.rate_limit_service as rl_mod
+    from services.daily_service import DailyService
+
+    async def _prompt(*a, **k):
+        return "（心灵奇旅提示词）"
+
+    monkeypatch.setattr(rl_mod, "USER_DAILY_MESSAGE_LIMIT", 0)
+    monkeypatch.setattr(DailyService, "build_journey_prompt", _prompt)
+    _install(monkeypatch, "星星在今夜为你点灯。")
+    today = date.today().isoformat()
+
+    assert env.post(f"/api/daily/{USER_ID}/draw", json={"effective_date": today}).status_code == 200
+    assert env.post(f"/api/daily/{USER_ID}/journey", params={"date": today}).status_code == 200
+    assert _usage() == 2
 
 
 def test_journeys_flag_today_conversations_not_yet_archived(env, monkeypatch):

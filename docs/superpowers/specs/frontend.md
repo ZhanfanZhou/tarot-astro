@@ -55,8 +55,9 @@ spring 滑入；per-deck 的 accent 只驱动细微辉光。
   样式映射到设计体系（`h2/h3` 金色小型大写标题、`strong` 亮金、`blockquote` 金色左线…）。
   **用户消息是纯文本**，不走 markdown。
 - **Composer** 是自动增高的 textarea：Enter 发送、Shift+Enter 换行，长到约 6 行后滚动。
+  发出去的那句被后端以额度用完拒收（没落库）时，字回到输入框（见 auth-and-limits.md）。
 - **没有原生弹窗**：失败提示走 `useToastStore` + `<Toaster/>`，确认走 promise 形态的
-  `useConfirmStore` + `ConfirmDialog`。代码里不应再出现 `alert` / `window.confirm`。
+  `useConfirmStore` + `ConfirmDialog`（`hideCancel` = 只留确认一个按钮，纯告知用）。代码里不应再出现 `alert` / `window.confirm`。
 - **表单弹窗一套件** `components/ui/form.tsx`：登录 / 注册（`AuthModal`）、星盘资料（`AstrologyProfileModal`）、
   转为注册用户（`ConvertToRegisteredModal`）都用它，新表单也用它。
   外壳 `ModalShell` = 压暗底 + 发丝金边面板、顶上一层淡金光、右上发丝圆关闭；
@@ -64,7 +65,8 @@ spring 滑入；per-deck 的 accent 只驱动细微辉光。
   输入框同对话输入坞（淡金发丝边，聚焦变亮晕金），下拉换成金色折角、没选时字是淡的；
   单选（性别）是 `ChoicePill`，选中 = 金边亮起 + 淡金底；主按钮 `PrimaryButton` 是暗底金边胶囊，
   次按钮 `GhostButton` 是细边胶囊，**次要在左、主要在右**。
-  登录弹窗的第一屏是两扇「门」（游客 = 月牙，注册 = 连起来的星，注册那扇金边更亮）+ 一条「已有账号？立即登录」。
+  登录弹窗的第一屏是两扇「门」（游客 = 月牙，注册 = 连起来的星，注册那扇金边更亮、写「更好的占卜体验 · 更多使用额度」）
+  + 一条「已有账号？立即登录」。
 - **最近的占卜** `RecentArc`：一段右括号形的弧线（拱高 40px），弧线不动，占卜列表沿弧滚、一次停一场。
   每一场按离「选中线」的远近沿弧往左收、变淡变小，经过选中线的那一场亮起来（点放大发光、标题变亮）。
   标题「RECENT · 最近的占卜」和搜索（只筛标题）钉在弧线起点、不参与滚动；今天 / 本周 / 更早是压在弧线上的小标签。

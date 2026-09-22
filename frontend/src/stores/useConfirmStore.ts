@@ -5,6 +5,8 @@ export interface ConfirmOptions {
   message: string;
   confirmText?: string;
   cancelText?: string;
+  /** 只留确认一个按钮（纯告知，没有可选的另一条路） */
+  hideCancel?: boolean;
   tone?: 'default' | 'danger';
 }
 

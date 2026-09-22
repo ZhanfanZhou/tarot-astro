@@ -92,7 +92,7 @@ const AuthModal: React.FC<AuthModalProps> = ({
   const header = {
     choice: { eyebrow: 'Welcome', subtitle: '选一种方式入殿' },
     guest: { eyebrow: 'Guest · 游客模式', subtitle: '快速开始，但不保存历史记录' },
-    register: { eyebrow: 'Register · 注册账号', subtitle: '保存历史记录，随时查看' },
+    register: { eyebrow: 'Register · 注册账号', subtitle: '更好的占卜体验 · 更多使用额度' },
     login: { eyebrow: 'Sign in · 登录', subtitle: '回到你的占卜记录' },
   }[mode];
 
@@ -112,7 +112,7 @@ const AuthModal: React.FC<AuthModalProps> = ({
           <Door
             en="Register"
             title="注册账号"
-            line="保存历史记录，随时查看"
+            line="更好的占卜体验 · 更多使用额度"
             visual={<RegisterGlyph />}
             featured
             onClick={() => handleModeChange('register')}

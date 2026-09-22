@@ -46,7 +46,7 @@ OpenAI 的 `assistant.tool_calls` / `role=tool`），不推断、不伪造任何
 所有入口（`/api/tarot/*`、`/api/astrology/*`）都是薄壳，转 `turn_service`：
 
 ```
-校验（归属 / 旧会话）→ 收口上一轮没做完的 interrupt → 扣额度
+校验（归属 / 旧会话）→ 收口上一轮没做完的 interrupt → 额度（/message 用完就 429，/resume 只计数）
 → Agent Loop → 逐条落库 → SSE 推正文
 ```
 
