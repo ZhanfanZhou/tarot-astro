@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Copy, Check, X } from 'lucide-react';
-import type { Message, SessionType } from '@/types';
+import { User, Copy, Check, X, ThumbsUp, ThumbsDown, Share2 } from 'lucide-react';
+import type { FeedbackRating, Message, SessionType } from '@/types';
 import { getCardInfo } from '@/config/tarotCards';
 import { useDeckWallet } from '@/stores/useDeckWallet';
 import { resolveActiveCardImage } from '@/data/activeDeckImage';
 import Markdown from './Markdown';
 import ChatInvite from './ChatInvite';
+import ShareDialog from './ShareDialog';
 
 interface ChatMessageProps {
   message: Message;
@@ -26,6 +27,9 @@ interface ChatMessageProps {
   showProfileButton?: boolean; // 是否显示补充资料按钮
   onReadyToFillProfile?: () => void; // 点击补充资料按钮的回调
   isStreaming?: boolean; // 正在流式输出（显示光标 + 纯文本）
+  /** 用户对这条回复的评价；传了 onFeedback 才显示赞 / 踩（只给已落库的回复） */
+  feedback?: FeedbackRating;
+  onFeedback?: (rating: FeedbackRating | null) => void;
 }
 
 const THINKING_MESSAGES = [
@@ -51,6 +55,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   showProfileButton = false,
   onReadyToFillProfile,
   isStreaming = false,
+  feedback,
+  onFeedback,
 }) => {
   const isUser = message.role === 'user';
   // 都不是「谁说的话」：tool 是工具结果（牌面由之后的回复画），system 只在旧版本对话里有
@@ -59,6 +65,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   const spread = message.tarot_cards?.length ? message.draw_request : drawnRequest;
   const trimmedContent = message.content?.trim() ?? '';
   const [copied, setCopied] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [previewCard, setPreviewCard] = useState<{ card: any; cardInfo: any } | null>(null);
 
   const handleCopy = async () => {
@@ -242,10 +249,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
           <span className="text-[11px] tracking-[0.14em]" style={{ color: 'var(--ivory-faint)' }}>
             {new Date(message.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
           </span>
+          {/* 复制 / 赞 / 踩常驻（手机上没有悬停）；点过的那个亮起，再点一次取消 */}
           {!isUser && trimmedContent && !isStreaming && (
             <button
               onClick={handleCopy}
-              className="flex items-center gap-1 text-[11px] tracking-wide opacity-0 group-hover:opacity-60 hover:!opacity-100 focus:opacity-100 transition-opacity"
+              className="flex items-center gap-1 text-[11px] tracking-wide opacity-60 hover:opacity-100 focus:opacity-100 transition-opacity"
               style={{ color: copied ? 'var(--gold)' : 'var(--ivory-faint)' }}
               aria-label="复制解读"
             >
@@ -253,8 +261,39 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
               {copied ? '已复制' : '复制'}
             </button>
           )}
+          {!isUser && trimmedContent && !isStreaming && onFeedback &&
+            (['up', 'down'] as const).map((rating) => {
+              const active = feedback === rating;
+              const Icon = rating === 'up' ? ThumbsUp : ThumbsDown;
+              return (
+                <button
+                  key={rating}
+                  onClick={() => onFeedback(active ? null : rating)}
+                  className={`flex items-center text-[11px] transition-opacity ${
+                    active ? 'opacity-100' : 'opacity-60 hover:opacity-100 focus:opacity-100'
+                  }`}
+                  style={{ color: active ? oracleAccent : 'var(--ivory-faint)' }}
+                  aria-label={rating === 'up' ? '赞' : '踩'}
+                  aria-pressed={active}
+                >
+                  <Icon size={12} fill={active ? 'currentColor' : 'none'} />
+                </button>
+              );
+            })}
+          {!isUser && trimmedContent && !isStreaming && onFeedback && (
+            <button
+              onClick={() => setSharing(true)}
+              className="flex items-center text-[11px] opacity-60 hover:opacity-100 focus:opacity-100 transition-opacity"
+              style={{ color: 'var(--ivory-faint)' }}
+              aria-label="分享"
+            >
+              <Share2 size={12} />
+            </button>
+          )}
         </div>
       </div>
+
+      <ShareDialog open={sharing} excerpt={trimmedContent.slice(0, 120)} onClose={() => setSharing(false)} />
 
       {/* 大图预览 — 点击牌面查看，不改变对话框中的牌朝向 */}
       {createPortal(

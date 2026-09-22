@@ -93,6 +93,8 @@ export default function ConversationsPanel() {
                   {c.archived_at && (
                     <span className="archived-badge" title={`用户于 ${fmtTime(c.archived_at)} 删除`}>已归档</span>
                   )}
+                  {c.feedback_up > 0 && <span className="feedback-badge up" title="被点赞的回复">👍 {c.feedback_up}</span>}
+                  {c.feedback_down > 0 && <span className="feedback-badge down" title="被点踩的回复">👎 {c.feedback_down}</span>}
                   {c.phase === 'opening' && <span className="phase-badge">开场幕</span>}
                   <span className="admin-dim">{TYPE_LABELS[c.session_type] || c.session_type}</span>
                 </span>
@@ -140,9 +142,26 @@ export default function ConversationsPanel() {
             {detail.messages.map((m, i) => (
               <div key={i} className={`msg msg-${m.role}`}>
                 <div className="admin-dim">
-                  {m.role === 'user' ? '用户' : m.role === 'assistant' ? '占卜师' : '系统'} · {fmtTime(m.timestamp)}
+                  {m.role === 'user' ? '用户' : m.role === 'assistant' ? '占卜师'
+                    : m.role === 'tool' ? `工具结果${m.tool_name ? ` · ${m.tool_name}` : ''}` : '系统'} · {fmtTime(m.timestamp)}
+                  {detail.feedback?.[i] === 'up' && <span className="feedback-badge up">👍 用户点赞</span>}
+                  {detail.feedback?.[i] === 'down' && <span className="feedback-badge down">👎 用户点踩</span>}
                 </div>
-                <div className="content">{m.content}</div>
+                {m.content && <div className="content">{m.content}</div>}
+                {m.reasoning && (
+                  <details className="reasoning">
+                    <summary>思考过程</summary>
+                    <div className="content">{m.reasoning}</div>
+                  </details>
+                )}
+                {m.tool_calls?.map((call) => (
+                  <div key={call.id} className="tool-call">
+                    <div className="tool-call-name">调用 {call.name}</div>
+                    {Object.keys(call.args ?? {}).length > 0 && (
+                      <pre>{JSON.stringify(call.args, null, 2)}</pre>
+                    )}
+                  </div>
+                ))}
                 {m.tarot_cards && m.tarot_cards.length > 0 && (
                   <div className="cards">
                     {m.tarot_cards.map((card, j) => (

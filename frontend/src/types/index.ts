@@ -82,6 +82,9 @@ export interface Message {
   draw_request?: DrawCardsRequest;
 }
 
+/** 对占卜师某条回复的评价；不评价就是没有这一项 */
+export type FeedbackRating = 'up' | 'down';
+
 export interface Conversation {
   conversation_id: string;
   user_id: string;

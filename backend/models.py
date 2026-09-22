@@ -157,6 +157,14 @@ class ResumeRequest(BaseModel):
     conversation_id: str
 
 
+class MessageFeedbackRequest(BaseModel):
+    """对占卜师某一条回复点赞 / 点踩；rating=None 是取消。只进 message_feedback 表，不进会话。
+    message_timestamp 是那条消息的 timestamp，和下标一起核对，防止点到别的消息上。"""
+    message_index: int
+    message_timestamp: str
+    rating: Optional[Literal["up", "down"]] = None
+
+
 class DrawCardsResponse(BaseModel):
     cards: List[TarotCard]
     conversation_id: str

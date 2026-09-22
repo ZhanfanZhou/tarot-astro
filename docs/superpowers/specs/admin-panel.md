@@ -21,15 +21,15 @@ UI 从简，不做视觉投入。
 |---|---|
 | `POST /login` | 密码换 admin token |
 | `GET /stats` | 概览指标（只算正常会话，不含已归档） |
-| `GET /conversations?limit&offset&type` | 全局会话分页（倒序，可按类型过滤，带开场幕相位）。用户删掉后归档的也在里面，和正常会话同一个顺序，带 `archived_at` |
-| `GET /conversations/{id}` | 完整会话（含 messages），供详情渲染；已归档的也能取，带 `archived_at` |
+| `GET /conversations?limit&offset&type` | 全局会话分页（倒序，可按类型过滤，带开场幕相位）。用户删掉后归档的也在里面，和正常会话同一个顺序，带 `archived_at`；`feedback_up` / `feedback_down` 是这一场被赞 / 被踩的回复条数 |
+| `GET /conversations/{id}` | 完整会话（含 messages），供详情渲染；已归档的也能取，带 `archived_at`；`feedback` = `{消息下标: up|down}` |
 | `GET /users?limit&offset` | 用户列表 + 每人会话数 + 最后活跃时间（不含已归档） |
 | `GET /usage` · `DELETE /usage/{user_id}` | 今日各身份已用 LLM 次数 + 限额；按人清零 |
 | `GET /prompts` | 整页一次取全：`items`（每份的生效内容 / 是否覆盖 / 更新时间 / 字符数）+ `stages`（按阶段分组的全部调用点） |
 | `PUT /prompts/{name}` · `DELETE /prompts/{name}` | 保存覆盖（原子写 + `.bak`）· 重置为默认 |
 | `GET /llm` · `PUT /llm/{agent}` · `DELETE /llm/{agent}` | 三个 Agent 的 provider / model 现状与可选清单 · 覆盖 · 撤销覆盖 |
 
-`StorageService` 只增只读查询，沿用现有影子列（`user_id` / `updated_at`）索引，**不改表结构**。
+`StorageService` 只增只读查询，沿用现有影子列（`user_id` / `updated_at`）索引，不改会话表结构；赞 / 踩读的是独立的 `message_feedback` 表（见[会话核心](conversation-core.md) §8）。
 
 ---
 
@@ -95,7 +95,7 @@ UI 从简，不做视觉投入。
 |---|---|
 | 登录 | 单密码输入框 |
 | 概览 | 指标数字一排 |
-| 会话 | 左列表（倒序 / 类型筛选 / 分页）+ 右详情（气泡区分角色，塔罗牌消息显示牌名 + 正逆位，开场幕会话带起手单卡片）；用户删掉的会话在列表和详情里标「已归档」（游客永久删除后人已不在，只显示 user_id）；窄屏堆叠 |
+| 会话 | 左列表（倒序 / 类型筛选 / 分页）+ 右详情（气泡区分角色，塔罗牌消息显示牌名 + 正逆位，开场幕会话带起手单卡片；占卜师那一轮发起的工具调用列出工具名 + 参数，推理内容可展开「思考过程」，工具结果标出是哪个工具——只调用不说话的那一轮因此不是空的）；用户删掉的会话在列表和详情里标「已归档」（游客永久删除后人已不在，只显示 user_id）；用户赞 / 踩过的：列表行上标 👍n / 👎n，详情里那条消息的抬头标「用户点赞 / 用户点踩」，归档的一样；窄屏堆叠 |
 | Prompt | §3 的单一视图 |
 | 模型 | 三个 Agent 各自选 provider / model，可撤销回 `.env` |
 | 用量 | 今日计数表，可按人清零 |

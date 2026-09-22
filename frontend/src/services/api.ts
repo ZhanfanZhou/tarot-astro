@@ -3,6 +3,7 @@ import type {
   User,
   UserProfile,
   Conversation,
+  FeedbackRating,
   SessionType,
   TarotCard,
   DrawCardsRequest,
@@ -171,6 +172,26 @@ export const conversationApi = {
    */
   greeting: (conversationId: string, onChunk: (chunk: string) => void): Promise<void> =>
     streamTurn(`${API_BASE_URL}/api/conversations/${conversationId}/greeting`, {}, onChunk),
+
+  /** 本人在这场里点过的赞 / 踩：消息下标 → up / down */
+  getFeedback: async (conversationId: string): Promise<Record<number, FeedbackRating>> => {
+    const response = await api.get(`/api/conversations/${conversationId}/feedback`);
+    return response.data.feedback;
+  },
+
+  /** 点赞 / 点踩 / 取消（rating=null）。只记在评价表里，不进会话、不进模型上下文 */
+  setFeedback: async (
+    conversationId: string,
+    messageIndex: number,
+    messageTimestamp: string,
+    rating: FeedbackRating | null,
+  ): Promise<void> => {
+    await api.put(`/api/conversations/${conversationId}/feedback`, {
+      message_index: messageIndex,
+      message_timestamp: messageTimestamp,
+      rating,
+    });
+  },
 
   exit: async (conversationId: string): Promise<{ notebook_updated: boolean }> => {
     const response = await api.post(`/api/conversations/${conversationId}/exit`);

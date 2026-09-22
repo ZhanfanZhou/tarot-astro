@@ -26,7 +26,7 @@ import { userApi, conversationApi, tarotApi, astrologyApi, dailyApi } from './se
 import { getEffectiveDate } from './utils/dailyDate';
 import { energyPercent, quotaNotice } from './utils/quota';
 import { MessageRole, UserType } from './types';
-import type { Conversation, SessionType, DrawCardsRequest, Message, TarotCard, ToolCallRecord, UserProfile, DailyOverview, Quota } from './types';
+import type { Conversation, SessionType, DrawCardsRequest, FeedbackRating, Message, TarotCard, ToolCallRecord, UserProfile, DailyOverview, Quota } from './types';
 
 /** 会话末尾是一次还在等用户动手的调用（抽牌 / 补资料）→ 返回它。和后端 tool_turns.pending_interrupt 同一个判据。 */
 const INTERRUPT_TOOLS = new Set(['draw_tarot_cards', 'request_user_profile']);
@@ -98,6 +98,20 @@ const App: React.FC = () => {
       console.error('查询额度失败:', error);
     }
   }, []);
+
+  // 赞 / 踩：记着是哪场会话的，切走就不算数。拉取失败只是看不到之前点过的，照样能点
+  const [feedback, setFeedback] = useState<{ id: string; map: Record<number, FeedbackRating> } | null>(null);
+  const currentConversationId = currentConversation?.conversation_id;
+  useEffect(() => {
+    if (!currentConversationId) return;
+    let stale = false;
+    conversationApi
+      .getFeedback(currentConversationId)
+      .then((map) => { if (!stale) setFeedback({ id: currentConversationId, map }); })
+      .catch((error) => console.error('加载评价失败:', error));
+    return () => { stale = true; };
+  }, [currentConversationId]);
+  const feedbackMap = feedback && feedback.id === currentConversationId ? feedback.map : {};
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -323,6 +337,28 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('删除对话失败:', error);
       toast.error('删除失败，请重试');
+    }
+  };
+
+  // 点赞 / 点踩：先亮起来，没记上就退回原样
+  const handleFeedback = async (idx: number, message: Message, rating: FeedbackRating | null) => {
+    if (!currentConversationId) return;
+    const id = currentConversationId;
+    const apply = (r: FeedbackRating | null) =>
+      setFeedback((prev) => {
+        const map = { ...(prev?.id === id ? prev.map : {}) };
+        if (r) map[idx] = r;
+        else delete map[idx];
+        return { id, map };
+      });
+    const before = feedbackMap[idx] ?? null;
+    apply(rating);
+    try {
+      await conversationApi.setFeedback(id, idx, message.timestamp, rating);
+    } catch (error) {
+      console.error('评价失败:', error);
+      apply(before);
+      toast.error('评价没记上，请重试');
     }
   };
 
@@ -749,6 +785,12 @@ const App: React.FC = () => {
                       onReadyToDraw={handleReadyToDraw}
                       showProfileButton={isLast && needsProfile}
                       onReadyToFillProfile={handleReadyToFillProfile}
+                      feedback={feedbackMap[idx]}
+                      onFeedback={
+                        message.role === MessageRole.ASSISTANT
+                          ? (rating) => handleFeedback(idx, message, rating)
+                          : undefined
+                      }
                     />
                   );
                 })}

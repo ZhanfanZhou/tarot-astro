@@ -140,6 +140,43 @@ class StorageService:
                 row = await cur.fetchone()
         return (Conversation(**json.loads(row["data"])), row["archived_at"]) if row else None
 
+    # ── 点赞 / 点踩 ───────────────────────────────────────────────────────
+    @staticmethod
+    async def set_message_feedback(
+        conversation_id: str, message_index: int, message_timestamp: str,
+        user_id: str, rating: Optional[str],
+    ):
+        """记下（rating 为 up/down）或取消（None）对某条回复的评价。只动 message_feedback。"""
+        async with get_db() as db:
+            if rating is None:
+                await db.execute(
+                    "DELETE FROM message_feedback WHERE conversation_id=? AND message_index=?",
+                    (conversation_id, message_index),
+                )
+            else:
+                await db.execute(
+                    "INSERT INTO message_feedback"
+                    "(conversation_id, message_index, message_timestamp, user_id, rating, updated_at) "
+                    "VALUES(?,?,?,?,?,?) "
+                    "ON CONFLICT(conversation_id, message_index) DO UPDATE SET "
+                    "message_timestamp=excluded.message_timestamp, user_id=excluded.user_id, "
+                    "rating=excluded.rating, updated_at=excluded.updated_at",
+                    (conversation_id, message_index, message_timestamp, user_id, rating,
+                     datetime.utcnow().isoformat()),
+                )
+            await db.commit()
+
+    @staticmethod
+    async def get_conversation_feedback(conversation_id: str) -> dict:
+        """{message_index: 'up' | 'down'}，没评价过的消息不在里面。"""
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT message_index, rating FROM message_feedback WHERE conversation_id=?",
+                (conversation_id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        return {r["message_index"]: r["rating"] for r in rows}
+
     # ── 后台管理只读查询 ──────────────────────────────────────────────────
     @staticmethod
     async def get_admin_stats() -> dict:
@@ -182,7 +219,8 @@ class StorageService:
     ) -> tuple:
         """全局会话摘要（不含消息全文），updated_at 倒序。返回 (items, total)。
 
-        用户删掉后归档的也在里面，和正常会话按同一个顺序排，带 archived_at（正常会话为 None）。"""
+        用户删掉后归档的也在里面，和正常会话按同一个顺序排，带 archived_at（正常会话为 None）。
+        feedback_up / feedback_down 是这一场里被点赞 / 点踩的回复条数。"""
         where, params = [], []
         if session_type:
             where.append("json_extract(data,'$.session_type')=?")
@@ -207,8 +245,14 @@ class StorageService:
                            json_extract(data,'$.title')        AS title,
                            json_extract(data,'$.created_at')   AS created_at,
                            COALESCE(json_array_length(data,'$.messages'),0) AS message_count,
-                           COALESCE(json_extract(data,'$.phase'),'reading') AS phase
-                    FROM {src} {w}
+                           COALESCE(json_extract(data,'$.phase'),'reading') AS phase,
+                           (SELECT COUNT(*) FROM message_feedback f
+                             WHERE f.conversation_id = s.conversation_id
+                               AND f.rating = 'up')   AS feedback_up,
+                           (SELECT COUNT(*) FROM message_feedback f
+                             WHERE f.conversation_id = s.conversation_id
+                               AND f.rating = 'down') AS feedback_down
+                    FROM {src} AS s {w}
                     ORDER BY updated_at DESC LIMIT ? OFFSET ?""",
                 params + [limit, offset],
             ) as cur:

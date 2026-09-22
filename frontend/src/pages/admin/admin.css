@@ -80,6 +80,13 @@
   font-size: 11px; color: #a39a91; border: 1px solid #55504a;
   border-radius: 4px; padding: 0 5px; line-height: 1.6; white-space: nowrap;
 }
+/* 用户对某条回复的赞 / 踩:列表里是条数,详情里挂在那条消息的抬头上 */
+.feedback-badge {
+  font-size: 11px; border-radius: 4px; padding: 0 5px; line-height: 1.6; white-space: nowrap;
+}
+.admin-conv-detail .feedback-badge { margin-left: 8px; }
+.feedback-badge.up { color: #8fc79a; border: 1px solid #3f6b48; }
+.feedback-badge.down { color: #e08a8a; border: 1px solid #7a3d3d; }
 /* 策略单卡片:开场读人交付物,古董金调,克制,置于消息列表之前 */
 .strategy-brief {
   background: #1c1926; border: 1px solid #4a4358; border-radius: 8px;
@@ -97,6 +104,17 @@
 .admin-conv-detail .msg-assistant { border-left: 3px solid #cfa94a; }
 .admin-conv-detail .msg-system { border-left: 3px solid #7d7788; opacity: 0.8; }
 .admin-conv-detail .content { white-space: pre-wrap; word-break: break-word; margin-top: 6px; line-height: 1.6; }
+/* assistant 一轮里发起的工具调用与推理:正文之外的记录,不然只调用不说话的那一轮看着是空的 */
+.admin-conv-detail .msg-tool { border-left: 3px solid #7d7788; opacity: 0.85; }
+.admin-conv-detail .tool-call {
+  margin-top: 8px; border: 1px dashed #4a4358; border-radius: 6px; padding: 6px 8px;
+}
+.admin-conv-detail .tool-call-name { font-size: 12px; color: #cfa94a; }
+.admin-conv-detail .tool-call pre {
+  margin: 4px 0 0; font-size: 12px; white-space: pre-wrap; word-break: break-word; color: #c9c2b8;
+}
+.admin-conv-detail .reasoning { margin-top: 8px; font-size: 12px; color: #a39a91; }
+.admin-conv-detail .reasoning summary { cursor: pointer; }
 .admin-conv-detail .cards { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
 .card-chip {
   background: #2a2536; border: 1px solid #4a4358; border-radius: 999px;

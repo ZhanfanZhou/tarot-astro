@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List
 from models import (
-    Conversation, CreateConversationRequest, MessageRole,
+    Conversation, CreateConversationRequest, MessageFeedbackRequest, MessageRole,
     UpdateConversationTitleRequest, User,
 )
 from services.conversation_service import ConversationService
@@ -100,6 +100,46 @@ async def get_user_conversations(
         return conversations
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{conversation_id}/feedback")
+async def get_feedback(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """这场里本人点过的赞 / 踩：{"feedback": {下标: "up" | "down"}}（仅本人）。"""
+    conversation = await ConversationService.get_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    ensure_owner(current_user, conversation.user_id)
+    return {"feedback": await StorageService.get_conversation_feedback(conversation_id)}
+
+
+@router.put("/{conversation_id}/feedback")
+async def set_feedback(
+    conversation_id: str,
+    request: MessageFeedbackRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """对占卜师的某一条回复点赞 / 点踩 / 取消（仅本人）。
+
+    只写 message_feedback 表：会话记录不动、不进模型上下文、不扣额度，
+    和正在跑的一轮互不影响。只收有正文的 assistant 消息；下标和时间戳对不上就 409。
+    """
+    conversation = await ConversationService.get_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    ensure_owner(current_user, conversation.user_id)
+    idx = request.message_index
+    message = conversation.messages[idx] if 0 <= idx < len(conversation.messages) else None
+    if message is None or message.timestamp != request.message_timestamp:
+        raise HTTPException(status_code=409, detail="找不到这条消息，请刷新后再试")
+    if message.role != MessageRole.ASSISTANT or not message.content.strip():
+        raise HTTPException(status_code=400, detail="只能评价占卜师的回复")
+    await StorageService.set_message_feedback(
+        conversation_id, idx, message.timestamp, current_user.user_id, request.rating
+    )
+    return {"message_index": idx, "rating": request.rating}
 
 
 @router.put("/title", response_model=Conversation)

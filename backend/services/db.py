@@ -45,6 +45,21 @@ CREATE TABLE IF NOT EXISTS archived_conversations (
     archived_at     TEXT NOT NULL,
     data            TEXT NOT NULL
 );
+
+-- 用户给占卜师某一条回复点的赞/踩。单独一张表、不进会话的 data：会话记录（也就是模型
+-- 看到的历史）一个字节都不动，正在跑的一轮保存会话时也不会和它互相覆盖。
+-- 一条消息用它在 messages 里的下标认（消息只追加，下标不变），时间戳一并记下，
+-- 写入时核对，对不上就拒收。会话被用户删掉挪进归档表后，这里的记录照样留着给后台看。
+-- 取消 = 删掉这一行。
+CREATE TABLE IF NOT EXISTS message_feedback (
+    conversation_id   TEXT NOT NULL,
+    message_index     INTEGER NOT NULL,
+    message_timestamp TEXT NOT NULL,
+    user_id           TEXT NOT NULL,
+    rating            TEXT NOT NULL,   -- up / down
+    updated_at        TEXT NOT NULL,
+    PRIMARY KEY (conversation_id, message_index)
+);
 """
 
 _initialized = False

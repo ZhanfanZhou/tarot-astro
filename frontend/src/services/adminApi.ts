@@ -60,12 +60,17 @@ export interface AdminConvSummary {
   user_type: string | null;
   phase?: 'opening' | 'reading';
   archived_at: string | null;   // 用户删掉后归档的时间；正常会话为 null
+  feedback_up: number;          // 被点赞的回复条数
+  feedback_down: number;        // 被点踩的回复条数
 }
 
 export interface AdminMessage {
   role: string;
   content: string;
   timestamp?: string;
+  tool_calls?: Array<{ id: string; name: string; args: Record<string, unknown> }> | null;  // assistant 发起的调用
+  reasoning?: string | null;     // assistant：思考模型那一轮的推理（只在带调用时记）
+  tool_name?: string | null;     // tool：这是哪个工具的结果
   tarot_cards?: Array<{ card_id: number; card_name: string; reversed: boolean }> | null;
 }
 
@@ -92,6 +97,7 @@ export interface AdminConversation {
   phase?: 'opening' | 'reading';
   strategy?: ReadingBrief | null;
   archived_at: string | null;
+  feedback: Record<string, 'up' | 'down'>;   // 消息下标 → 用户的评价，没评价的不在里面
 }
 
 export interface AdminUser {

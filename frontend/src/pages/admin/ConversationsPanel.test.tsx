@@ -7,6 +7,7 @@ const summary = (id: string, archived_at: string | null): AdminConvSummary => ({
   conversation_id: id, user_id: 'u1', updated_at: '2026-09-20T10:00:00', created_at: '2026-09-20T09:00:00',
   session_type: 'tarot', title: `标题-${id}`, message_count: 2,
   username: 'alice', nickname: null, user_type: 'registered', phase: 'reading', archived_at,
+  feedback_up: id === 'gone' ? 1 : 0, feedback_down: 0,
 });
 
 const ITEMS = [summary('live', null), summary('gone', '2026-09-21T08:30:00')];
@@ -14,7 +15,17 @@ const ITEMS = [summary('live', null), summary('gone', '2026-09-21T08:30:00')];
 const DETAIL: AdminConversation = {
   conversation_id: 'gone', user_id: 'u1', session_type: 'tarot', title: '标题-gone',
   created_at: '2026-09-20T09:00:00', updated_at: '2026-09-20T10:00:00',
-  messages: [{ role: 'user', content: '想问问工作' }], archived_at: '2026-09-21T08:30:00',
+  messages: [
+    { role: 'user', content: '想问问工作' },
+    {
+      role: 'assistant', content: '', reasoning: '先把牌抽出来',
+      tool_calls: [{ id: 't1', name: 'draw_tarot_cards', args: { spread_type: 'three_card' } }],
+    },
+    { role: 'tool', content: '{"success": true}', tool_name: 'draw_tarot_cards' },
+    { role: 'assistant', content: '牌面解读' },
+  ],
+  archived_at: '2026-09-21T08:30:00',
+  feedback: { '3': 'up' },
 };
 
 vi.mock('@/services/adminApi', async (orig) => ({
@@ -49,5 +60,32 @@ describe('ConversationsPanel', () => {
     const detail = container.querySelector('.admin-conv-detail') as HTMLElement;
     expect(within(detail).getByText('已归档 · 用户于 2026-09-21 08:30 删除')).toBeTruthy();
     expect(within(detail).getByText('想问问工作')).toBeTruthy();
+  });
+
+  it('只调用不说话的那一轮：显示调了什么、参数和思考过程；工具结果标出是哪个工具', async () => {
+    const { getByText, container } = render(<ConversationsPanel />);
+    await waitFor(() => getByText('标题-gone'));
+    fireEvent.click(getByText('标题-gone'));
+    await waitFor(() => container.querySelector('.admin-conv-detail'));
+    const detail = container.querySelector('.admin-conv-detail') as HTMLElement;
+
+    expect(within(detail).getByText('调用 draw_tarot_cards')).toBeTruthy();
+    expect(detail.querySelector('.tool-call pre')?.textContent).toContain('"spread_type": "three_card"');
+    expect(within(detail).getByText('先把牌抽出来')).toBeTruthy();
+    expect(within(detail).getByText(/工具结果 · draw_tarot_cards/)).toBeTruthy();
+  });
+
+  it('赞 / 踩：列表行上是条数，详情里挂在被评价的那条消息上', async () => {
+    const { getByText, container } = render(<ConversationsPanel />);
+    await waitFor(() => getByText('标题-gone'));
+    const rows = container.querySelectorAll('.admin-conv-list li');
+    expect(rows[0].querySelector('.feedback-badge')).toBeNull();
+    expect(rows[1].querySelector('.feedback-badge.up')?.textContent).toBe('👍 1');
+
+    fireEvent.click(getByText('标题-gone'));
+    await waitFor(() => container.querySelector('.admin-conv-detail'));
+    const msgs = container.querySelectorAll('.admin-conv-detail .msg');
+    expect(msgs[3].querySelector('.feedback-badge.up')?.textContent).toBe('👍 用户点赞');
+    expect([0, 1, 2].every((i) => !msgs[i].querySelector('.feedback-badge'))).toBe(true);
   });
 });

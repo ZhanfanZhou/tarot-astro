@@ -161,18 +161,36 @@ SSE 形状与 `/message` 一致，前端的等待体验因此和等一轮回复�
 
 ---
 
-## 8. 存储
+## 8. 赞 / 踩
+
+占卜师每条有正文的回复下面常驻「复制 / 赞 / 踩 / 分享」（分享暂时只是入口，点开弹窗写着还在筹备中）。可以都不点；点过的那个亮起，
+再点一次取消，点另一个就是改主意。流式中的回复还没落库，不出赞踩。
+
+- **不进会话**：记在单独的 `message_feedback` 表（主键 = 会话 id + 消息下标，另记那条消息的
+  timestamp），会话的 `data` 一个字节不动，模型看到的历史里没有它，也不扣额度。
+  一轮跑完整行保存会话时两者互不覆盖。
+- **怎么认消息**：消息只追加，下标不变。`PUT /api/conversations/{id}/feedback`
+  带 `message_index` + `message_timestamp` + `rating`（`up` / `down` / `null` = 取消）；
+  下标越界或时间戳对不上 409，不是有正文的 assistant 消息 400，仅本人。
+  `GET` 同一路径取本人在这场点过的 `{下标: up|down}`，前端进会话时拉一次，
+  点的时候先亮起，没记上就退回并提示。
+- **归档不影响**：用户删掉会话只挪 `conversations` 那一行，评价留着，后台照样看得到。
+- 后台怎么显示见 [后台管理](admin-panel.md) §5。
+
+---
+
+## 9. 存储
 
 | 数据 | 存哪 |
 |---|---|
-| 用户、会话、用户删掉的会话（`archived_conversations`） | `backend/data/app.db`（SQLite / WAL，aiosqlite） |
+| 用户、会话、用户删掉的会话（`archived_conversations`）、赞 / 踩（`message_feedback`） | `backend/data/app.db`（SQLite / WAL，aiosqlite） |
 | 日运、钱包、支付、用量、笔记本 | `backend/data/*.json`、`data/notebooks/` |
 
 `backend/data/` 全部是实时数据，gitignored、无备份。**测试一律指向临时库或 mock，不碰它。**
 
 ---
 
-## 9. 代码在哪
+## 10. 代码在哪
 
 | 文件 | 管什么 |
 |---|---|
