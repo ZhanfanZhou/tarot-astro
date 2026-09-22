@@ -35,6 +35,7 @@ backend/data/app.db
 backend/data/app.db-wal
 backend/data/app.db-shm
 backend/data/prompts/
+backend/data/notebooks/
 
 # Node
 node_modules/
@@ -69,6 +70,9 @@ htmlcov/
 
 # 塔罗牌图片资源（体积大 ~266MB，通过 sync-assets.sh 用 rsync 同步到服务器，不进 git）
 frontend/public/tarot-images/decks/
+# 首页立绘/图标的 PNG 原图与备选稿；页面用的是同名 .webp（进 git）
+frontend/public/assets/*.png
+frontend/public/assets/resources/
 
 
 
@@ -78,7 +82,6 @@ frontend/public/tarot-images/decks/
 AWS_EC2_DEPLOY.md
 CLAUDE.md
 sync-assets.sh
-Makefile
 tools/
 .claude/
 

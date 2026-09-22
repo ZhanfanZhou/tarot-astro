@@ -118,8 +118,7 @@
 
 ```bash
 git clone https://github.com/ZhanfanZhou/tarot-astro.git && cd tarot-astro
-python3 -m venv venv && venv/bin/pip install -r requirements.txt
-cd frontend && npm install && cd ..
+make install      # 创建 venv 并安装后端依赖，再装前端依赖
 ```
 
 ### 2. 准备牌图
@@ -150,12 +149,10 @@ venv/bin/python backend/scripts/check_providers.py
 ### 4. 启动
 
 ```bash
-# 终端 1：后端，监听 :8000
-cd backend && ../venv/bin/uvicorn main:app --reload --port 8000
-
-# 终端 2：前端，监听 :5173，/api 请求由 Vite 转发到 :8000
-cd frontend && npm run dev
+make dev          # 同时启动后端 :8000 和前端 :5173，Ctrl+C 一起停止
 ```
+
+前端的 `/api` 请求由 Vite 转发到 :8000。也可以用 `make backend` / `make frontend` 只起一端。访问 LLM 需要走代理时，用 `PROXY=http://127.0.0.1:7890 make dev`。
 
 浏览器打开 http://localhost:5173 ，选「游客模式」就能开始占卜。后端接口文档在 http://localhost:8000/docs 。
 
