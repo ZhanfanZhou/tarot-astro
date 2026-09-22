@@ -54,6 +54,7 @@ const App: React.FC = () => {
     startTurn,
     appendTurn,
     finishTurn,
+    rejectTurn,
   } = useConversationStore();
 
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -361,26 +362,28 @@ const App: React.FC = () => {
   /**
    * 在某场会话里跑一轮：流式正文记在这场会话名下，结束后刷新这场会话。
    * 刷新只在它仍是当前会话时替换当前视图——用户中途切走不会被拽回来。
-   * 返回 false = 今日额度用完、后端没收这一轮（什么都没落库，刷新后界面和后端一致）。
+   * sent = 这一轮开始前先显示出去的那句用户发言（只有发消息有）。
+   * 返回 false = 今日额度用完、后端没收这一轮：什么都没落库，库里还是这一轮之前的样子，
+   * 所以不再拉会话，只在本地撤下 sent，其余消息原样不动。
    */
   const runTurn = async (
     conv: Conversation,
     start: (onChunk: (chunk: string) => void) => Promise<void>,
-    failMessage: string
+    failMessage: string,
+    sent?: Message
   ): Promise<boolean> => {
     const id = conv.conversation_id;
-    let accepted = true;
     startTurn(id);
     try {
       await start((chunk) => appendTurn(id, chunk));
     } catch (error: any) {
       console.error(failMessage, error);
       if (error?.status === 429) {
-        accepted = false;
+        rejectTurn(id, sent);
         showQuotaPrompt();
-      } else {
-        toast.error(error?.message || failMessage);
+        return false;
       }
+      toast.error(error?.message || failMessage);
     }
     let refreshed: Conversation | null = null;
     try {
@@ -389,7 +392,7 @@ const App: React.FC = () => {
       console.error('刷新对话失败:', error);
     }
     finishTurn(id, refreshed);
-    return accepted;
+    return true;
   };
 
   const handleAstrologyProfileSubmit = async (profile: UserProfile) => {
@@ -416,18 +419,19 @@ const App: React.FC = () => {
     setShowAstrologyProfileModal(false);
   };
 
-  /** 返回 false = 今日额度用完、这句没发出去：没落库，刷新后也不在对话里，交回输入框 */
+  /** 返回 false = 今日额度用完、这句没发出去：没落库，从对话里撤下，交回输入框 */
   const handleSendMessage = async (content: string): Promise<boolean | void> => {
     const conv = currentConversation;
     if (!conv || conv.conversation_id in liveTurns) return;
 
     // 立即将用户消息添加到对话中（无需等待API响应）
-    addMessageToCurrentConversation({
+    const sent: Message = {
       role: 'user' as MessageRole,
       content,
       timestamp: new Date().toISOString(),
-    });
-    return runTurn(conv, (onChunk) => turnApi(conv.session_type).sendMessage(conv.conversation_id, content, onChunk), '发送失败，请重试');
+    };
+    addMessageToCurrentConversation(sent);
+    return runTurn(conv, (onChunk) => turnApi(conv.session_type).sendMessage(conv.conversation_id, content, onChunk), '发送失败，请重试', sent);
   };
 
   const handleReadyToDraw = () => setShowCardDrawer(true);

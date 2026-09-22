@@ -13,6 +13,11 @@ interface ConversationState {
   appendTurn: (conversationId: string, chunk: string) => void;
   /** 一轮结束：用刷新后的会话替换旧的，并清掉流式文本——同一次更新，不会两者同时出现在屏幕上 */
   finishTurn: (conversationId: string, refreshed: Conversation | null) => void;
+  /**
+   * 一轮被后端拒收（今日额度用完，什么都没落库）：清掉流式文本，撤下先显示出去的那句 sent（按引用找）。
+   * 库里的会话就是这一轮之前的样子，本地撤掉这一句就和它一致，其余消息原样不动——同一次更新。
+   */
+  rejectTurn: (conversationId: string, sent?: Message) => void;
   setConversations: (conversations: Conversation[]) => void;
   setCurrentConversation: (conversation: Conversation | null) => void;
   addConversation: (conversation: Conversation) => void;
@@ -53,6 +58,20 @@ export const useConversationStore = create<ConversationState>((set) => ({
       };
     }),
   
+  rejectTurn: (conversationId, sent) =>
+    set((state) => {
+      const liveTurns = { ...state.liveTurns };
+      delete liveTurns[conversationId];
+      if (!sent) return { liveTurns };
+      const drop = (c: Conversation) =>
+        c.conversation_id === conversationId ? { ...c, messages: c.messages.filter((m) => m !== sent) } : c;
+      return {
+        liveTurns,
+        conversations: state.conversations.map(drop),
+        currentConversation: state.currentConversation && drop(state.currentConversation),
+      };
+    }),
+
   setConversations: (conversations) => set({ conversations }),
   
   setCurrentConversation: (conversation) => set({ currentConversation: conversation }),
