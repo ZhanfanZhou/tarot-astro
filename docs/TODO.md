@@ -57,6 +57,10 @@
   设想是每 12 轮用户消息追加一次增量更新。
 - **token 到期无刷新机制**：60 天到期后用户得重新登录；也没有密码重置。
 - **会话内的钱包入口**：余额胸章目前只在主页和商店顶栏，会话页要不要放，未定。
+- **前端缓存修复还没上线**：`deploy/publish-frontend.sh`（原子发布，不再直写对外目录）和
+  `deploy/nginx/frontend.conf`（HTML `no-cache`、缺失资源 404 + `no-store`、历史入口
+  `/assets/index-*.js` 改发 `frontend/recovery/legacy-entry-recovery.js`）都已就绪并测过，
+  服务器上还是旧的那套。上线顺序是先跑发布脚本生成对外目录，再换 nginx 配置并 reload。
 
 ## 等外部条件
 

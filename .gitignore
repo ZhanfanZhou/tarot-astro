@@ -49,6 +49,9 @@ lerna-debug.log*
 frontend/dist/
 frontend/dist-ssr/
 frontend/*.local
+# 服务器上 deploy/publish-frontend.sh 产生的发布目录与符号链接
+frontend/releases/
+frontend/published
 
 # Editor
 .vscode/

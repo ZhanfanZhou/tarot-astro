@@ -5,13 +5,61 @@
     <link rel="icon" type="image/webp" href="/assets/icon.webp" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>小 x 的秘密圣殿</title>
+    <style>
+      /* 入口脚本没跑起来时唯一生效的样式，不能依赖任何构建产物 */
+      #boot {
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        padding: 32px;
+        box-sizing: border-box;
+        background: #06060f;
+        color: #ede6d6;
+        font-family: system-ui, sans-serif;
+        line-height: 1.7;
+        text-align: center;
+      }
+      #boot button {
+        padding: 10px 24px;
+        border: 1px solid #c9a96e;
+        border-radius: 2px;
+        background: transparent;
+        color: #c9a96e;
+        font: inherit;
+        cursor: pointer;
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="boot"><p>正在进入……</p></div>
+    </div>
+    <script>
+      // 必须写在入口模块之前，且不能进构建产物：白屏的时候坏的正是 main.tsx 所在的
+      // 那个包，注册在包里的任何错误处理都不会执行。捕获阶段才收得到资源加载失败。
+      window.addEventListener(
+        'error',
+        function (event) {
+          var el = event.target;
+          if (!el || el === window || el.tagName !== 'SCRIPT') return;
+          var boot = document.getElementById('boot');
+          if (!boot) return;
+          boot.innerHTML = '';
+          var msg = document.createElement('p');
+          msg.textContent = '页面没能加载完。刷新一次通常就好了。';
+          var btn = document.createElement('button');
+          btn.textContent = '重新加载';
+          btn.onclick = function () {
+            window.location.reload();
+          };
+          boot.append(msg, btn);
+        },
+        true
+      );
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-
-
-
-

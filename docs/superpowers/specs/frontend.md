@@ -43,6 +43,14 @@ spring 滑入；per-deck 的 accent 只驱动细微辉光。
   对话页放在阅读列左侧页边（≥1280），当前这场停在选中线上；更窄时左缘只留一道小弧（`RecentArcEdge`），
   点开整条轨迹浮在页面上。
 - 阅读列居中 `max-width: 720px`；输入坞贴底，带 `env(safe-area-inset-bottom)`。
+- **入口加载失败的兜底写在 `index.html` 里**，不在包里。`#root` 初始装一个 `#boot` 占位（「正在进入……」，
+  样式内联，不依赖任何构建产物），React 首次 render 时被换掉；同一份 HTML 里还有一段内联 `<script>`，
+  在入口模块之前注册捕获阶段的 `error` 监听，`<script>` 加载失败就把占位换成「页面没能加载完」＋重新加载按钮。
+  必须写在 HTML 里：白屏的时候坏的正是 `main.tsx` 所在的那个产物，`ErrorBoundary` 和任何注册在包里的
+  处理都不会执行。故意不加超时兜底——762KB 的入口在慢网络上本来就要等，误报比不报更糟。
+  已经卡在旧缓存里、连这段新 HTML 都拿不到的老页面，由服务端的 `frontend/recovery/legacy-entry-recovery.js`
+  接走：入口 JS 被新构建删掉后，那个 URL 改发这段脚本，它给当前地址加一个版本参数再整页跳转，
+  逼浏览器回源取新 HTML。规则见 `deploy/nginx/frontend.conf`，发布流程见 `deploy/publish-frontend.sh`。
 
 **殿堂（hub）自上而下**：标题 → 三扇拱窗（`SessionButtons`，网格 900 宽）→ 一排次级入口（`HubStrip`）。
 在 1440×820 的窗口里三段一屏放下，更高的窗口把多出来的高度分给段间留白；更矮的就滚动，拱窗不缩。
