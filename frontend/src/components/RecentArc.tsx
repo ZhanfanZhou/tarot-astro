@@ -420,15 +420,33 @@ export const RecentArcEdge: React.FC<Omit<RecentArcProps, 'height'> & { classNam
   }, [open]);
   return (
     <>
+      {/* 贴着左缘的一枚书签：弧线裱在一圈发丝金边里，一看就是个能点的东西
+          （右边多出的 pr 是透明的，只为把可点区域撑到 47px 宽） */}
       <button
         onClick={() => setOpen(true)}
-        className={`group fixed left-0 top-1/2 -translate-y-1/2 z-30 w-6 h-40 ${className}`}
+        className={`group fixed left-0 top-1/2 -translate-y-1/2 z-30 flex items-center py-2 pr-5 ${className}`}
         aria-label="最近的占卜"
+        title="最近的占卜"
       >
-        <svg width="24" height="160" aria-hidden>
-          <path d="M 4 8 Q 20 80 4 152" stroke="var(--gold)" strokeOpacity="0.45" fill="none" className="transition-[stroke-opacity] group-hover:[stroke-opacity:0.9]" />
-          <circle cx="12" cy="80" r="2.5" fill="var(--gold)" />
-        </svg>
+        <span
+          className="flex items-center py-4 pl-1 pr-1.5 rounded-r-xl backdrop-blur-md transition-colors duration-300 group-hover:bg-white/[0.05] group-active:bg-white/[0.07]"
+          style={{
+            background: 'linear-gradient(to right, rgba(10,10,22,0.92), rgba(10,10,22,0.4))',
+            border: '1px solid var(--line)',
+            borderLeft: 'none',
+          }}
+        >
+          <svg width="16" height="120" aria-hidden>
+            <path
+              d="M 3 6 Q 15 60 3 114"
+              stroke="var(--gold)"
+              strokeOpacity="0.5"
+              fill="none"
+              className="transition-[stroke-opacity] group-hover:[stroke-opacity:0.9]"
+            />
+            <circle cx="9" cy="60" r="2.5" fill="var(--gold)" />
+          </svg>
+        </span>
       </button>
       <AnimatePresence>
         {open && (

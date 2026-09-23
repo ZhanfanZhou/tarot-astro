@@ -35,7 +35,8 @@ const ASTROLOGY_QUICK_REPLIES = [
 
 const QuickReplies: React.FC<QuickRepliesProps> = ({ conversationType, onReplyClick }) => {
   const replies = conversationType === SessionType.TAROT || conversationType === SessionType.DAILY ? TAROT_QUICK_REPLIES : ASTROLOGY_QUICK_REPLIES;
-  const [open, setOpen] = useState(true);
+  // 手机上默认收起：十来条灵感要折五六行，摊开就占掉半屏对话。≥sm 照旧摊开
+  const [open, setOpen] = useState(() => window.matchMedia('(min-width: 640px)').matches);
 
   const chipBase: React.CSSProperties = {
     border: '1px solid var(--line-soft)',

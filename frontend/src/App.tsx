@@ -693,7 +693,8 @@ const App: React.FC = () => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.3 }}
-            className="flex-1 overflow-y-auto relative"
+            // overflow-x-hidden：拱窗背后那圈背光比窗子宽一截，手机上会探出屏幕、拖出一条横向滚动
+            className="flex-1 overflow-y-auto overflow-x-hidden relative"
           >
             {/* 标题 → 三扇拱窗 → 一排次级入口，1440×820 里一屏放下；多出来的高度分给各段之间 */}
             <div className="min-h-full flex flex-col items-center px-5 sm:px-6 pb-3">

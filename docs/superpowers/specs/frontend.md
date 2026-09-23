@@ -40,9 +40,14 @@ spring 滑入；per-deck 的 accent 只驱动细微辉光。
   什么时候刷新见 auth-and-limits.md §2。
   殿堂上顶栏透明无底线，对话里加磨砂和一条淡金底线。窄屏（<640）logo 让位，只留所在之处。
 - **最近的占卜** `RecentArc`：代替侧栏的对话历史，见 §3。殿堂上放在拱窗左侧页边（窗口 ≥1400），
-  对话页放在阅读列左侧页边（≥1280），当前这场停在选中线上；更窄时左缘只留一道小弧（`RecentArcEdge`），
+  对话页放在阅读列左侧页边（≥1280），当前这场停在选中线上；更窄时收成左缘一枚书签（`RecentArcEdge`）：
+  一道小弧裱在暗底发丝金边的圆角框里（不写字），右侧多留一截透明内边距把可点区域撑到约 47×184，
   点开整条轨迹浮在页面上。
 - 阅读列居中 `max-width: 720px`；输入坞贴底，带 `env(safe-area-inset-bottom)`。
+- **一屏就是一屏**：`#root` 宽 `100%`、高 `100dvh`（前面留一行 `100vh` 兜底），`body` 不滚动且
+  `overscroll-behavior: none`。手机浏览器的 `100vh` 是「地址栏收起后」的高度，比真正看得见的一屏高一截，
+  页面于是比屏幕长，一被滚动就把顶栏顶出屏幕；`dvh` 让页面永远正好等于可见区。殿堂那一层还要
+  `overflow-x-hidden`——拱窗背后的背光比窗子宽一圈，不裁掉窄屏上就能左右拖动。
 - **入口加载失败的兜底写在 `index.html` 里**，不在包里。`#root` 初始装一个 `#boot` 占位（「正在进入……」，
   样式内联，不依赖任何构建产物），React 首次 render 时被换掉；同一份 HTML 里还有一段内联 `<script>`，
   在入口模块之前注册捕获阶段的 `error` 监听，`<script>` 加载失败就把占位换成「页面没能加载完」＋重新加载按钮。
@@ -66,6 +71,9 @@ spring 滑入；per-deck 的 accent 只驱动细微辉光。
   **用户消息是纯文本**，不走 markdown。
 - **Composer** 是自动增高的 textarea：Enter 发送、Shift+Enter 换行，长到约 6 行后滚动。
   发出去的那句被后端以额度用完拒收（没落库）时，字回到输入框（见 auth-and-limits.md）。
+- **灵感** `QuickReplies`：输入坞上面一排预设问句，「✦ 灵感」那枚开关收放。桌面默认摊开，
+  手机（`<640`，与 `sm` 同一条线）默认收起——十来条要折五六行，摊开就占掉半屏对话。
+  收放只做淡入淡出：动 `height` 会让换行的 flex 容器反复测量、整列对话每帧重排。
 - **没有原生弹窗**：失败提示走 `useToastStore` + `<Toaster/>`，确认走 promise 形态的
   `useConfirmStore` + `ConfirmDialog`（`hideCancel` = 只留确认一个按钮，纯告知用）。代码里不应再出现 `alert` / `window.confirm`。
 - **表单弹窗一套件** `components/ui/form.tsx`：登录 / 注册（`AuthModal`）、星盘资料（`AstrologyProfileModal`）、

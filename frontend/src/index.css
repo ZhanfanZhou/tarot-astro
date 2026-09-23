@@ -47,12 +47,18 @@ body {
   color: var(--ivory);
   position: relative;
   overflow: hidden;
+  /* 内层列表滚到头时不把整页一起带走（手机上一带就把顶栏顶出屏幕） */
+  overscroll-behavior: none;
   letter-spacing: 0.01em;
 }
 
 #root {
-  width: 100vw;
+  /* 100vw 会把滚动条算进去；100% 就是可视宽度，横向永远不多出一截 */
+  width: 100%;
+  /* 手机浏览器里 100vh 是「地址栏收起后」的高度，比真正看得见的一屏高一截：
+     页面于是比屏幕长，一滚就把顶栏推出去。dvh 跟着地址栏伸缩，永远等于看得见的那一屏。 */
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   position: relative;
 }
