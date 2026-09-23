@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Settings, LogOut, UserRoundPlus } from 'lucide-react';
 import { UserType } from '@/types';
@@ -27,8 +27,44 @@ const EnergyBar: React.FC<{ percent: number }> = ({ percent }) => (
 );
 
 /**
+ * 能量环：手机顶栏被殿堂胶囊和钱包胸章占满，没有 88px 横向余地放那条线，
+ * 于是同一份读数绕着头像画一圈——剩多少画多少，不占任何额外宽度。
+ */
+const EnergyRing: React.FC<{ percent: number }> = ({ percent }) => {
+  const gid = useId().replace(/:/g, '');
+  const r = 16;
+  const c = 2 * Math.PI * r;
+  return (
+    <svg className="absolute -inset-[3px] -rotate-90" width="34" height="34" viewBox="0 0 34 34" aria-hidden>
+      <defs>
+        <linearGradient id={`energy-${gid}`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="var(--gold-deep)" />
+          <stop offset="0.6" stopColor="var(--gold)" />
+          <stop offset="1" stopColor="var(--gold-bright)" />
+        </linearGradient>
+      </defs>
+      {/* 底圈用金色发丝线（不是那条线的 --line-soft）：环要先看得出是一圈刻度，空的那段才有意义 */}
+      <circle cx="17" cy="17" r={r} fill="none" stroke="var(--line)" strokeWidth="2" />
+      <circle
+        cx="17"
+        cy="17"
+        r={r}
+        fill="none"
+        stroke={`url(#energy-${gid})`}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeDasharray={c}
+        strokeDashoffset={c * (1 - Math.min(Math.max(percent, 0), 100) / 100)}
+        className="transition-[stroke-dashoffset] duration-700 motion-reduce:transition-none"
+        style={{ filter: 'drop-shadow(0 0 4px rgba(201,169,110,0.5))' }}
+      />
+    </svg>
+  );
+};
+
+/**
  * 右上角的账户 + 设置：头像、名字、能量剩余和一枚齿轮，点开是原来设置弹窗里的全部内容。
- * 窄屏只留头像和齿轮，名字和能量剩余都在点开的面板里。
+ * 窄屏放不下名字和那条能量线：名字收进面板，能量改成绕着头像的一圈环 + 一个百分数。
  */
 const AccountMenu: React.FC<AccountMenuProps> = ({ user, energy, onConvert, onLogout }) => {
   const [open, setOpen] = useState(false);
@@ -57,12 +93,30 @@ const AccountMenu: React.FC<AccountMenuProps> = ({ user, energy, onConvert, onLo
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        <span
-          className="w-7 h-7 rounded-full grid place-items-center font-display text-[13px]"
-          style={{ background: 'rgba(201,169,110,0.1)', color: 'var(--gold)', border: '1px solid rgba(201,169,110,0.35)' }}
-        >
-          {name.slice(0, 1)}
+        <span className="relative block flex-shrink-0 w-7 h-7">
+          {/* 窄屏才画环：宽屏右边那块有完整的「能量剩余 / 百分比 / 细线」 */}
+          {energy !== null && (
+            <span aria-hidden className="sm:hidden">
+              <EnergyRing percent={energy} />
+            </span>
+          )}
+          <span
+            className="w-full h-full rounded-full grid place-items-center font-display text-[13px]"
+            style={{ background: 'rgba(201,169,110,0.1)', color: 'var(--gold)', border: '1px solid rgba(201,169,110,0.35)' }}
+          >
+            {name.slice(0, 1)}
+          </span>
         </span>
+        {/* 环旁边的读数：窄屏上没有「能量剩余」四个字的余地，数字跟着环一起看 */}
+        {energy !== null && (
+          <span
+            aria-hidden
+            className="sm:hidden flex-shrink-0 whitespace-nowrap font-display text-[11px] tracking-[0.04em]"
+            style={{ color: 'var(--gold)' }}
+          >
+            {energy}%
+          </span>
+        )}
         <span className="hidden sm:inline max-w-[8rem] truncate font-display text-sm tracking-[0.06em]" style={{ color: 'var(--ivory-dim)' }}>
           {name}
         </span>
