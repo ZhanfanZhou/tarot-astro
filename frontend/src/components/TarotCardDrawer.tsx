@@ -168,15 +168,15 @@ const TarotCardDrawer: React.FC<TarotCardDrawerProps> = ({
     if (selectedIndices.includes(index)) {
       setSelectedIndices(selectedIndices.filter((i) => i !== index));
       setShowConfirm(false);
+    } else if (cardCount === 1) {
+      // 单张:点哪张就换成哪张,不用先取消;和多张一样,点「确认抽牌」才收场
+      setSelectedIndices([index]);
+      setShowConfirm(true);
     } else if (selectedIndices.length < cardCount) {
       const newSelected = [...selectedIndices, index];
       setSelectedIndices(newSelected);
       if (newSelected.length === cardCount) {
-        if (cardCount === 1) {
-          finishSelection(newSelected); // 单张:选中即确认,省去二次确认面板
-        } else {
-          setShowConfirm(true);
-        }
+        setShowConfirm(true);
       }
     }
   };
