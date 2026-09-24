@@ -10,7 +10,9 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 SERVICES = {
     'backend': (8000, [str(ROOT / 'venv/bin/python'), 'backend/main.py'], ROOT),
-    'frontend': (5173, ['npm', 'run', 'dev', '--', '--port', '5173', '--strictPort'], ROOT / 'frontend'),
+    # --host also listens on the LAN: a phone on the same Wi-Fi opens the "Network" URL Vite prints,
+    # while localhost keeps working. /api is proxied to :8000 on this machine, so the backend needs no change.
+    'frontend': (5173, ['npm', 'run', 'dev', '--', '--port', '5173', '--strictPort', '--host'], ROOT / 'frontend'),
 }
 
 
