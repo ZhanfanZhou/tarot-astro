@@ -48,3 +48,17 @@ describe('ChatMessage 赞 / 踩', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });
+
+describe('ChatMessage 牌面大图', () => {
+  it('点牌面打开大图预览', () => {
+    const withCard: Message = {
+      ...reply,
+      tarot_cards: [{ card_id: 17, card_name: '星星', reversed: true }],
+      draw_request: { spread_type: 'single', positions: ['今日指引'] },
+    };
+    render(<ChatMessage message={withCard} />);
+    fireEvent.click(screen.getByLabelText('查看大图'));
+    expect(screen.getByLabelText('关闭预览')).toBeInTheDocument();
+    expect(screen.getByText('The Star')).toBeInTheDocument();
+  });
+});

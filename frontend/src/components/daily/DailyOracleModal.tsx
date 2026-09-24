@@ -3,13 +3,14 @@ import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { X, Sparkles } from 'lucide-react';
 import TarotCardDrawer from '../TarotCardDrawer';
 import DailyCalendarStrip from './DailyCalendarStrip';
+import CardPreview from '../CardPreview';
 import Markdown from '../Markdown';
 import { conversationApi, dailyApi } from '@/services/api';
 import { CARD_BACK_IMAGE, getCardInfo } from '@/config/tarotCards';
 import { getEffectiveDate, isEveningDraw } from '@/utils/dailyDate';
 import { toast } from '@/stores/useToastStore';
 import { MessageRole } from '@/types';
-import type { DailyDayView, DailyOverview, DrawCardsRequest } from '@/types';
+import type { DailyDayView, DailyOverview, DrawCardsRequest, TarotCard } from '@/types';
 
 const DAILY_DRAW_REQUEST: DrawCardsRequest = {
   spread_type: 'single',
@@ -131,6 +132,8 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
   const [verdict, setVerdict] = useState<'hit' | 'miss' | null>(null);
   const [note, setNote] = useState('');
   const [savingFeedback, setSavingFeedback] = useState(false);
+  // 舞台上那张牌的大图;null = 没打开
+  const [previewCard, setPreviewCard] = useState<TarotCard | null>(null);
 
   const selectedView: DailyDayView | undefined = overview?.history.find(
     (h) => h.effective_date === selectedDate
@@ -334,24 +337,32 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
                 ) : (
                   /* ── 有记录(今日已抽 / 回顾态) ── */
                   <div className="flex flex-col items-center">
-                    <motion.div
-                      key={record.conversation_id}
-                      initial={{ rotateY: 90, opacity: 0 }}
-                      animate={{ rotateY: 0, opacity: 1 }}
-                      transition={{ duration: 0.55, ease: 'easeOut' }}
-                      className="w-[110px] h-[180px] rounded-lg overflow-hidden"
-                      style={{
-                        border: '1px solid rgba(201,169,110,0.45)',
-                        boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
-                      }}
+                    {/* 点牌面看大图(逆位也正着放) */}
+                    <button
+                      type="button"
+                      onClick={() => setPreviewCard(record.card)}
+                      aria-label="查看大图"
+                      className="block rounded-lg cursor-zoom-in"
                     >
-                      <img
-                        src={cardInfo?.imageUrl || CARD_BACK_IMAGE}
-                        alt={record.card.card_name}
-                        className="w-full h-full object-cover"
-                        style={{ transform: record.card.reversed ? 'rotate(180deg)' : 'none' }}
-                      />
-                    </motion.div>
+                      <motion.div
+                        key={record.conversation_id}
+                        initial={{ rotateY: 90, opacity: 0 }}
+                        animate={{ rotateY: 0, opacity: 1 }}
+                        transition={{ duration: 0.55, ease: 'easeOut' }}
+                        className="w-[110px] h-[180px] rounded-lg overflow-hidden"
+                        style={{
+                          border: '1px solid rgba(201,169,110,0.45)',
+                          boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
+                        }}
+                      >
+                        <img
+                          src={cardInfo?.imageUrl || CARD_BACK_IMAGE}
+                          alt={record.card.card_name}
+                          className="w-full h-full object-cover"
+                          style={{ transform: record.card.reversed ? 'rotate(180deg)' : 'none' }}
+                        />
+                      </motion.div>
+                    </button>
                     <p
                       className="mt-3 font-display font-semibold tracking-[0.1em]"
                       style={{ color: 'var(--ivory)' }}
@@ -456,6 +467,9 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
         eyebrow="Daily Oracle"
         subtitle="静心凝神,为今天抽取一张指引"
       />
+
+      {/* 舞台牌面的大图(z-120,盖在弹窗之上) */}
+      <CardPreview card={previewCard} onClose={() => setPreviewCard(null)} />
     </>
   );
 };
