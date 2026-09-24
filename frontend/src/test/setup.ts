@@ -26,3 +26,8 @@ if (typeof window.matchMedia !== 'function') {
     };
   }) as unknown as typeof window.matchMedia;
 }
+
+// jsdom 没有 scrollIntoView（日签等解读时把舞台滚进视野）
+if (typeof Element.prototype.scrollIntoView !== 'function') {
+  Element.prototype.scrollIntoView = () => {};
+}

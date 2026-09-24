@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useEffect, useRef, useState } from 'react';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { X, Sparkles } from 'lucide-react';
 import TarotCardDrawer from '../TarotCardDrawer';
 import DailyCalendarStrip from './DailyCalendarStrip';
@@ -15,6 +15,86 @@ const DAILY_DRAW_REQUEST: DrawCardsRequest = {
   spread_type: 'single',
   positions: ['今日指引'],
 };
+
+// 等过这么久，说明文字换成「还在写，请稍候」
+const DRAW_PATIENCE_SECONDS = 15;
+
+/**
+ * 选完牌到解读回来之间的那一段。/api/daily/draw 要把整段解读生成完才返回（最长 60 秒超时），
+ * 中间没有进度可报，所以只说实话：牌背上一道光来回扫、底下一条金线在走、秒数在跳——
+ * 一眼看得出是在等，不是卡住。开减少动态效果时光和线都停，秒数照跳。
+ */
+export const DrawingStage: React.FC<{ startedAt: number }> = ({ startedAt }) => {
+  const reduceMotion = useReducedMotion();
+  const ref = useRef<HTMLDivElement>(null);
+  const secondsSince = () => Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+  const [elapsed, setElapsed] = useState(secondsSince);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setElapsed(secondsSince()), 1000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startedAt]);
+
+  // 小屏上舞台可能在弹窗折线以下：等待一开始就把它滚进视野
+  useEffect(() => {
+    ref.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, []);
+
+  return (
+    <div ref={ref} className="flex flex-col items-center text-center py-4" aria-busy="true">
+      <div
+        className="relative w-[110px] h-[180px] rounded-lg overflow-hidden"
+        style={{
+          border: '1px solid rgba(201,169,110,0.55)',
+          boxShadow: '0 0 26px rgba(201,169,110,0.32)',
+        }}
+      >
+        <img src={CARD_BACK_IMAGE} alt="" aria-hidden className="w-full h-full object-cover" />
+        {!reduceMotion && (
+          <motion.span
+            aria-hidden
+            className="absolute inset-y-0 left-0 w-full pointer-events-none"
+            style={{
+              background: 'linear-gradient(105deg, transparent 25%, rgba(240,208,144,0.34) 50%, transparent 75%)',
+            }}
+            initial={{ x: '-100%' }}
+            animate={{ x: '100%' }}
+            transition={{ duration: 1.8, repeat: Infinity, repeatDelay: 0.5, ease: 'easeInOut' }}
+          />
+        )}
+      </div>
+
+      <div role="status" className="mt-5">
+        <p className="font-display text-[15px] tracking-[0.12em]" style={{ color: 'var(--ivory)' }}>
+          牌已抽出 · 正在解读
+        </p>
+        <p className="mt-3 text-xs tracking-[0.06em]" style={{ color: 'var(--ivory-dim)' }}>
+          {elapsed < DRAW_PATIENCE_SECONDS ? '占卜师正在为你写下今日的指引' : '解读还在写，请留在这里稍候'}
+          <span aria-hidden className="tabular-nums"> · {elapsed} 秒</span>
+        </p>
+      </div>
+
+      {/* 不定长的进度：一截金光沿发丝轨道来回走 */}
+      <div
+        aria-hidden
+        className="relative mt-3 w-40 h-[2px] rounded-full overflow-hidden"
+        style={{ background: 'rgba(201,169,110,0.18)' }}
+      >
+        {!reduceMotion && (
+          <motion.span
+            className="absolute inset-y-0 left-0 w-1/3 rounded-full"
+            style={{ background: 'linear-gradient(to right, transparent, var(--gold-bright), transparent)' }}
+            initial={{ x: '-100%' }}
+            animate={{ x: '300%' }}
+            transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+          />
+        )}
+      </div>
+    </div>
+  );
+};
+
 interface DailyOracleModalProps {
   isOpen: boolean;
   userId: string;
@@ -43,7 +123,8 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
   const todayDate = overview?.today_effective_date ?? getEffectiveDate();
   const [selectedDate, setSelectedDate] = useState<string>(todayDate);
   const [showDrawer, setShowDrawer] = useState(false);
-  const [drawing, setDrawing] = useState(false);
+  // 选完牌、等解读的起始时刻;null = 没在等
+  const [drawStartedAt, setDrawStartedAt] = useState<number | null>(null);
   // conversation_id → 解读全文;undefined=未加载,null=对话已删除,''=尚无解读
   const [readings, setReadings] = useState<Record<string, string | null>>({});
   // 印证表单(回顾态)
@@ -87,7 +168,7 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
   const handleCardsDrawn = async () => {
     // 选牌器仪式完成 → 后端抽出真牌并当场生成今日解读 → 在弹窗里揭示
     setShowDrawer(false);
-    setDrawing(true);
+    setDrawStartedAt(Date.now());
     try {
       const eff = todayDate;
       const res = await dailyApi.draw(userId, eff);
@@ -104,7 +185,7 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
         toast.error(err?.response?.data?.detail || '抽牌失败,请重试');
       }
     } finally {
-      setDrawing(false);
+      setDrawStartedAt(null);
     }
   };
 
@@ -142,7 +223,8 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 16 }}
               transition={{ duration: 0.3, ease: [0.2, 0.8, 0.2, 1] }}
-              className="relative w-full max-w-[560px] max-h-[88vh] overflow-y-auto rounded-2xl px-5 sm:px-7 py-6"
+              // 手机浏览器的 vh 按收起地址栏算，比看得见的一屏高：弹窗底边会压在工具栏底下，按 dvh 算
+              className="relative w-full max-w-[560px] max-h-[88vh] supports-[height:100dvh]:max-h-[88dvh] overflow-y-auto rounded-2xl px-5 sm:px-7 py-6"
               style={{
                 background: 'linear-gradient(160deg, rgba(18,18,30,0.97) 0%, rgba(8,8,18,0.97) 100%)',
                 border: '1px solid rgba(201,169,110,0.3)',
@@ -207,7 +289,10 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
               {/* 舞台区 */}
               <div className="mt-5 min-h-[260px]">
                 {!record ? (
-                  isToday ? (
+                  isToday && drawStartedAt !== null ? (
+                    /* ── 牌已选定,等解读 ── */
+                    <DrawingStage startedAt={drawStartedAt} />
+                  ) : isToday ? (
                     /* ── 今日未抽 ── */
                     <div className="flex flex-col items-center text-center py-4">
                       <motion.img
@@ -230,15 +315,14 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
                       </p>
                       <button
                         onClick={() => setShowDrawer(true)}
-                        disabled={drawing}
-                        className="mt-4 px-7 py-2.5 rounded-xl font-display tracking-[0.15em] text-sm transition-all hover:brightness-110 disabled:opacity-50"
+                        className="mt-4 px-7 py-2.5 rounded-xl font-display tracking-[0.15em] text-sm transition-all hover:brightness-110"
                         style={{
                           color: '#1a1407',
                           background: 'linear-gradient(120deg, #C9A96E, #E2C893)',
                           boxShadow: '0 8px 24px rgba(201,169,110,0.25)',
                         }}
                       >
-                        {drawing ? '正在抽取…' : isEveningDraw() ? '静心 · 为明日抽签' : '静心 · 抽取今日指引'}
+                        {isEveningDraw() ? '静心 · 为明日抽签' : '静心 · 抽取今日指引'}
                       </button>
                     </div>
                   ) : (
