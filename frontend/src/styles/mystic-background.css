@@ -76,7 +76,11 @@
   to   { transform: translate3d(-700px, -360px, 0); }
 }
 
-/* ── Nebulae — large, soft, slow-breathing glows (animated in component) ────── */
+/* ── Nebulae — large, soft, static glows ─────────────────────────────────────
+   原先在组件里呼吸（金 opacity .5↔.85、scale 1↔1.08；蓝 .45↔.75、1↔1.1），
+   现在定在呼吸区间的中间值，平时看到的亮度和大小不变。
+   位置：左上角贴在 left/top 上，不做 translate 居中——原先动画写的内联 transform
+   一直盖掉 CSS 里的 translate，大家看到的就是这个位置。 */
 .mystic-background__nebula {
   position: absolute;
   border-radius: 50%;
@@ -87,22 +91,25 @@
 .mystic-background__nebula--gold {
   width: 46vw; height: 46vw;
   top: -8vw; left: 50%;
-  transform: translateX(-50%);
+  opacity: .675;
+  transform: scale(1.04);
   background: radial-gradient(circle, rgba(201,169,110,.22) 0%, rgba(138,109,59,.08) 40%, transparent 70%);
 }
 .mystic-background__nebula--moon {
   width: 40vw; height: 40vw;
   bottom: -12vw; left: 18%;
+  opacity: .6;
+  transform: scale(1.05);
   background: radial-gradient(circle, rgba(168,216,234,.16) 0%, rgba(110,157,181,.06) 42%, transparent 72%);
 }
 
-/* ── Faint constellation ring — slow celestial rotation (rendered in JSX) ───── */
+/* ── Faint constellation ring — static ─────────────────────────────────────────
+   左上角在屏幕正中（同星云，原先的旋转动画盖掉了 translate 居中，一直是这个位置）。 */
 .mystic-background__ring {
   position: absolute;
   top: 50%; left: 50%;
   width: min(120vh, 1100px);
   height: min(120vh, 1100px);
-  transform: translate(-50%, -50%);
   border-radius: 50%;
   border: 1px solid rgba(201,169,110,.07);
   pointer-events: none;

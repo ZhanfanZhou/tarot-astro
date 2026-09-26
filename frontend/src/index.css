@@ -112,6 +112,14 @@ body {
   50%      { background-position: 100% 50%; }
 }
 
+/* 对话里抽牌邀请的小牌背呼吸光晕（ChatInvite；各张的起步延迟写在行内）。
+   写成 CSS 而不是 framer，是为了抽牌器打开时能停住它（见下一条） */
+@keyframes inviteBreathe {
+  0%, 100% { box-shadow: 0 0 6px rgba(201, 169, 110, 0.12); }
+  50%      { box-shadow: 0 0 16px rgba(201, 169, 110, 0.5); }
+}
+.invite-breathe { animation: inviteBreathe 4s ease-in-out infinite backwards; }
+
 /* Letter-spaced small-caps eyebrow */
 .eyebrow {
   font-family: 'Cinzel', serif;

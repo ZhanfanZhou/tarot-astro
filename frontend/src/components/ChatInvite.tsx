@@ -22,25 +22,21 @@ const MiniSpread: React.FC<{ count: number; hovered: boolean; still: boolean }> 
         return (
           <motion.span
             key={i}
-            className="block w-[26px] h-[42px] rounded-[4px] overflow-hidden"
+            // 呼吸光晕是 CSS 动画（index.css 的 invite-breathe）而不是 framer：抽牌器打开时要能停住它
+            className={`block w-[26px] h-[42px] rounded-[4px] overflow-hidden ${still ? '' : 'invite-breathe'}`}
             style={{
               marginLeft: i ? -13 : 0,
               transformOrigin: 'bottom center',
               border: '1px solid rgba(201,169,110,0.5)',
               zIndex: 5 - Math.abs(off),
+              ...(still ? { boxShadow: '0 4px 10px rgba(0,0,0,0.5)' } : { animationDelay: `${i * 0.25}s` }),
             }}
             animate={{
               rotate: off * 11,
               x: hovered ? off * 5 : 0,
               y: hovered ? -3 : 0,
-              boxShadow: still
-                ? '0 4px 10px rgba(0,0,0,0.5)'
-                : ['0 0 6px rgba(201,169,110,0.12)', '0 0 16px rgba(201,169,110,0.5)', '0 0 6px rgba(201,169,110,0.12)'],
             }}
-            transition={{
-              default: { type: 'spring', stiffness: 220, damping: 20 },
-              boxShadow: { duration: 4, repeat: Infinity, ease: 'easeInOut', delay: i * 0.25 },
-            }}
+            transition={{ type: 'spring', stiffness: 220, damping: 20 }}
           >
             <img src={CARD_BACK_IMAGE} alt="" aria-hidden className="w-full h-full object-cover" draggable={false} />
           </motion.span>
