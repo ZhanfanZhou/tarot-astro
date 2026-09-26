@@ -68,5 +68,5 @@
   `NotImplementedError` 占位，当前全部走模拟支付。补齐凭证后实现这两处，
   并把 `PAYMENTS_ALLOW_MOCK` 关掉。见 [牌组商城](superpowers/specs/deck-store.md)。
 - **真实牌组美术**：除 `classic-rws` 外都是占位（复用经典牌图叠 duotone）。
-  美术就绪后图片落 `frontend/public/tarot-images/decks/<id>/`（走 `sync-assets.sh`，不进 git），
+  美术就绪后图片落 `frontend/public/tarot-images/decks/<id>/`（走 `tools/sync-assets.sh`，不进 git），
   在 `data/storeDecks.ts` 把该条目改 `available` 并设 `liveDeckId`。

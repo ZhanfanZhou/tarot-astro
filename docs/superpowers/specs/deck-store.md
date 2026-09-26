@@ -82,7 +82,7 @@
 `data/deckCardImages.ts` 是卡面图的唯一数据源：Vite glob 扫 `classic-rws/**/*.thumb.webp`
 （`*.png` 供放大），剔除 `__alt` / `__backup` 变体，按规范顺序排序（大阿卡纳固定序，副牌 ace→king）。
 
-**上线真实牌组**：图片放进 `frontend/public/tarot-images/decks/<id>/`（走 `sync-assets.sh` 的 rsync，
+**上线真实牌组**：图片放进 `frontend/public/tarot-images/decks/<id>/`（走 `tools/sync-assets.sh` 的 rsync，
 不进 git），在 `data/storeDecks.ts` 把该条目 `state` 改 `available` 并设 `liveDeckId`。
 
 ### 占卜牌面按 active_deck_id 取图
