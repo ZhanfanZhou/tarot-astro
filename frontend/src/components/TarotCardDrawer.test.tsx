@@ -80,6 +80,56 @@ describe('TarotCardDrawer', () => {
     expect(onCardsDrawn).not.toHaveBeenCalled();
   });
 
+  // 牌跟着手指走，拖完松手时指针底下还是按下的那张，浏览器照样发 click
+  const mouse = { pointerId: 1, isPrimary: true, pointerType: 'mouse', button: 0 };
+  const dragFrom = (el: Element, fromX: number, toX: number) => {
+    fireEvent.pointerDown(el, { ...mouse, clientX: fromX });
+    fireEvent.pointerMove(window, { ...mouse, clientX: (fromX + toX) / 2 });
+    fireEvent.pointerMove(window, { ...mouse, clientX: toX });
+    fireEvent.pointerUp(window, { ...mouse, clientX: toX });
+  };
+
+  it('在牌上拖过再松手:松手处那张牌不选中;原地点一下照常选中', () => {
+    openSpread(['过去', '现在', '未来']);
+    const card = screen.getByAltText('塔罗牌 1');
+    dragFrom(card, 200, 160);
+    fireEvent.click(card);
+    expect(screen.getByText('0 / 3')).toBeInTheDocument();
+
+    fireEvent.pointerDown(card, { ...mouse, clientX: 160 });
+    fireEvent.pointerUp(window, { ...mouse, clientX: 160 });
+    fireEvent.click(card);
+    expect(screen.getByText('1 / 3')).toBeInTheDocument();
+  });
+
+  it('拖着牌到弹层外松手不关闭;直接点弹层外照常关闭', () => {
+    const { onClose } = openSpread(['过去', '现在', '未来']);
+    const backdrop = document.querySelector('.fixed.inset-0.z-50')!;
+    dragFrom(screen.getByAltText('塔罗牌 1'), 200, 20);
+    fireEvent.click(backdrop); // 按下和松手两处的共同祖先
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.pointerDown(backdrop, { ...mouse, clientX: 20 });
+    fireEvent.pointerUp(window, { ...mouse, clientX: 20 });
+    fireEvent.click(backdrop);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('按在滑轨 3/4 处:整条滑轨是一整圈 78 张,扇形直接转到牌堆的另一段', () => {
+    openSpread(['过去', '现在', '未来']);
+    const track = document.querySelector('.group\\/slider') as HTMLElement;
+    // jsdom 没有布局:滑轨按设计尺寸 210px 宽、左边在 100px
+    track.getBoundingClientRect = () =>
+      ({ left: 100, top: 0, width: 210, height: 8, right: 310, bottom: 8, x: 100, y: 0, toJSON: () => ({}) }) as DOMRect;
+    expect(screen.getByAltText('塔罗牌 1')).toBeInTheDocument();
+
+    // 3/4 处 = 旋转量 +19.5 张:正中换成第 20 张前后,第 1 张已经不在扇形上
+    fireEvent.pointerDown(track, { ...mouse, clientX: 100 + 210 * 0.75 });
+    expect(screen.queryByAltText('塔罗牌 1')).toBeNull();
+    expect(screen.getByAltText('塔罗牌 21')).toBeInTheDocument();
+    fireEvent.pointerUp(window, { ...mouse, clientX: 100 + 210 * 0.75 });
+  });
+
   it('多张不变:选满才出确认,满了再点别的牌不换', () => {
     const { onCardsDrawn } = openSpread(['过去', '现在', '未来']);
     pick(1);

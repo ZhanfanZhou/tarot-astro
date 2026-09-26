@@ -120,6 +120,25 @@ body {
 }
 .invite-breathe { animation: inviteBreathe 4s ease-in-out infinite backwards; }
 
+/* 抽牌器里选中那张牌的呼吸金光：两层固定的光晕交替淡入淡出（同原先 box-shadow 在两档之间 1.5 秒一个来回）。
+   只动透明度，GPU 合成；原先逐帧改 box-shadow，选中之后什么都不动，这一片也每帧重画 */
+@keyframes fanGlowDim {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+@keyframes fanGlowBright {
+  0%, 100% { opacity: 0; }
+  50%      { opacity: 1; }
+}
+.fan-glow-dim { animation: fanGlowDim 1.5s ease-in-out infinite; }
+.fan-glow-bright { animation: fanGlowBright 1.5s ease-in-out infinite; }
+
+/* 抽牌器打开期间（<html data-drawer-open>，弹层 95% 黑），底下看不见的装饰动画停在当前那一帧：
+   它们慢到看不出，却让整页每帧重画——抽牌器静止时的开销大半来自这里 */
+html[data-drawer-open] .mystic-background__stars,
+html[data-drawer-open] .mystic-background__stars--far,
+html[data-drawer-open] .invite-breathe { animation-play-state: paused; }
+
 /* Letter-spaced small-caps eyebrow */
 .eyebrow {
   font-family: 'Cinzel', serif;
