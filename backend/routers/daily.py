@@ -7,7 +7,8 @@ from fastapi.responses import StreamingResponse
 
 from models import (
     Conversation, DailyDayView, DailyDrawRecord, DailyDrawRequest, DailyDrawResponse,
-    DailyFeedbackRequest, DailyOverviewResponse, DrawCardsRequest, JourneyListResponse,
+    DailyFeedbackRequest, DailyOverviewResponse, DailyReadingResponse, DrawCardsRequest,
+    JourneyListResponse,
     Message, MessageRole, SessionType, User,
 )
 from services import llm
@@ -26,6 +27,9 @@ router = APIRouter(prefix="/api/daily", tags=["daily"])
 
 # 一次性生成（今日解读 / 心灵奇旅）的超时。都是几百字的单次输出，不走 Agent Loop。
 GENERATION_TIMEOUT_SECONDS = 60
+
+# 每日一签的牌阵：单张，一个位置
+DAILY_DRAW_REQUEST = DrawCardsRequest(spread_type="single", positions=["今日指引"])
 
 
 def _parse_date(value: str) -> date:
@@ -75,11 +79,10 @@ async def draw_daily(
     body: DailyDrawRequest,
     current_user: User = Depends(get_current_user),
 ):
-    """每日抽牌：一日一次。服务端随机单张，当场生成今日解读，建 daily 对话落记录。
+    """每日抽牌：一日一次。服务端随机单张，建 daily 对话、落记录，立刻把牌返回。
 
-    解读由「抽签」这个动作产生：牌已经在提示词里，模型没有工具可调，也没有用户发言
-    要回——和开场白同一个道理，直接一次生成、落成第一条 assistant。生成失败则什么都不落，
-    用户重抽即可（签是随机的，重抽不违背一日一签）。
+    解读不在这里写：和占卜里「/draw 抽牌 → /resume 解读」一样分两步，前端拿到牌先翻开，
+    再调 /reading 等解读。
     """
     ensure_owner(current_user, user_id)
     eff = _parse_date(body.effective_date)
@@ -89,15 +92,7 @@ async def draw_daily(
     if await DailyService.get_record(user_id, body.effective_date):
         raise HTTPException(status_code=409, detail="这一日已抽过签")
 
-    user = await UserService.get_user(user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    # 解读是一次真实 LLM 调用，计一次；一日一签，不拦
-    await RateLimitService.consume(current_user)
-
-    draw_request = DrawCardsRequest(spread_type="single", positions=["今日指引"])
-    cards = TarotService.draw_cards(draw_request)
+    cards = TarotService.draw_cards(DAILY_DRAW_REQUEST)
     conversation = Conversation(
         conversation_id=f"conv_{uuid.uuid4().hex[:16]}",
         user_id=user_id,
@@ -110,28 +105,63 @@ async def draw_daily(
         card=cards[0],
         conversation_id=conversation.conversation_id,
     )
+    await StorageService.save_conversation(conversation)
+    await DailyService.save_record(user_id, record)
+    return DailyDrawResponse(record=record, conversation_id=conversation.conversation_id)
 
-    prompt = await DailyService.render_daily_system_prompt(conversation, user, own=record)
+
+@router.post("/{user_id}/reading", response_model=DailyReadingResponse)
+async def read_daily(
+    user_id: str,
+    body: DailyDrawRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """今日解读：抽完牌之后前端接着调。
+
+    牌已经在提示词里，模型没有工具可调，也没有用户发言要回——和开场白同一个道理，
+    一次生成、落成这场对话的第一条 assistant，当日的牌挂在它上面。生成失败则什么都不落，
+    牌照旧（记录在抽牌时已经落了），前端提示后可以再请一次。
+    """
+    ensure_owner(current_user, user_id)
+    record = await DailyService.get_record(user_id, body.effective_date)
+    if not record:
+        raise HTTPException(status_code=404, detail="这一日还没有抽签")
+    conversation = await ConversationService.get_conversation(record.conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    if conversation.messages:
+        # 已经解读过、或者已经聊起来了：再生成一次就是凭空多一段台词
+        raise HTTPException(status_code=409, detail="这一签已经解读过了")
+
+    user = await UserService.get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    # 解读是一次真实 LLM 调用，计一次；一日一签，不拦
+    await RateLimitService.consume(current_user)
+
+    prompt = await DailyService.render_daily_system_prompt(conversation, user)
     try:
         reading = (await llm.get_provider("reading").generate_text(
             prompt, timeout=GENERATION_TIMEOUT_SECONDS,
         )).strip()
-    except Exception as e:  # noqa: BLE001 —— 翻成一个前端认得的失败，让用户重抽
+    except Exception as e:  # noqa: BLE001 —— 翻成一个前端认得的失败，让用户再请一次
         print(f"[Daily] ⚠️ 今日解读生成失败: {e}")
         raise HTTPException(status_code=503, detail="占卜师暂时联系不上，请重试")
     if not reading:
         raise HTTPException(status_code=503, detail="占卜师暂时联系不上，请重试")
 
+    # 生成要十几秒。这期间页面刷新过、又点了「重新解读」，另一次请求可能已经写好了：
+    # 用户断开不会打断服务端，头一次那段照样落库。以先写好的为准，不叠第二段
+    if (await ConversationService.get_conversation(conversation.conversation_id)).messages:
+        raise HTTPException(status_code=409, detail="这一签已经解读过了")
+
     # 解读 + 当日的牌挂在同一条 assistant 上（没有工具调用，牌不是模型抽的）
-    conversation.messages.append(Message(
+    await ConversationService.append_message(conversation.conversation_id, Message(
         role=MessageRole.ASSISTANT, content=reading,
-        tarot_cards=cards, draw_request=draw_request,
+        tarot_cards=[record.card], draw_request=DAILY_DRAW_REQUEST,
     ))
-    await StorageService.save_conversation(conversation)
-    await DailyService.save_record(user_id, record)
-    return DailyDrawResponse(
-        record=record, conversation_id=conversation.conversation_id, reading=reading,
-    )
+    return DailyReadingResponse(reading=reading)
 
 
 @router.post("/{user_id}/feedback", response_model=DailyDrawRecord)

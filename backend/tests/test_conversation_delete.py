@@ -64,7 +64,9 @@ def _draw_daily(env, monkeypatch) -> str:
     from services import llm
     monkeypatch.setattr(llm, "get_provider", lambda agent: _Provider())
     today = date.today().isoformat()
-    return env.post(f"/api/daily/{USER_ID}/draw", json={"effective_date": today}).json()["conversation_id"]
+    conv_id = env.post(f"/api/daily/{USER_ID}/draw", json={"effective_date": today}).json()["conversation_id"]
+    env.post(f"/api/daily/{USER_ID}/reading", json={"effective_date": today})
+    return conv_id
 
 
 def _say(conv_id: str, text: str):

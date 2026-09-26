@@ -35,7 +35,7 @@ _STAGES = [
     ("reading", "解读",
      "交单之后的正场，塔罗与占星各一份大提示词；接场约束把开场已经做完的事压掉。"),
     ("daily", "每日一签",
-     "每天一张牌：抽签当场生成解读，之后可以接着聊；心灵奇旅是隔一段时间回看这些签。"),
+     "每天一张牌：抽完牌生成今日解读，之后可以接着聊；心灵奇旅是隔一段时间回看这些签。"),
     ("notebook", "笔记本",
      "会话结束后离线跑一次：写这场的占卜笔记，并给这个人的画像打补丁。只有注册用户有。"),
 ]
@@ -187,7 +187,7 @@ def _call_sites() -> List[dict]:
               context_service.reading_prompt_parts(SessionType.ASTROLOGY, user_context, _ASTRO_BRIEF,
                                                    portrait_context),
               tools=reading_tools, after=_HISTORY),
-        _site("每日一签 · 抽签当场生成解读", "daily", "reading", _SINGLE, daily_parts),
+        _site("每日一签 · 抽完牌生成今日解读", "daily", "reading", _SINGLE, daily_parts),
         _site("每日一签 · 之后接着聊", "daily", "reading", _SYSTEM, daily_parts,
               tools=tool_names(SessionType.DAILY, opening=False, has_override=True), after=_HISTORY),
         _site("心灵奇旅", "daily", "reading", _SINGLE,

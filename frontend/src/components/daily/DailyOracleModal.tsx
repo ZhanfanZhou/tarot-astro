@@ -21,11 +21,11 @@ const DAILY_DRAW_REQUEST: DrawCardsRequest = {
 const DRAW_PATIENCE_SECONDS = 15;
 
 /**
- * 选完牌到解读回来之间的那一段。/api/daily/draw 要把整段解读生成完才返回（最长 60 秒超时），
- * 中间没有进度可报，所以只说实话：牌背上一道光来回扫、底下一条金线在走、秒数在跳——
- * 一眼看得出是在等，不是卡住。开减少动态效果时光和线都停，秒数照跳。
+ * 牌翻开之后、解读回来之前，垫在牌下面的那一段。/api/daily/reading 要把整段解读生成完才返回
+ * （最长 60 秒超时），中间没有进度可报，所以只说实话：一条金线在走、秒数在跳——
+ * 一眼看得出是在等，不是卡住。开减少动态效果时线停，秒数照跳。
  */
-export const DrawingStage: React.FC<{ startedAt: number }> = ({ startedAt }) => {
+export const ReadingPending: React.FC<{ startedAt: number }> = ({ startedAt }) => {
   const reduceMotion = useReducedMotion();
   const ref = useRef<HTMLDivElement>(null);
   const secondsSince = () => Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
@@ -43,32 +43,10 @@ export const DrawingStage: React.FC<{ startedAt: number }> = ({ startedAt }) => 
   }, []);
 
   return (
-    <div ref={ref} className="flex flex-col items-center text-center py-4" aria-busy="true">
-      <div
-        className="relative w-[110px] h-[180px] rounded-lg overflow-hidden"
-        style={{
-          border: '1px solid rgba(201,169,110,0.55)',
-          boxShadow: '0 0 26px rgba(201,169,110,0.32)',
-        }}
-      >
-        <img src={CARD_BACK_IMAGE} alt="" aria-hidden className="w-full h-full object-cover" />
-        {!reduceMotion && (
-          <motion.span
-            aria-hidden
-            className="absolute inset-y-0 left-0 w-full pointer-events-none"
-            style={{
-              background: 'linear-gradient(105deg, transparent 25%, rgba(240,208,144,0.34) 50%, transparent 75%)',
-            }}
-            initial={{ x: '-100%' }}
-            animate={{ x: '100%' }}
-            transition={{ duration: 1.8, repeat: Infinity, repeatDelay: 0.5, ease: 'easeInOut' }}
-          />
-        )}
-      </div>
-
-      <div role="status" className="mt-5">
+    <div ref={ref} className="flex flex-col items-center text-center" aria-busy="true">
+      <div role="status">
         <p className="font-display text-[15px] tracking-[0.12em]" style={{ color: 'var(--ivory)' }}>
-          牌已抽出 · 正在解读
+          正在解读
         </p>
         <p className="mt-3 text-xs tracking-[0.06em]" style={{ color: 'var(--ivory-dim)' }}>
           {elapsed < DRAW_PATIENCE_SECONDS ? '占卜师正在为你写下今日的指引' : '解读还在写，请留在这里稍候'}
@@ -110,7 +88,8 @@ interface DailyOracleModalProps {
 /**
  * 每日一签弹窗:顶部两周日历带 + 今日舞台(抽牌/解读)+ 回顾态(印证)。
  * 心灵奇旅是独立的卷宗(JourneyChronicle),这里只留一个入口。
- * 选牌器是纯仪式——真实牌面来自 POST /api/daily/draw 的响应,在本弹窗内翻面揭示。
+ * 选牌器是纯仪式——真实牌面来自 POST /api/daily/draw 的响应,在本弹窗内翻面揭示;
+ * 牌翻开之后再调 /reading 等今日解读,和占卜里「抽牌 → 解读」同一个顺序。
  */
 const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
   isOpen,
@@ -124,8 +103,10 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
   const todayDate = overview?.today_effective_date ?? getEffectiveDate();
   const [selectedDate, setSelectedDate] = useState<string>(todayDate);
   const [showDrawer, setShowDrawer] = useState(false);
-  // 选完牌、等解读的起始时刻;null = 没在等
-  const [drawStartedAt, setDrawStartedAt] = useState<number | null>(null);
+  // 选完牌、等 /draw 把真牌发回来
+  const [drawing, setDrawing] = useState(false);
+  // 牌已翻开、正在等解读的那场对话和起始时刻;null = 没在等
+  const [interpreting, setInterpreting] = useState<{ conversationId: string; startedAt: number } | null>(null);
   // conversation_id → 解读全文;undefined=未加载,null=对话已删除,''=尚无解读
   const [readings, setReadings] = useState<Record<string, string | null>>({});
   // 印证表单(回顾态)
@@ -147,36 +128,62 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
     if (isOpen) setSelectedDate(todayDate);
   }, [isOpen, todayDate]);
 
-  // 选中某天:同步印证表单 + 懒取该日解读全文
+  // 从对话里取解读全文:首条 assistant 就是它
+  const loadReading = (conversationId: string) =>
+    conversationApi
+      .get(conversationId)
+      .then((conv) => {
+        const first = conv.messages.find((m) => m.role === MessageRole.ASSISTANT);
+        setReadings((prev) => ({ ...prev, [conversationId]: first?.content ?? '' }));
+      })
+      .catch(() => setReadings((prev) => ({ ...prev, [conversationId]: null })));
+
+  // 选中某天:同步印证表单 + 懒取该日解读全文(正在写的那一场不取,写完直接放进来)
   useEffect(() => {
     const view = overview?.history.find((h) => h.effective_date === selectedDate);
     setVerdict(view?.record?.feedback?.verdict ?? null);
     setNote(view?.record?.feedback?.note ?? '');
     const rec = view?.record;
     if (!rec || readings[rec.conversation_id] !== undefined) return;
+    if (rec.conversation_id === interpreting?.conversationId) return;
     if (!view?.conversation_exists) {
       setReadings((prev) => ({ ...prev, [rec.conversation_id]: null }));
       return;
     }
-    conversationApi
-      .get(rec.conversation_id)
-      .then((conv) => {
-        const first = conv.messages.find((m) => m.role === MessageRole.ASSISTANT);
-        setReadings((prev) => ({ ...prev, [rec.conversation_id]: first?.content ?? '' }));
-      })
-      .catch(() => setReadings((prev) => ({ ...prev, [rec.conversation_id]: null })));
+    loadReading(rec.conversation_id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate, overview, isOpen]);
 
+  // 牌已落定,请占卜师写今日解读。失败了牌照旧,提示后舞台上可以再请一次
+  const requestReading = async (eff: string, conversationId: string) => {
+    setInterpreting({ conversationId, startedAt: Date.now() });
+    let reading: string;
+    try {
+      reading = (await dailyApi.reading(userId, eff)).reading;
+    } catch (e) {
+      const err = e as { response?: { status?: number; data?: { detail?: string } } };
+      // 409 = 早先那次请求已经写好了(比如写的时候刷新过页面):不算失败,取回来就是
+      if (err?.response?.status !== 409) {
+        toast.error(err?.response?.data?.detail || '解读失败,请重试');
+      }
+      await loadReading(conversationId); // 以库里为准:没写成就是空的,舞台上给「重新解读」
+      setInterpreting(null);
+      return;
+    }
+    setReadings((prev) => ({ ...prev, [conversationId]: reading }));
+    setInterpreting(null);
+    await onRefreshOverview(); // 殿堂入口的签语是解读首句
+  };
+
   const handleCardsDrawn = async () => {
-    // 选牌器仪式完成 → 后端抽出真牌并当场生成今日解读 → 在弹窗里揭示
+    // 选牌器仪式完成 → 后端抽出真牌、落下记录 → 牌在弹窗里翻开 → 接着等今日解读
     setShowDrawer(false);
-    setDrawStartedAt(Date.now());
+    setDrawing(true);
     try {
       const eff = todayDate;
       const res = await dailyApi.draw(userId, eff);
-      setReadings((prev) => ({ ...prev, [res.conversation_id]: res.reading }));
-      await onRefreshOverview();
+      void requestReading(eff, res.conversation_id);
+      await onRefreshOverview(); // 记录一到,舞台上的牌就翻开
       setSelectedDate(eff);
     } catch (e) {
       const err = e as { response?: { status?: number; data?: { detail?: string } } };
@@ -188,7 +195,7 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
         toast.error(err?.response?.data?.detail || '抽牌失败,请重试');
       }
     } finally {
-      setDrawStartedAt(null);
+      setDrawing(false);
     }
   };
 
@@ -292,10 +299,7 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
               {/* 舞台区 */}
               <div className="mt-5 min-h-[260px]">
                 {!record ? (
-                  isToday && drawStartedAt !== null ? (
-                    /* ── 牌已选定,等解读 ── */
-                    <DrawingStage startedAt={drawStartedAt} />
-                  ) : isToday ? (
+                  isToday ? (
                     /* ── 今日未抽 ── */
                     <div className="flex flex-col items-center text-center py-4">
                       <motion.img
@@ -318,7 +322,8 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
                       </p>
                       <button
                         onClick={() => setShowDrawer(true)}
-                        className="mt-4 px-7 py-2.5 rounded-xl font-display tracking-[0.15em] text-sm transition-all hover:brightness-110"
+                        disabled={drawing}
+                        className="mt-4 px-7 py-2.5 rounded-xl font-display tracking-[0.15em] text-sm transition-all hover:brightness-110 disabled:opacity-60"
                         style={{
                           color: '#1a1407',
                           background: 'linear-gradient(120deg, #C9A96E, #E2C893)',
@@ -372,7 +377,9 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
 
                     {/* 解读区 */}
                     <div className="w-full mt-4 text-left">
-                      {reading === undefined ? (
+                      {interpreting?.conversationId === record.conversation_id ? (
+                        <ReadingPending startedAt={interpreting.startedAt} />
+                      ) : reading === undefined ? (
                         <p className="text-sm text-center" style={{ color: 'var(--ivory-dim)' }}>
                           正在取回解读……
                         </p>
@@ -380,6 +387,19 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
                         <p className="text-sm text-center italic" style={{ color: 'var(--ivory-dim)' }}>
                           这段对话已随风而逝
                         </p>
+                      ) : reading === '' && isToday ? (
+                        <div className="flex flex-col items-center text-center">
+                          <p className="text-sm italic" style={{ color: 'var(--ivory-dim)' }}>
+                            解读还没写出来
+                          </p>
+                          <button
+                            onClick={() => requestReading(record.effective_date, record.conversation_id)}
+                            className="mt-3 px-5 py-2 rounded-xl font-display tracking-[0.12em] text-sm transition-all hover:bg-white/[0.04]"
+                            style={{ border: '1px solid var(--gold)', color: 'var(--gold)' }}
+                          >
+                            重新解读
+                          </button>
+                        </div>
                       ) : reading === '' ? (
                         <p className="text-sm text-center italic" style={{ color: 'var(--ivory-dim)' }}>
                           这一日没有留下解读

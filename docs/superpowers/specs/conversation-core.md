@@ -120,7 +120,7 @@ SSE 里只有正文。要不要显示抽牌 / 补资料按钮、抽牌器用什�
 | 场合 | 落成什么 |
 |---|---|
 | 开场白 | `POST /api/conversations/{id}/greeting`，会话的第一条 assistant |
-| 每日一签的当日解读 | 抽签接口当场生成，当日的牌挂在这条 assistant 上 |
+| 每日一签的当日解读 | 抽完牌之后 `POST /api/daily/{user_id}/reading` 生成，会话的第一条 assistant，当日的牌挂在它上面 |
 | 心灵奇旅 | 整段提示词一次生成，不落进会话 |
 
 SSE 形状与 `/message` 一致，前端的等待体验因此和等一轮回复一样。

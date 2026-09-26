@@ -1,6 +1,6 @@
 """每日一签 / 心灵奇旅：都是单次生成，没有对话历史，也没有用户发言要回。
 
-  · 抽签：服务端当场生成今日解读，落成第一条 assistant（牌挂在它上面），随响应返回
+  · 抽签：服务端抽牌、落记录，立刻返回牌；解读另走 /reading，落成第一条 assistant（牌挂在它上面）
   · 心灵奇旅：整段提示词就是全部输入，一次生成，整段推给前端
 
 两者都不再拿一条编出来的用户发言（「请根据抽牌结果进行解读」「请回望我最近的旅程」）
@@ -75,50 +75,110 @@ def _usage():
     return day.get(USER_ID, 0)
 
 
-def test_draw_generates_the_reading_and_stores_it_with_the_card(env, monkeypatch):
-    prov = _install(monkeypatch, "星星在今夜为你点灯。它提醒你保持希望。")
+def _draw(env, today):
+    """抽签 + 解读，和前端的顺序一样。返回 conversation_id。"""
+    conv_id = env.post(f"/api/daily/{USER_ID}/draw", json={"effective_date": today}).json()["conversation_id"]
+    assert env.post(f"/api/daily/{USER_ID}/reading", json={"effective_date": today}).status_code == 200
+    return conv_id
+
+
+def test_draw_returns_the_card_before_any_reading(env, monkeypatch):
+    """抽签只抽牌、落记录：不调 LLM、不计费，牌立刻返回，前端先翻开。"""
+    prov = _install(monkeypatch, "星星在今夜为你点灯。")
     today = date.today().isoformat()
 
     resp = env.post(f"/api/daily/{USER_ID}/draw", json={"effective_date": today})
     assert resp.status_code == 200
     body = resp.json()
-    assert body["reading"] == "星星在今夜为你点灯。它提醒你保持希望。"
     assert body["record"]["effective_date"] == today
+    assert "reading" not in body
+    assert prov.prompts == [] and _usage() == 0
+
+    # 记录已经落了，同一天不能再抽；对话建好了，还没有任何记录
+    overview = env.get(f"/api/daily/{USER_ID}/overview", params={"date": today}).json()
+    assert overview["today_record"]["card"] == body["record"]["card"]
+    assert overview["history"][-1]["conversation_exists"] is True
+    assert overview["history"][-1]["tagline"] is None
+    conv = env.get(f"/api/conversations/{body['conversation_id']}").json()
+    assert conv["messages"] == [] and conv["has_drawn_cards"] is True
+    assert env.post(f"/api/daily/{USER_ID}/draw", json={"effective_date": today}).status_code == 409
+
+
+def test_reading_is_generated_and_stored_with_the_card(env, monkeypatch):
+    prov = _install(monkeypatch, "星星在今夜为你点灯。它提醒你保持希望。")
+    today = date.today().isoformat()
+    drawn = env.post(f"/api/daily/{USER_ID}/draw", json={"effective_date": today}).json()
+
+    resp = env.post(f"/api/daily/{USER_ID}/reading", json={"effective_date": today})
+    assert resp.status_code == 200
+    assert resp.json() == {"reading": "星星在今夜为你点灯。它提醒你保持希望。"}
 
     # 提示词里带着这张牌；这是唯一一次 LLM 调用，计费一次
     assert len(prov.prompts) == 1
-    assert body["record"]["card"]["card_name"] in prov.prompts[0]
+    assert drawn["record"]["card"]["card_name"] in prov.prompts[0]
     assert _usage() == 1
 
     # 会话：只有一条 assistant，牌挂在它上面；没有 system / user / tool 记录
-    conv = env.get(f"/api/conversations/{body['conversation_id']}").json()
+    conv = env.get(f"/api/conversations/{drawn['conversation_id']}").json()
     assert [m["role"] for m in conv["messages"]] == ["assistant"]
-    assert conv["messages"][0]["content"] == body["reading"]
-    assert conv["messages"][0]["tarot_cards"][0]["card_name"] == body["record"]["card"]["card_name"]
-    assert conv["has_drawn_cards"] is True
+    assert conv["messages"][0]["content"] == "星星在今夜为你点灯。它提醒你保持希望。"
+    assert conv["messages"][0]["tarot_cards"] == [drawn["record"]["card"]]
 
     # 概览里的签语就是解读首句
     overview = env.get(f"/api/daily/{USER_ID}/overview", params={"date": today}).json()
     assert overview["history"][-1]["tagline"] == "星星在今夜为你点灯"
 
+    # 解读过了就不再写第二段
+    again = env.post(f"/api/daily/{USER_ID}/reading", json={"effective_date": today})
+    assert again.status_code == 409 and len(prov.prompts) == 1
 
-def test_draw_failure_leaves_nothing_behind(env, monkeypatch):
-    """生成失败 → 503，记录和会话都不落，用户重抽即可。"""
+
+def test_reading_failure_keeps_the_card_and_can_be_retried(env, monkeypatch):
+    """生成失败 → 503，对话里什么都不落；牌和记录照旧，再请一次就好。"""
     from services import llm
 
     class _Boom:
         async def generate_text(self, *a, **k):
             raise RuntimeError("provider down")
 
-    monkeypatch.setattr(llm, "get_provider", lambda agent: _Boom())
     today = date.today().isoformat()
+    assert env.post(f"/api/daily/{USER_ID}/reading", json={"effective_date": today}).status_code == 404
 
-    resp = env.post(f"/api/daily/{USER_ID}/draw", json={"effective_date": today})
+    drawn = env.post(f"/api/daily/{USER_ID}/draw", json={"effective_date": today}).json()
+    monkeypatch.setattr(llm, "get_provider", lambda agent: _Boom())
+    resp = env.post(f"/api/daily/{USER_ID}/reading", json={"effective_date": today})
     assert resp.status_code == 503
 
     overview = env.get(f"/api/daily/{USER_ID}/overview", params={"date": today}).json()
-    assert overview["history"][-1]["record"] is None
-    assert env.get(f"/api/conversations/user/{USER_ID}").json() == []
+    assert overview["today_record"]["card"] == drawn["record"]["card"]
+    assert env.get(f"/api/conversations/{drawn['conversation_id']}").json()["messages"] == []
+
+    _install(monkeypatch, "星星在今夜为你点灯。")
+    assert env.post(f"/api/daily/{USER_ID}/reading", json={"effective_date": today}).json() == {
+        "reading": "星星在今夜为你点灯。"}
+
+
+def test_reading_written_meanwhile_is_not_doubled(env, monkeypatch):
+    """写解读的十几秒里另一次请求先写好了（刷新页面后又点了「重新解读」）：
+    后到的那段不落，对话里只有一条解读。"""
+    from services import llm
+    from services.conversation_service import ConversationService
+    from models import Message
+
+    today = date.today().isoformat()
+    conv_id = env.post(f"/api/daily/{USER_ID}/draw", json={"effective_date": today}).json()["conversation_id"]
+
+    class _Slow:
+        async def generate_text(self, *a, **k):
+            # 这一段还在写的时候，先到的那次已经落库
+            await ConversationService.append_message(
+                conv_id, Message(role=MessageRole.ASSISTANT, content="先写好的那段。"))
+            return "后写好的那段。"
+
+    monkeypatch.setattr(llm, "get_provider", lambda agent: _Slow())
+    assert env.post(f"/api/daily/{USER_ID}/reading", json={"effective_date": today}).status_code == 409
+    conv = env.get(f"/api/conversations/{conv_id}").json()
+    assert [m["content"] for m in conv["messages"]] == ["先写好的那段。"]
 
 
 def test_followup_chat_in_a_daily_conversation_continues_from_the_reading(env, monkeypatch):
@@ -127,7 +187,7 @@ def test_followup_chat_in_a_daily_conversation_continues_from_the_reading(env, m
 
     _install(monkeypatch, "今天的星星提醒你保持希望。")
     today = date.today().isoformat()
-    conv_id = env.post(f"/api/daily/{USER_ID}/draw", json={"effective_date": today}).json()["conversation_id"]
+    conv_id = _draw(env, today)
 
     seen = {}
 
@@ -199,8 +259,8 @@ def test_journeys_are_kept_for_reading_back(env, monkeypatch):
     assert _usage() == 2
 
 
-def test_draw_and_journey_are_not_blocked_when_quota_exhausted(env, monkeypatch):
-    """日签抽签、心灵奇旅都是一天一次的单次生成：额度用完也放行，只是照样记一次。"""
+def test_reading_and_journey_are_not_blocked_when_quota_exhausted(env, monkeypatch):
+    """日签解读、心灵奇旅都是一天一次的单次生成：额度用完也放行，只是照样记一次。"""
     import services.rate_limit_service as rl_mod
     from services.daily_service import DailyService
 
@@ -213,6 +273,7 @@ def test_draw_and_journey_are_not_blocked_when_quota_exhausted(env, monkeypatch)
     today = date.today().isoformat()
 
     assert env.post(f"/api/daily/{USER_ID}/draw", json={"effective_date": today}).status_code == 200
+    assert env.post(f"/api/daily/{USER_ID}/reading", json={"effective_date": today}).status_code == 200
     assert env.post(f"/api/daily/{USER_ID}/journey", params={"date": today}).status_code == 200
     assert _usage() == 2
 
@@ -231,7 +292,7 @@ def test_journeys_flag_today_conversations_not_yet_archived(env, monkeypatch):
     assert env.get(f"/api/daily/{USER_ID}/journeys", params={"date": today}).json()["pending_today"] is False
 
     _install(monkeypatch, "星星在今夜为你点灯。")
-    conv_id = env.post(f"/api/daily/{USER_ID}/draw", json={"effective_date": today}).json()["conversation_id"]
+    conv_id = _draw(env, today)
     # 只抽了签没聊：那张牌本来就在素材里，不算没归档
     assert env.get(f"/api/daily/{USER_ID}/journeys", params={"date": today}).json()["pending_today"] is False
 
@@ -267,7 +328,7 @@ def test_journey_counts_readings_that_drew_cards(env, monkeypatch):
         )))
 
     _install(monkeypatch, "星星在今夜为你点灯。")
-    env.post(f"/api/daily/{USER_ID}/draw", json={"effective_date": today})
+    _draw(env, today)
     save("tarot_1", [TarotCard(card_id=0, card_name="愚者")])
     save("no_cards", [])
     assert ready() is False      # 1 签 + 1 场抽过牌的占卜；没抽牌那场不算
@@ -286,7 +347,7 @@ def test_feedback_note_is_limited_to_30_chars(env, monkeypatch):
     """附言原样进提示词：30 字以内收下，多一个字整条拒收，旧附言不被覆盖。"""
     _install(monkeypatch, "星星在今夜为你点灯。")
     today = date.today().isoformat()
-    env.post(f"/api/daily/{USER_ID}/draw", json={"effective_date": today})
+    _draw(env, today)
 
     ok = env.post(f"/api/daily/{USER_ID}/feedback",
                   json={"effective_date": today, "verdict": "hit", "note": "准" * 30})

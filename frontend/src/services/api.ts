@@ -403,9 +403,15 @@ export const dailyApi = {
   draw: async (
     userId: string,
     effectiveDate: string
-  ): Promise<{ record: DailyDrawRecord; conversation_id: string; reading: string }> => {
-    // 今日解读在抽签时由服务端直接生成，随响应返回
+  ): Promise<{ record: DailyDrawRecord; conversation_id: string }> => {
+    // 只抽牌：服务端抽出真牌、落下记录就返回，解读另走 reading
     const r = await api.post(`/api/daily/${userId}/draw`, { effective_date: effectiveDate });
+    return r.data;
+  },
+
+  /** 抽完牌之后的今日解读：整段生成完才返回（最长 60 秒超时） */
+  reading: async (userId: string, effectiveDate: string): Promise<{ reading: string }> => {
+    const r = await api.post(`/api/daily/${userId}/reading`, { effective_date: effectiveDate });
     return r.data;
   },
 

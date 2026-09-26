@@ -245,5 +245,8 @@ class JourneyListResponse(BaseModel):
 class DailyDrawResponse(BaseModel):
     record: DailyDrawRecord
     conversation_id: str
-    reading: str    # 今日解读：抽签时服务端直接生成，随响应返回
+
+
+class DailyReadingResponse(BaseModel):
+    reading: str    # 今日解读：抽完牌之后单独生成，落成那场对话的第一条 assistant
 
