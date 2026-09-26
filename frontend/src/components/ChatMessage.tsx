@@ -156,9 +156,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
       )}
 
       {/* Content */}
-      <div className={`flex-1 max-w-3xl ${isUser ? 'text-right' : 'text-left'}`}>
+      {/* min-w-0 + 气泡 max-w-full：气泡最宽到这一列为止，里面放不下的（抽牌按钮那行说明）自己截断，不把列撑出屏幕 */}
+      <div className={`flex-1 min-w-0 max-w-3xl ${isUser ? 'text-right' : 'text-left'}`}>
         <div
-          className={`inline-block px-5 py-4 rounded-2xl backdrop-blur-xl text-left ${
+          className={`inline-block max-w-full px-5 py-4 rounded-2xl backdrop-blur-xl text-left ${
             isUser ? 'rounded-tr-md' : 'rounded-tl-md'
           }`}
           style={

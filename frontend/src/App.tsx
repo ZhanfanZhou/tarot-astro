@@ -771,7 +771,8 @@ const App: React.FC = () => {
           >
             <div ref={setConvPane} className="flex-1 min-h-0 relative">
             {/* Messages */}
-            <div className="absolute inset-0 overflow-y-auto px-4 sm:px-6 py-6">
+            {/* overflow-x-hidden：只许上下滚，手机上不能左右拖（同殿堂） */}
+            <div className="absolute inset-0 overflow-y-auto overflow-x-hidden px-4 sm:px-6 py-6">
               <div className="max-w-[720px] mx-auto space-y-6">
                 {visibleRows.map(({ message, idx, cards }) => {
                   const isLast = buttonOnLastRow && message === lastVisibleMessage;

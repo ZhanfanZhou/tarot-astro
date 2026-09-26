@@ -63,6 +63,13 @@ body {
   position: relative;
 }
 
+/* iPhone 上点进字号 <16px 的输入框，Safari 会把整页放大，而且不会自己缩回：
+   之后整页能上下左右拖，气泡和按钮看着被切掉一截，抽牌器也跟着页面晃。
+   手机上输入框一律 16px，从根上不触发放大（各组件自己的字号在桌面上照旧）。 */
+@media (max-width: 639px) {
+  input, textarea, select { font-size: 16px !important; }
+}
+
 /* ── Gold scrollbar (replaces the old purple bar) ──────────────────────────── */
 ::-webkit-scrollbar { width: 11px; height: 11px; }
 ::-webkit-scrollbar-track { background: transparent; }

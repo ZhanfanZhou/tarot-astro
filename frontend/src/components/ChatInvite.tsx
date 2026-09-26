@@ -117,7 +117,7 @@ const ChatInvite: React.FC<ChatInviteProps> = ({ kind, title, positions = [], af
   const tag = isDraw ? (positions.length ? `${positions.length} 张` : '') : '出生资料';
   const line = isDraw
     ? positions.length
-      ? positions.join(' · ')
+      ? positions.join(' · ') // 不断行空格把 · 贴在前一个位置上，折行只落在 · 后面
       : '洗牌之后，凭直觉选牌'
     : '出生日期 · 时间 · 城市，用来排出星盘';
 
@@ -143,7 +143,8 @@ const ChatInvite: React.FC<ChatInviteProps> = ({ kind, title, positions = [], af
         onHoverEnd={() => setHovered(false)}
         whileHover={reduceMotion ? {} : { y: -2 }}
         whileTap={{ scale: 0.985 }}
-        className="group relative w-full min-w-[17rem] sm:min-w-[20rem] flex items-center gap-4 pl-3 pr-3.5 py-3 rounded-2xl text-left"
+        // 手机上不设最小宽度：气泡那一列只有 ~300px，17rem 会把气泡撑出屏幕、拖出横向滚动
+        className="group relative w-full sm:min-w-[20rem] flex items-center gap-4 pl-3 pr-3.5 py-3 rounded-2xl text-left"
       >
         {/* 背光：从小图那一格透出来，悬停时亮起 */}
         <span
@@ -185,7 +186,8 @@ const ChatInvite: React.FC<ChatInviteProps> = ({ kind, title, positions = [], af
           <span className="block font-display text-[15px] tracking-[0.14em] mt-1" style={{ color: 'var(--ivory)' }}>
             {title}
           </span>
-          <span className="block text-[11px] mt-0.5 tracking-[0.06em] truncate" style={{ color: 'var(--ivory-faint)' }}>
+          {/* 手机上折行写全牌阵各位置（窄屏截断会把后几个位置吞掉），break-keep 不把「未来」拆成两行；桌面一行截断 */}
+          <span className="block text-[11px] mt-0.5 tracking-[0.06em] break-keep sm:truncate" style={{ color: 'var(--ivory-faint)' }}>
             {line}
           </span>
         </span>
