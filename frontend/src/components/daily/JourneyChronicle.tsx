@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Feather } from 'lucide-react';
 import Markdown from '../Markdown';
-import { dailyApi } from '@/services/api';
+import { dailyApi, StreamCut } from '@/services/api';
 import { toast } from '@/stores/useToastStore';
 import type { JourneyEntry } from '@/types';
 
@@ -48,6 +48,8 @@ const JourneyChronicle: React.FC<JourneyChronicleProps> = ({
   const [loading, setLoading] = useState(false);
   const [writing, setWriting] = useState(false);
   const [draft, setDraft] = useState('');   // 正在流式写下的那一篇
+  // 这个页面正在跟着写:关了卷宗再打开,接着看这一份,不重来
+  const writingRef = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -57,6 +59,7 @@ const JourneyChronicle: React.FC<JourneyChronicleProps> = ({
       setReady(list.ready);
       setPendingToday(list.pending_today);
       setSelected(0);
+      return list;
     } catch (error) {
       console.error('[Journey] 加载卷宗失败:', error);
       toast.error('卷宗一时翻不开,请稍后再试');
@@ -66,25 +69,38 @@ const JourneyChronicle: React.FC<JourneyChronicleProps> = ({
   }, [userId, todayDate]);
 
   useEffect(() => {
-    if (isOpen) {
-      setDraft('');
-      load();
-    }
+    if (!isOpen || writingRef.current) return;
+    setDraft('');
+    // 今天那一篇在服务端正在写(写的时候刷新过页面):接上它,已经写出来的先补上
+    load().then((list) => {
+      if (list?.writing) write();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, load]);
 
+  // 写今天这一篇;正在写的话,同一个请求接上那一份
   const write = async () => {
+    writingRef.current = true;
     setWriting(true);
     setDraft('');
+    let cut = false;
     try {
       await dailyApi.journey(userId, todayDate, (chunk) =>
         setDraft((prev) => prev + chunk)
       );
       await load();
     } catch (error: any) {
-      toast.error(error?.message || '旅程一时写不出来,请稍后再试');
+      if (error instanceof StreamCut) cut = true;
+      else toast.error(error?.message || '旅程一时写不出来,请稍后再试');
     } finally {
+      writingRef.current = false;
       setWriting(false);
       setDraft('');
+    }
+    // 连接断了(手机切走、网络晃了一下),服务端照样在写:还在写就接上,写完了卷宗里就有
+    if (cut) {
+      const list = await load();
+      if (list?.writing) write();
     }
   };
 

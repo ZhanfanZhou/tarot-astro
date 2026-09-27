@@ -46,13 +46,32 @@ OpenAI 的 `assistant.tool_calls` / `role=tool`），不推断、不伪造任何
 所有入口（`/api/tarot/*`、`/api/astrology/*`）都是薄壳，转 `turn_service`：
 
 ```
-校验（归属 / 旧会话）→ 收口上一轮没做完的 interrupt → 额度（/message 用完就 429，/resume 只计数）
-→ Agent Loop → 逐条落库 → SSE 推正文
+校验（归属 / 旧会话 / 这场有没有一轮还在跑）→ 收口上一轮没做完的 interrupt
+→ 看额度（/message 用完就 429，/resume 不拦）→ 后台跑 Agent Loop（逐条落库）→ SSE 推正文
+→ 跑完才扣额度
 ```
 
 Agent Loop（`gemini_service.stream_response`）按相位取 provider、提示词、工具集，
 yield 三种事件：`content`（正文片段）、`message`（一条要落库的记录）、`done`。
 **SSE 只推正文**，界面需要的其余状态从会话数据推导（见 §4）。
+
+### 生成不跟着请求走
+
+和 ChatGPT / Claude 网页一样：刷新不等于失败。一轮对话、开场白、日签解读、心灵奇旅都交给
+`live_turns` 在后台任务里跑，发起它的请求只是观众——页面关了、刷新了、手机切走把连接断了，
+任务照样跑完、逐条落库。
+
+- 按 key 登记进行中的生成（对话用 conversation_id，心灵奇旅用人 + 日期），线上单 worker，放进程内。
+  「看库里的状态 → 看有没有在跑 → 起一个」在同一把按 key 的锁里做完，同一个 key 一次只起一个。
+- 流的形状（前端 `readStream` 同一个读法）：先 `{"start": n}`——这段回复从会话第 n 条记录开始；
+  再是正文块 `{"content"}`；生成失败一条 `{"error": 给用户看的话}`；最后 `[DONE]`。
+- `GET /api/conversations/{id}/live`：这场有一段回复在生成 → 同样形状的流，先把已经出来的正文补上，
+  后面的接着推；没有 → 204。前端打开一场会话（从最近的占卜点进来、日签「继续这段对话」）就来要一次；
+  发起的那条流没等到 `[DONE]` 就断了（`StreamCut`），也来要一次。接上时会话只显示第 n 条之前的，
+  从 n 开始的正文（可能已经落了一部分库）都在流式气泡里，不显示两遍。
+- 这场有一轮还在跑时再发 `/message`、`/resume` → 409。
+- 失败了（模型 / 网络出错）：已经落库的照旧，流里给 error，前端提示；**不扣额度**——额度在生成成功跑完之后才扣。
+  进程重启时正在跑的会丢，已经落库的照旧，同样不扣。
 
 ### 工具集
 
@@ -123,7 +142,8 @@ SSE 里只有正文。要不要显示抽牌 / 补资料按钮、抽牌器用什�
 | 每日一签的当日解读 | 抽完牌之后 `POST /api/daily/{user_id}/reading` 生成，会话的第一条 assistant，当日的牌挂在它上面 |
 | 心灵奇旅 | 整段提示词一次生成，不落进会话 |
 
-SSE 形状与 `/message` 一致，前端的等待体验因此和等一轮回复一样。
+三处都和一轮对话一样交给 `live_turns` 在后台跑（见 §2）。开场白、心灵奇旅的 SSE 形状与 `/message` 一致，
+前端的等待体验因此和等一轮回复一样；日签解读是普通 JSON，正在写就等那一份写完一起返回。
 
 ---
 
@@ -199,6 +219,7 @@ SSE 形状与 `/message` 一致，前端的等待体验因此和等一轮回复�
 | 文件 | 管什么 |
 |---|---|
 | `services/turn_service.py` | 一轮对话的全流程（塔罗占星共用） |
+| `services/live_turns.py` | 进行中的生成：后台任务、按 key 登记与加锁、SSE 观众 |
 | `services/tool_turns.py` | 工具轮落库形状、interrupt 结果、旧会话判定 |
 | `services/gemini_service.py` | Agent Loop |
 | `services/context_service.py` | 相位判定、提示词拼装、用户资料 / 画像 / 来访次数块 |

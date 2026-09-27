@@ -73,6 +73,54 @@ const streamError = async (response: Response): Promise<Error & { status?: numbe
   return err;
 };
 
+/** 流没等到 [DONE] 就断了（手机切走、网络晃了一下）：服务端照样在生成，接上就是，不算失败 */
+export class StreamCut extends Error {
+  constructor() {
+    super('连接断开了');
+    this.name = 'StreamCut';
+  }
+}
+
+/**
+ * 读完一个生成流（/message /resume /greeting /live /journey 同一个形状）：
+ * {"start": n} 这段回复从会话第 n 条记录开始；{"content"} 正文块；{"error"} 生成失败（抛出，文案直接给用户看）；
+ * [DONE] 结束。没等到 [DONE] 流就断了 → 抛 StreamCut。
+ */
+async function readStream(
+  response: Response,
+  onChunk: (chunk: string) => void,
+  onStart?: (start: number) => void
+): Promise<void> {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('无法读取响应流');
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    let read: ReadableStreamReadResult<Uint8Array>;
+    try {
+      read = await reader.read();
+    } catch {
+      throw new StreamCut();
+    }
+    if (read.done) throw new StreamCut();
+
+    buffer += decoder.decode(read.value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6);
+      if (data === '[DONE]') return;
+      const parsed = JSON.parse(data);
+      if (parsed.error) throw new Error(parsed.error);
+      if (parsed.start !== undefined) onStart?.(parsed.start);
+      if (parsed.content) onChunk(parsed.content);
+    }
+  }
+}
+
 // 用户相关API
 export const userApi = {
   createGuest: async (profile?: UserProfile): Promise<AuthResponse> => {
@@ -172,6 +220,24 @@ export const conversationApi = {
   greeting: (conversationId: string, onChunk: (chunk: string) => void): Promise<void> =>
     streamTurn(`${API_BASE_URL}/api/conversations/${conversationId}/greeting`, {}, onChunk),
 
+  /**
+   * 接上这场会话在服务端还在生成的那段回复（关过页面、刷新过、连接断过）：已经出来的正文先补上，
+   * 后面的接着流。onStart(n)：这段回复从第 n 条记录开始，之前的照常显示。没有在生成的 → 返回 false。
+   */
+  live: async (
+    conversationId: string,
+    onStart: (start: number) => void,
+    onChunk: (chunk: string) => void
+  ): Promise<boolean> => {
+    const response = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/live`, {
+      headers: { ...authHeaders() },
+    });
+    if (response.status === 204) return false;
+    if (!response.ok) throw await streamError(response);
+    await readStream(response, onChunk, onStart);
+    return true;
+  },
+
   /** 本人在这场里点过的赞 / 踩：消息下标 → up / down */
   getFeedback: async (conversationId: string): Promise<Record<number, FeedbackRating>> => {
     const response = await api.get(`/api/conversations/${conversationId}/feedback`);
@@ -202,7 +268,8 @@ export const conversationApi = {
  * 跑一轮并把正文流式交给 onChunk。body 只有两种形状：
  *   {conversation_id, content}  —— 用户说了一句话（/message）
  *   {conversation_id}           —— 用户在界面上做完了动作（抽完牌 / 填完资料），请接着跑（/resume）
- * 流里只有正文。要不要显示抽牌/补资料按钮，看刷新后会话末尾那条记录的 tool_calls。
+ * 流里只有正文（形状见 readStream）。要不要显示抽牌/补资料按钮，看刷新后会话末尾那条记录的 tool_calls。
+ * 这一轮在服务端后台跑，流断了它照样跑完；接回去走 conversationApi.live。
  */
 async function streamTurn(url: string, body: object, onChunk: (chunk: string) => void): Promise<void> {
   const response = await fetch(url, {
@@ -214,31 +281,7 @@ async function streamTurn(url: string, body: object, onChunk: (chunk: string) =>
   if (!response.ok) {
     throw await streamError(response);
   }
-
-  const reader = response.body?.getReader();
-  if (!reader) {
-    throw new Error('无法读取响应流');
-  }
-
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6);
-      if (data === '[DONE]') return;
-      const parsed = JSON.parse(data);
-      if (parsed.content) onChunk(parsed.content);
-    }
-  }
+  await readStream(response, onChunk);
 }
 
 // 牌阵与位置由后端从那次 draw_tarot_cards 调用里取，这里不传
@@ -435,7 +478,7 @@ export const dailyApi = {
     return r.data;
   },
 
-  /** 心灵奇旅(SSE 流式;解析方式与 tarotApi.sendMessage 一致)。一天一篇,当天写过就是回放 */
+  /** 心灵奇旅(SSE 流式,形状同 readStream)。一天一篇,当天写过就是回放,正在写就接上那一份 */
   journey: async (
     userId: string,
     date: string,
@@ -448,29 +491,7 @@ export const dailyApi = {
     if (!response.ok) {
       throw await streamError(response);
     }
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error('无法读取响应流');
-    const decoder = new TextDecoder();
-    let buffer = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]') return;
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.content) onChunk(parsed.content);
-          } catch {
-            /* ignore malformed chunk */
-          }
-        }
-      }
-    }
+    await readStream(response, onChunk);
   },
 };
 

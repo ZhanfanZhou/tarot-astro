@@ -1,11 +1,13 @@
-"""一轮对话：校验 → 收口 interrupt → 扣额度 → Agent Loop → 逐条落库 → SSE。
+"""一轮对话：校验 → 收口 interrupt → 看额度 → 后台跑 Agent Loop（逐条落库）→ SSE → 跑完才扣额度。
 
 塔罗与占星两个 router 共用（此前各自复制了一份 250 行的同样逻辑）。会话类型、相位、
 提示词都从会话本身取，router 只负责路径和鉴权。
+
+这一轮交给 live_turns 在后台跑，不跟着请求走：页面关了、刷新了，照样跑完落库，
+重新打开这场对话时从 GET /api/conversations/{id}/live 接上。
 """
-import json
 from datetime import datetime
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
@@ -13,11 +15,11 @@ from fastapi.responses import StreamingResponse
 from models import (
     Conversation, DrawCardsRequest, DrawCardsResponse, Message, MessageRole, SessionType, User,
 )
-from services import opening_service, tool_turns
+from services import live_turns, opening_service, tool_turns
 from services.astrology_service import AstrologyService
 from services.conversation_service import ConversationService
 from services.daily_service import DailyService
-from services.gemini_service import GeminiService, chunk_text
+from services.gemini_service import GeminiService
 from services.notebook_service import notebook_enabled, notebook_service
 from services.rate_limit_service import RateLimitService
 from services.storage_service import StorageService
@@ -41,94 +43,84 @@ async def stream_turn(
     conversation_id: str, current_user: User, user_content: Optional[str],
 ) -> StreamingResponse:
     """user_content 为 None = resume：用户在界面上做完了动作，不写用户消息。"""
-    conversation = await _load(conversation_id, current_user)
-    user = current_user
-    pending = tool_turns.pending_interrupt(conversation)
+    async with live_turns.lock(conversation_id):
+        conversation = await _load(conversation_id, current_user)
+        if live_turns.running(conversation_id):
+            # 另一个标签页 / 设备上这一轮还在跑
+            raise HTTPException(status_code=409, detail="上一段回复还没说完，请稍候")
+        user = current_user
+        pending = tool_turns.pending_interrupt(conversation)
 
-    # 先把历史收口成「每个调用后面都跟着结果」，再扣额度、再跑模型
-    if user_content is not None:
-        if not user_content.strip():
-            raise HTTPException(status_code=400, detail="消息内容不能为空")
-        appended = []
-        if pending:
-            # 用户没做那一步（没抽牌 / 没填资料），直接说话了——把这个事实作为结果记下
-            appended.append(tool_turns.tool_message(pending, tool_turns.declined_result(pending)))
-        appended.append(Message(role=MessageRole.USER, content=user_content))
-    else:
-        if pending and pending.name == "request_user_profile":
-            appended = [tool_turns.tool_message(
-                pending, tool_turns.profile_result(user, conversation))]
-        elif pending:
-            raise HTTPException(status_code=400, detail="还没有抽牌，没有可以继续的内容")
-        elif conversation.messages and conversation.messages[-1].role == MessageRole.TOOL:
-            appended = []   # 抽牌结果已由 /draw 写好，直接继续
+        # 先把历史收口成「每个调用后面都跟着结果」，再看额度、再跑模型
+        if user_content is not None:
+            if not user_content.strip():
+                raise HTTPException(status_code=400, detail="消息内容不能为空")
+            appended = []
+            if pending:
+                # 用户没做那一步（没抽牌 / 没填资料），直接说话了——把这个事实作为结果记下
+                appended.append(tool_turns.tool_message(pending, tool_turns.declined_result(pending)))
+            appended.append(Message(role=MessageRole.USER, content=user_content))
         else:
-            raise HTTPException(status_code=400, detail="没有可以继续的内容")
+            if pending and pending.name == "request_user_profile":
+                appended = [tool_turns.tool_message(
+                    pending, tool_turns.profile_result(user, conversation))]
+            elif pending:
+                raise HTTPException(status_code=400, detail="还没有抽牌，没有可以继续的内容")
+            elif conversation.messages and conversation.messages[-1].role == MessageRole.TOOL:
+                appended = []   # 抽牌结果已由 /draw 写好，直接继续
+            else:
+                raise HTTPException(status_code=400, detail="没有可以继续的内容")
 
-    # 用户开口说话才看额度；resume 是抽牌/补资料之后的那段解读，只计数不拦
-    if user_content is not None:
-        await RateLimitService.check_and_consume(current_user)
-    else:
-        await RateLimitService.consume(current_user)
-    for msg in appended:
-        conversation = await ConversationService.append_message(conversation_id, msg)
+        # 用户开口说话才看额度；resume 是抽牌/补资料之后的那段解读，不拦。扣都在这一轮跑完之后
+        if user_content is not None:
+            RateLimitService.check(current_user)
+        for msg in appended:
+            conversation = await ConversationService.append_message(conversation_id, msg)
 
-    # 开场幕上下文：相位 + <称呼与来访次数>
-    phase, relationship_block = await opening_service.prepare_opening_context(
-        conversation, user
-    )
+        # 开场幕上下文：相位 + <称呼与来访次数>
+        phase, relationship_block = await opening_service.prepare_opening_context(
+            conversation, user
+        )
 
-    async def execute_function(func_name: str, func_args: dict) -> dict:
-        print(f"\n[Function Executor] 执行函数: {func_name} {func_args}")
-        if func_name == "submit_reading_brief":
-            # 纯后台工具：按牌阵 ID 展开起手单、落库、翻相位，不产生任何前端事件
-            return await opening_service.submit_brief(conversation, dict(func_args))
-        if func_name == "get_astrology_chart":
-            return await _fetch_chart(user)
-        if func_name == "read_divination_notes":
-            return _read_notes(user)
-        return {"success": False, "error": f"未知的函数: {func_name}"}
+        async def execute_function(func_name: str, func_args: dict) -> dict:
+            print(f"\n[Function Executor] 执行函数: {func_name} {func_args}")
+            if func_name == "submit_reading_brief":
+                # 纯后台工具：按牌阵 ID 展开起手单、落库、翻相位，不产生任何前端事件
+                return await opening_service.submit_brief(conversation, dict(func_args))
+            if func_name == "get_astrology_chart":
+                return await _fetch_chart(user)
+            if func_name == "read_divination_notes":
+                return _read_notes(user)
+            return {"success": False, "error": f"未知的函数: {func_name}"}
 
-    # daily 对话：每次请求实时渲染日运系统提示词（模板热加载 + 近日旅程始终最新）
-    system_prompt_override = None
-    if conversation.session_type == SessionType.DAILY:
-        system_prompt_override = await DailyService.render_daily_system_prompt(conversation, user)
+        # daily 对话：每次请求实时渲染日运系统提示词（模板热加载 + 近日旅程始终最新）
+        system_prompt_override = None
+        if conversation.session_type == SessionType.DAILY:
+            system_prompt_override = await DailyService.render_daily_system_prompt(conversation, user)
 
-    async def generate():
-        async for event in gemini_service.stream_response(
-            conversation.messages,
-            user,
-            function_executor=execute_function,
-            session_type=conversation.session_type,
-            system_prompt_override=system_prompt_override,
-            phase=phase,
-            strategy=conversation.strategy,
-            relationship_block=relationship_block,
-        ):
-            if "content" in event:
-                yield f"data: {json.dumps({'content': event['content']})}\n\n"
-            elif "message" in event:
-                # 模型的一轮 / 一个工具结果，按发生顺序落库。抽牌、补资料这类 interrupt 调用
-                # 也在这里落库；前端刷新会话后看末尾那条的 tool_calls 决定显示哪个按钮。
-                await ConversationService.append_message(conversation_id, event["message"])
-        yield "data: [DONE]\n\n"
+        async def run() -> AsyncIterator[str]:
+            async for event in gemini_service.stream_response(
+                conversation.messages,
+                user,
+                function_executor=execute_function,
+                session_type=conversation.session_type,
+                system_prompt_override=system_prompt_override,
+                phase=phase,
+                strategy=conversation.strategy,
+                relationship_block=relationship_block,
+            ):
+                if "content" in event:
+                    yield event["content"]
+                elif "message" in event:
+                    # 模型的一轮 / 一个工具结果，按发生顺序落库。抽牌、补资料这类 interrupt 调用
+                    # 也在这里落库；前端刷新会话后看末尾那条的 tool_calls 决定显示哪个按钮。
+                    await ConversationService.append_message(conversation_id, event["message"])
+            # 这一轮跑完了才扣：模型出错没说完的，不算用户的
+            await RateLimitService.consume(current_user)
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
-
-
-def stream_text(text: str) -> StreamingResponse:
-    """把一段已经生成好的正文按 SSE 推出去，形状与跑一轮完全一致（开场白走这里）。
-
-    开场白不经过 Agent Loop（没有工具，只要一两句迎接语），但前端不该为它另写一套
-    等待与渲染 —— 同一个流、同一个思考气泡、同样的逐块出字。生成在进流之前完成，
-    所以失败还能以 HTTP 状态码返回；一旦进了流，就只剩正文可推。
-    """
-    async def generate():
-        for piece in chunk_text(text):
-            yield f"data: {json.dumps({'content': piece})}\n\n"
-        yield "data: [DONE]\n\n"
-
-    return StreamingResponse(generate(), media_type="text/event-stream")
+        # 这一轮的输出从现在的末尾开始（用户这句已经落库，在它之前）
+        turn = live_turns.start(conversation_id, len(conversation.messages), run())
+    return live_turns.sse(turn)
 
 
 async def record_draw(conversation_id: str, current_user: User) -> DrawCardsResponse:

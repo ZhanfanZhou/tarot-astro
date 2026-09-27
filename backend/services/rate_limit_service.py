@@ -4,9 +4,10 @@
 只保留当天数据，避免无限增长；写入走临时文件 + os.replace 原子替换，配合进程内
 asyncio.Lock，避免并发下计数丢失或文件损坏。
 
-每次真实 LLM 调用都计一次，但只有用户开口对话时才拦（check_and_consume）：发消息、
+每次生成成功才计一次（consume，在生成跑完之后调）：模型 / 网络出错、进程重启丢了的，
+用户没拿到回复，不算他的。只有用户开口对话时才拦（check，在开始之前调）：发消息、
 新开占卜的开场白。其余调用（抽牌/补资料之后的解读、日签解读、心灵奇旅）次数本就
-有限，只计数不拦（consume）。
+有限，不拦。
 
 注意：游客身份可被清缓存重置，本层不防此类绕过（按需求暂不做 IP 限流）。它的定位是
 「每个身份的公平额度 + 账单兜底」，更强的防滥用应叠加 IP 限流 / 全局预算熔断。
@@ -49,37 +50,34 @@ def _limit_for(user: User) -> int:
     return GUEST_DAILY_MESSAGE_LIMIT if user.user_type == UserType.GUEST else USER_DAILY_MESSAGE_LIMIT
 
 
-async def _count(user: User, enforce: bool) -> dict:
-    limit = _limit_for(user)
-    today = _today()
-    async with _lock:
-        data = _read()
-        day = data.get(today, {})
-        used = day.get(user.user_id, 0)
-        if enforce and used >= limit:
-            if user.user_type == UserType.GUEST:
-                detail = f"今日免费次数已用完（{limit} 次/天），明天再来，或注册账号获取更多次数。"
-            else:
-                detail = f"今日次数已达上限（{limit} 次/天），请明天再来。"
-            raise HTTPException(status_code=429, detail=detail)
-        day[user.user_id] = used + 1
-        # 只落当天，顺手丢弃历史日期，保持文件极小
-        _write_atomic({today: day})
-    return {"used": used + 1, "limit": limit}
-
-
 class RateLimitService:
     """每日次数限制。"""
 
     @staticmethod
-    async def check_and_consume(user: User) -> dict:
-        """额度足够则计数 +1 并返回用量；超额抛 429。"""
-        return await _count(user, enforce=True)
+    def check(user: User) -> None:
+        """今日额度用完了就抛 429，不计数。用户开口说话、开始生成之前看这一道。"""
+        limit = _limit_for(user)
+        if _read().get(_today(), {}).get(user.user_id, 0) < limit:
+            return
+        if user.user_type == UserType.GUEST:
+            detail = f"今日免费次数已用完（{limit} 次/天），明天再来，或注册账号获取更多次数。"
+        else:
+            detail = f"今日次数已达上限（{limit} 次/天），请明天再来。"
+        raise HTTPException(status_code=429, detail=detail)
 
     @staticmethod
     async def consume(user: User) -> dict:
-        """只计数不拦：用完额度也放行，照常记进当天用量。"""
-        return await _count(user, enforce=False)
+        """计一次：生成成功跑完之后调。不拦——开始之前该拦的已经由 check 拦过了。"""
+        limit = _limit_for(user)
+        today = _today()
+        async with _lock:
+            data = _read()
+            day = data.get(today, {})
+            used = day.get(user.user_id, 0) + 1
+            day[user.user_id] = used
+            # 只落当天，顺手丢弃历史日期，保持文件极小
+            _write_atomic({today: day})
+        return {"used": used, "limit": limit}
 
     @staticmethod
     def get_usage(user: User) -> dict:
@@ -97,7 +95,7 @@ async def reset_user_usage(user_id: str) -> None:
     """后台手动清零某用户今日已用次数（当天恢复满额度）。
 
     仅动今天这一格；文件本就只留当天，历史无需处理。锁内读改写，
-    与 check_and_consume 串行，避免与并发计数丢更新。
+    与 consume 串行，避免与并发计数丢更新。
     """
     today = _today()
     async with _lock:

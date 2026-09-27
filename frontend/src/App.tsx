@@ -22,7 +22,7 @@ import { toast } from './stores/useToastStore';
 import { confirmDialog } from './stores/useConfirmStore';
 import { useAuthStore } from './stores/useAuthStore';
 import { useConversationStore } from './stores/useConversationStore';
-import { userApi, conversationApi, tarotApi, astrologyApi, dailyApi } from './services/api';
+import { userApi, conversationApi, tarotApi, astrologyApi, dailyApi, StreamCut } from './services/api';
 import { getEffectiveDate } from './utils/dailyDate';
 import { energyPercent, quotaNotice } from './utils/quota';
 import { MessageRole, UserType } from './types';
@@ -309,12 +309,12 @@ const App: React.FC = () => {
       // 这场会话还有一轮在跑：服务端可能已经落了这一轮的前半段（先说一句、再调工具接着跑），
       // 而这段话还在流式气泡里。用本地这份（这一轮开始时的样子），这一轮结束时 finishTurn
       // 统一换成服务端的——和一直停在这场会话里看到的一样。
-      const fullConv =
-        conversation.conversation_id in liveTurns
-          ? conversation
-          : await conversationApi.get(conversation.conversation_id);
+      const running = conversation.conversation_id in liveTurns;
+      const fullConv = running ? conversation : await conversationApi.get(conversation.conversation_id);
       setCurrentConversation(fullConv);
       previousConversationIdRef.current = fullConv.conversation_id;
+      // 这个页面没在跟，服务端却可能还在生成（关过页面、刷新过）：接上它
+      if (!running) void attachLiveTurn(fullConv);
     } catch (error) {
       console.error('加载对话失败:', error);
       toast.error('加载对话失败，请重试');
@@ -432,6 +432,7 @@ const App: React.FC = () => {
   ): Promise<boolean> => {
     const id = conv.conversation_id;
     startTurn(id);
+    let cut = false;
     try {
       await start((chunk) => appendTurn(id, chunk));
     } catch (error: any) {
@@ -442,7 +443,8 @@ const App: React.FC = () => {
         showQuotaPrompt();
         return false;
       }
-      toast.error(error?.message || failMessage);
+      if (error instanceof StreamCut) cut = true;
+      else toast.error(error?.message || failMessage);
     }
     let refreshed: Conversation | null = null;
     try {
@@ -451,7 +453,43 @@ const App: React.FC = () => {
       console.error('刷新对话失败:', error);
     }
     finishTurn(id, refreshed);
+    // 流断了（手机切走、网络晃了一下），服务端这一轮照样在跑：接上它
+    if (cut) await attachLiveTurn(refreshed ?? conv);
     return true;
+  };
+
+  /**
+   * 这场会话在服务端还有一段回复在生成（关过页面、刷新过、连接断过）：接上它，和 ChatGPT 刷新后一样。
+   * 流里先说这段回复从第几条记录开始：之前的照常显示；从它开始的正文（可能已经落了一部分库）
+   * 都在流里，交给流式气泡，不显示两遍。没有在生成的就什么都不做。
+   */
+  const attachLiveTurn = async (conv: Conversation) => {
+    const id = conv.conversation_id;
+    if (id in useConversationStore.getState().liveTurns) return;
+    let attached = false;
+    try {
+      await conversationApi.live(
+        id,
+        (start) => {
+          attached = true;
+          updateConversation({ ...conv, messages: conv.messages.slice(0, start) });
+          startTurn(id);
+        },
+        (chunk) => appendTurn(id, chunk)
+      );
+    } catch (error: any) {
+      console.error('接上进行中的回复失败:', error);
+      // 生成失败给提示；又断了就停在库里的样子，不反复重连
+      if (attached && !(error instanceof StreamCut)) toast.error(error?.message || '回复没能写完，请重试');
+    }
+    if (!attached) return;
+    let refreshed: Conversation | null = null;
+    try {
+      refreshed = await conversationApi.get(id);
+    } catch (error) {
+      console.error('刷新对话失败:', error);
+    }
+    finishTurn(id, refreshed);
   };
 
   const handleAstrologyProfileSubmit = async (profile: UserProfile) => {
@@ -546,6 +584,7 @@ const App: React.FC = () => {
       const conv = await conversationApi.get(conversationId);
       await loadUserConversations(); // 让新建的日运对话出现在最近的占卜里
       setCurrentConversation(conv);
+      void attachLiveTurn(conv);
     } catch (error) {
       console.error('[Daily] 打开日运对话失败:', error);
       toast.error('打开对话失败');

@@ -135,7 +135,7 @@ def test_reading_is_generated_and_stored_with_the_card(env, monkeypatch):
 
 
 def test_reading_failure_keeps_the_card_and_can_be_retried(env, monkeypatch):
-    """生成失败 → 503，对话里什么都不落；牌和记录照旧，再请一次就好。"""
+    """生成失败 → 503，对话里什么都不落、不扣额度；牌和记录照旧，再请一次就好。"""
     from services import llm
 
     class _Boom:
@@ -149,6 +149,7 @@ def test_reading_failure_keeps_the_card_and_can_be_retried(env, monkeypatch):
     monkeypatch.setattr(llm, "get_provider", lambda agent: _Boom())
     resp = env.post(f"/api/daily/{USER_ID}/reading", json={"effective_date": today})
     assert resp.status_code == 503
+    assert _usage() == 0          # 用户没拿到解读，不算他的
 
     overview = env.get(f"/api/daily/{USER_ID}/overview", params={"date": today}).json()
     assert overview["today_record"]["card"] == drawn["record"]["card"]
@@ -157,6 +158,7 @@ def test_reading_failure_keeps_the_card_and_can_be_retried(env, monkeypatch):
     _install(monkeypatch, "星星在今夜为你点灯。")
     assert env.post(f"/api/daily/{USER_ID}/reading", json={"effective_date": today}).json() == {
         "reading": "星星在今夜为你点灯。"}
+    assert _usage() == 1
 
 
 def test_asking_while_it_is_being_written_waits_for_the_same_one(env, monkeypatch):
@@ -236,7 +238,7 @@ def test_journey_is_a_single_generation_pushed_whole(env, monkeypatch):
     resp = env.post(f"/api/daily/{USER_ID}/journey", params={"date": today})
     assert resp.status_code == 200
     payloads = [json.loads(l[6:]) for l in resp.text.splitlines() if l.startswith("data: ") and l != "data: [DONE]"]
-    assert payloads == [{"content": "你从一张宝剑三出发……"}]
+    assert payloads == [{"start": 0}, {"content": "你从一张宝剑三出发……"}]
     assert prov.prompts == ["（心灵奇旅提示词）"]   # 提示词就是全部输入，没有附加的用户发言
     assert _usage() == 1
 

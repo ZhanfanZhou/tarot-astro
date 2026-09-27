@@ -255,7 +255,8 @@ def test_opening_submits_brief_then_draws_straight_from_it(
         "submit_reading_brief", "request_user_profile", "read_divination_notes"]
 
     # —— SSE 只有正文：交单、起手单内容、抽牌指令都不在流里 ——
-    assert all(set(e) == {"content"} for e in events)
+    # 开头一条 {"start": n} 只是这段回复从第几条记录开始，其余全是正文
+    assert set(events[0]) == {"start"} and all(set(e) == {"content"} for e in events[1:])
     assert "submit_reading_brief" not in resp.text
     assert "他还会回头吗" not in resp.text
 
@@ -371,7 +372,8 @@ def test_opening_clarifying_turn_stays_in_opening_and_persists_reply(env, monkey
 
     # —— 追问正常流式吐给用户，且没有任何工具事件外泄 ——
     assert _sse_text(events) == question
-    assert all(set(e) == {"content"} for e in events)
+    # 开头一条 {"start": n} 只是这段回复从第几条记录开始，其余全是正文
+    assert set(events[0]) == {"start"} and all(set(e) == {"content"} for e in events[1:])
     assert done
 
     # —— 相位/策略单纹丝不动，assistant 追问已落库 ——

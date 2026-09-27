@@ -1,5 +1,5 @@
-from fastapi import APIRouter, HTTPException, Depends
-from typing import List
+from fastapi import APIRouter, HTTPException, Depends, Response
+from typing import AsyncIterator, List
 from models import (
     Conversation, CreateConversationRequest, MessageFeedbackRequest, MessageRole,
     UpdateConversationTitleRequest, User,
@@ -8,7 +8,8 @@ from services.conversation_service import ConversationService
 from services.notebook_service import notebook_enabled, notebook_service
 from services.rate_limit_service import RateLimitService
 from services.storage_service import StorageService
-from services import context_service, opening_service, turn_service
+from services import context_service, live_turns, opening_service
+from services.gemini_service import chunk_text
 from dependencies import get_current_user, ensure_owner
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
@@ -41,38 +42,67 @@ async def stream_greeting(
 ):
     """开场白：建完会话由前端单独取，SSE 形状与 /message 一致。
 
-    生成在进流之前做完——provider 挂了还能以 503 返回让前端提示重试；一旦进了流，
-    就只剩正文可推、没法再表达失败。开场白也是一次真实 LLM 调用，额度在这里扣。
+    和一轮对话一样交给 live_turns 在后台生成：页面关了、刷新了照样写完落库，
+    重新打开这场对话时从 /live 接上。失败了在流里给一条 error，让前端提示重试；
+    会话留着、一句话都没有，用户想直接开口也行——占卜师从他那句话接起。
+    开场白也是一次真实 LLM 调用：开始前看额度，写成了才扣。
+    """
+    async with live_turns.lock(conversation_id):
+        conversation = await ConversationService.get_conversation(conversation_id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="对话不存在")
+        ensure_owner(current_user, conversation.user_id)
+
+        if conversation.session_type not in context_service.OPENING_PHASE_SESSIONS:
+            raise HTTPException(status_code=400, detail="这类对话没有开场白")
+        if conversation.messages or live_turns.running(conversation_id):
+            # 已经有开场白、正在写、或者已经聊起来了：再生成一次就是凭空多一句台词
+            raise HTTPException(status_code=409, detail="这场对话已经开始了")
+
+        RateLimitService.check(current_user)
+        turn = live_turns.start(conversation_id, 0, _greet(conversation, current_user))
+    return live_turns.sse(turn)
+
+
+async def _greet(conversation: Conversation, user: User) -> AsyncIterator[str]:
+    try:
+        greeting = await opening_service.build_greeting(
+            user=user,
+            conversation=conversation,
+            session_type=conversation.session_type,
+        )
+    except opening_service.GreetingUnavailable as e:
+        # 不发保底文案：让前端拿到明确失败并提示重试
+        print(f"[Conversations] ⚠️ {e}")
+        raise HTTPException(status_code=503, detail="占卜师暂时联系不上，请重试")
+
+    await ConversationService.add_message(
+        conversation.conversation_id, MessageRole.ASSISTANT, greeting
+    )
+    await RateLimitService.consume(user)
+    # 开场白不经过 Agent Loop，但和一轮回复按同一个尺寸切块推，前端同一个流式气泡
+    for piece in chunk_text(greeting):
+        yield piece
+
+
+@router.get("/{conversation_id}/live")
+async def follow_live(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """这场对话在服务端还有一段回复在生成（关过页面、刷新过、连接断过）：接上它。
+
+    SSE 形状与 /message 一致：先 {"start": n}（这段回复从第 n 条记录开始，之前的照常显示），
+    再把已经出来的正文补上、后面的接着推，失败了一条 error，最后 [DONE]。没有在生成的 → 204。
     """
     conversation = await ConversationService.get_conversation(conversation_id)
     if not conversation:
         raise HTTPException(status_code=404, detail="对话不存在")
     ensure_owner(current_user, conversation.user_id)
-
-    if conversation.session_type not in context_service.OPENING_PHASE_SESSIONS:
-        raise HTTPException(status_code=400, detail="这类对话没有开场白")
-    if conversation.messages:
-        # 已经有开场白、或者已经聊起来了：再生成一次就是凭空多一句台词
-        raise HTTPException(status_code=409, detail="这场对话已经开始了")
-
-    await RateLimitService.check_and_consume(current_user)
-
-    try:
-        greeting = await opening_service.build_greeting(
-            user=current_user,
-            conversation=conversation,
-            session_type=conversation.session_type,
-        )
-    except opening_service.GreetingUnavailable as e:
-        # 不发保底文案：让前端拿到明确失败并提示重试。空会话留在库里无害（消息数 0，
-        # 不计入来访），用户想接着说话也行——占卜师从他那句话接起。
-        print(f"[Conversations] ⚠️ {e}")
-        raise HTTPException(status_code=503, detail="占卜师暂时联系不上，请重试")
-
-    await ConversationService.add_message(
-        conversation_id, MessageRole.ASSISTANT, greeting
-    )
-    return turn_service.stream_text(greeting)
+    turn = live_turns.running(conversation_id)
+    if turn is None:
+        return Response(status_code=204)
+    return live_turns.sse(turn)
 
 
 @router.get("/{conversation_id}", response_model=Conversation)

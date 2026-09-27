@@ -208,7 +208,10 @@ spring 滑入；per-deck 的 accent 只驱动细微辉光。
 ## 5. 接口层
 
 `services/api.ts` 一处封装：axios 实例 + 拦截器（带 token、401 登出）+ SSE 解析。
-SSE 端点用原生 `fetch`，手动拼 `Authorization`。
+SSE 端点用原生 `fetch`，手动拼 `Authorization`，都走 `readStream` 一个读法：`start` / `content` / `error` / `[DONE]`，
+没等到 `[DONE]` 就断了抛 `StreamCut`（服务端照样在生成，不算失败）。
+打开一场会话、或者发起的那条流断了，`App.attachLiveTurn` 去 `/live` 接上服务端还在生成的那段回复
+（见 [会话核心](conversation-core.md) §2）。
 管理端另有 `services/adminApi.ts`，独立实例、独立 token。
 
 ---

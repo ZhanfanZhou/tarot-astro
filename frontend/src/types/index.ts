@@ -141,4 +141,5 @@ export interface JourneyList {
   entries: JourneyEntry[]; // 新→旧
   ready: boolean;
   pending_today: boolean;  // 今天聊过但笔记还没归档,这一篇里看不到
+  writing: boolean;        // 今天那一篇正在写(关过卷宗、刷新过页面),打开就接上
 }

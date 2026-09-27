@@ -240,6 +240,7 @@ class JourneyListResponse(BaseModel):
     entries: List[JourneyEntry] = []       # 新→旧
     ready: bool = False                    # 素材够不够写新的一篇
     pending_today: bool = False            # 今天聊过但笔记还没归档,这一篇里看不到
+    writing: bool = False                  # 今天那一篇正在写(关过卷宗、刷新过页面),打开就接上
 
 
 class DailyDrawResponse(BaseModel):

@@ -5,7 +5,7 @@ from services import context_service, tool_turns
 
 
 # 正文推给前端的分块大小。模型是整段回完才到这里的，切块纯粹是让前端逐块渲染出
-# 「一句一句写出来」的样子 —— 开场白那次调用也按同一个尺寸推（见 turn_service.stream_text）。
+# 「一句一句写出来」的样子 —— 开场白那次调用也按同一个尺寸推（见 routers/conversations.py 的 _greet）。
 CLIENT_CHUNK_SIZE = 50
 
 

@@ -3,12 +3,14 @@ import { render, screen, waitFor } from '@testing-library/react';
 
 // 卷宗只读:写过的篇目按卷排开,没有任何改写入口(一天只写一篇)。
 const journeys = vi.fn();
+const journey = vi.fn();
 
 vi.mock('@/services/api', () => ({
   dailyApi: {
     journeys: (...args: unknown[]) => journeys(...args),
-    journey: vi.fn(),
+    journey: (...args: unknown[]) => journey(...args),
   },
+  StreamCut: class StreamCut extends Error {},
 }));
 
 const TODAY = '2026-09-19';
@@ -17,7 +19,10 @@ const entry = (generated_on: string, date_range: string, text: string) => ({
   generated_on, date_range, text, generated_at: `${generated_on}T10:00:00`,
 });
 
-beforeEach(() => journeys.mockReset());
+beforeEach(() => {
+  journeys.mockReset();
+  journey.mockReset();
+});
 
 describe('JourneyChronicle', () => {
   it('把写过的篇目按卷排开,哪一篇都不能重写', async () => {
@@ -63,5 +68,33 @@ describe('JourneyChronicle', () => {
 
     await waitFor(() => expect(screen.getByText('卷宗还是空的')).toBeInTheDocument());
     expect(screen.getByText(/再积累几次日签或占卜/)).toBeInTheDocument();
+  });
+
+  it('打开卷宗时今天那一篇在服务端正在写(写的时候刷新过页面):自动接上,写完就在卷里', async () => {
+    const written = entry(TODAY, '2026-09-05 ~ 2026-09-19', '你从一张宝剑三出发……');
+    journeys
+      .mockResolvedValueOnce({ entries: [], ready: true, pending_today: false, writing: true })
+      .mockResolvedValue({ entries: [written], ready: true, pending_today: false, writing: false });
+    let finish: () => void = () => {};
+    journey.mockImplementation((_u: string, _d: string, onChunk: (c: string) => void) => {
+      onChunk('你从一张宝剑三出发');
+      return new Promise<void>((resolve) => (finish = resolve));
+    });
+    const { default: JourneyChronicle } = await import('./JourneyChronicle');
+    const { rerender } = render(<JourneyChronicle isOpen userId="u" todayDate={TODAY} onClose={() => {}} />);
+
+    // 没点「写下这一篇」就接上了,已经写出来的先显示
+    await waitFor(() => expect(screen.getByText('正在回望……')).toBeInTheDocument());
+    expect(screen.getByText('你从一张宝剑三出发')).toBeInTheDocument();
+
+    // 同一个页面里关了卷宗再打开:接着看这一份,不再接一次
+    rerender(<JourneyChronicle isOpen={false} userId="u" todayDate={TODAY} onClose={() => {}} />);
+    rerender(<JourneyChronicle isOpen userId="u" todayDate={TODAY} onClose={() => {}} />);
+    expect(journey).toHaveBeenCalledTimes(1);
+
+    finish();
+    await waitFor(() => expect(screen.getAllByText('你从一张宝剑三出发……').length).toBeGreaterThan(0));
+    expect(screen.queryByText('正在回望……')).not.toBeInTheDocument();
+    expect(journey).toHaveBeenCalledTimes(1);
   });
 });

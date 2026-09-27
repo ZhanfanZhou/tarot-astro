@@ -36,16 +36,17 @@ SSE 端点不走 axios，用 `authHeaders()` 手动拼 header。
 - 额度：游客 `GUEST_DAILY_MESSAGE_LIMIT` 默认 **15**，注册用户 `USER_DAILY_MESSAGE_LIMIT` 默认 **50**。
   游客可清缓存重置额度，所以额度宜小、主要额度绑到注册账号；
   15 这个数是为了让游客在有开场白（1 次）+ 澄清轮（0–1 次）的情况下仍能走完一场完整占卜。
-- **计数**：每次真实 LLM 调用计一次，被拒的请求不计。旅程当天已写过、直接回放的不计。
-- **拦截只在用户开口对话时**（`check_and_consume`，用完 → 429）：
+- **计数**：每次生成**成功跑完**才计一次（`consume`，在生成之后调）。模型 / 网络出错、进程重启丢了的，
+  用户没拿到回复，不算他的；被拒的请求不计；接上正在写的、回放写过的都不计。
+- **拦截只在用户开口对话时**（`check`，开始之前看，用完 → 429，不计数）：
 
   | 调用 | 用完额度时 |
   |---|---|
   | `/message`（输入框、快捷回复、日签接着聊） | 429 |
   | `/greeting`（新开塔罗 / 占星的开场白） | 429 |
-  | `/resume`（抽牌 / 补资料之后的解读） | 放行，照样计一次（`consume`） |
-  | 每日一签的今日解读（`/reading`） | 放行，真去写的那次计一次（已写好、正在写时再来要不计） |
-  | 心灵奇旅 | 放行，照样计一次；一天只写一篇，写过就回放 |
+  | `/resume`（抽牌 / 补资料之后的解读） | 放行，成功照样计一次 |
+  | 每日一签的今日解读（`/reading`） | 放行，真去写并写成的那次计一次 |
+  | 心灵奇旅 | 放行，写成了计一次；一天只写一篇，写过就回放 |
 
   放行的几类都是一次性调用，入口本身有次数上限（一日一签、一天一篇、interrupt 由模型发起）。
 - 查询：`GET /api/users/{user_id}/quota` → `{used, limit}`，只能查自己的。
@@ -78,7 +79,7 @@ SSE 端点不走 axios，用 `authHeaders()` 手动拼 header。
 |---|---|
 | `services/auth_service.py` | 签发 / 解码 JWT |
 | `dependencies.py` | `get_current_user` / `ensure_owner` |
-| `services/rate_limit_service.py` | 计数、拦截（`check_and_consume`）/ 只计数（`consume`）、查询、原子写 |
+| `services/rate_limit_service.py` | 拦截（`check`）/ 成功后计数（`consume`）、查询、原子写 |
 | `routers/users.py` | `GET /{user_id}/quota` |
 | `services/user_service.py` | 用户、密码、游客转正 |
 | `stores/useAuthStore.ts` · `services/api.ts` | 前端持久化与拦截器 |

@@ -5,7 +5,7 @@
 「反复取开场白」就是无限白嫖。
 
 锁住四条：
-  1. 建会话不打 LLM、不扣额度；开场白接口才打、才扣，且落成第一条消息
+  1. 建会话不打 LLM、不扣额度；开场白接口才打、写成了才扣，且落成第一条消息
   2. 额度耗尽时开场白被 429 拒绝，且一个 LLM 调用都不发出去
   3. 无开场幕的会话类型（每日一签/闲聊）没有开场白可取
   4. 同一场会话的开场白只生成一次，第二次拒绝（不重复扣费、不多一句台词）
@@ -108,8 +108,18 @@ def _sse_content(resp) -> str:
         payload = line[6:]
         if payload == "[DONE]":
             break
-        out.append(json.loads(payload)["content"])
+        event = json.loads(payload)
+        if "content" in event:
+            out.append(event["content"])
     return "".join(out)
+
+
+def _sse_error(resp):
+    """流里那条 error（生成失败时才有）。"""
+    for line in resp.text.splitlines():
+        if line.startswith("data: ") and line[6:] != "[DONE]" and "error" in json.loads(line[6:]):
+            return json.loads(line[6:])["error"]
+    return None
 
 
 def _create(env, session_type) -> str:
@@ -197,8 +207,9 @@ def test_conversation_without_opening_phase_has_no_greeting(env, monkeypatch, se
     assert _usage(env) == 0
 
 
-def test_greeting_failure_returns_503_not_a_canned_line(env, monkeypatch):
-    """provider 挂了 → 503 让用户重试，绝不塞一句假问候把会话开起来。"""
+def test_greeting_failure_is_reported_not_a_canned_line_and_not_charged(env, monkeypatch):
+    """provider 挂了 → 流里一条 error 让用户重试，绝不塞一句假问候把会话开起来；
+    用户没拿到开场白，不扣额度。"""
     from services import opening_service as op_mod
 
     async def _boom(prompt):
@@ -208,7 +219,9 @@ def test_greeting_failure_returns_503_not_a_canned_line(env, monkeypatch):
     conv_id = _create(env, "tarot")
 
     resp = env.post(f"/api/conversations/{conv_id}/greeting")
-    assert resp.status_code == 503
+    assert _sse_error(resp) == "占卜师暂时联系不上，请重试"
+    assert _sse_content(resp) == ""
+    assert _usage(env) == 0
     # 会话留着，但一句话都没有——用户直接开口说话就能接着聊
     assert env.get(f"/api/conversations/{conv_id}").json()["messages"] == []
 
