@@ -183,6 +183,10 @@ export const displayName = (u: {
 export interface LlmModelOption {
   id: string;
   label: string;
+  /** 这个模型认的思考强度档位；没有 = 不能设，也不发这个参数 */
+  efforts?: string[];
+  /** 不发思考强度时模型自己用的档位 */
+  effort_default?: string;
 }
 
 export interface LlmProviderOption {
@@ -196,10 +200,13 @@ export interface LlmAgentState {
   label: string;
   provider: string;
   model: string;
+  /** 这次实际发的思考强度；'' = 不发，模型用 effort_default */
+  reasoning_effort: string;
   /** override = 管理页改过；env = 跟着 .env 走 */
   source: 'override' | 'env';
   env_provider: string;
   env_model: string;
+  env_reasoning_effort: string;
   key_ready: boolean;
   in_catalog: boolean;
 }
@@ -235,8 +242,12 @@ export const adminApi = {
   resetPrompt: async (name: string): Promise<PromptInfo> =>
     (await api.delete(`/api/admin/prompts/${name}`)).data,
   llmConfig: async (): Promise<LlmConfig> => (await api.get('/api/admin/llm')).data,
-  setLlmAgent: async (agent: string, provider: string, model: string): Promise<LlmConfig> =>
-    (await api.put(`/api/admin/llm/${agent}`, { provider, model })).data,
+  setLlmAgent: async (
+    agent: string, provider: string, model: string, reasoningEffort: string,
+  ): Promise<LlmConfig> =>
+    (await api.put(`/api/admin/llm/${agent}`, {
+      provider, model, reasoning_effort: reasoningEffort,
+    })).data,
   resetLlmAgent: async (agent: string): Promise<LlmConfig> =>
     (await api.delete(`/api/admin/llm/${agent}`)).data,
 };

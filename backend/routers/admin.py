@@ -207,18 +207,19 @@ async def admin_prompt_reset(name: str, _: None = Depends(require_admin)):
         raise HTTPException(status_code=404, detail="提示词不存在")
 
 
-# ── 三个 Agent 的 provider / model ────────────────────────────────────────────
+# ── 三个 Agent 的 provider / model / 思考强度 ─────────────────────────────────
 # 改完下一次请求即生效（get_provider 每次实时读盘），无需重启。
 
 
 class AgentModelRequest(BaseModel):
     provider: str
     model: str
+    reasoning_effort: str = ""      # 空 = 不发，用模型默认档；模型不认的档位 400
 
 
 @router.get("/llm")
 async def admin_llm_config(_: None = Depends(require_admin)):
-    """每个 Agent 的现状 + 可选 provider/model 清单。"""
+    """每个 Agent 的现状 + 可选 provider/model/思考强度清单。"""
     return agent_config.describe()
 
 
@@ -227,7 +228,7 @@ async def admin_llm_set(
     agent: str, request: AgentModelRequest, _: None = Depends(require_admin)
 ):
     try:
-        agent_config.set_agent(agent, request.provider, request.model)
+        agent_config.set_agent(agent, request.provider, request.model, request.reasoning_effort)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return agent_config.describe()

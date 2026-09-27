@@ -1,9 +1,20 @@
 """三家 provider 的可选模型清单 —— 唯一真源。
 
-管理页的 provider / model 下拉用它（用户不该手敲模型名）。
+管理页的 provider / model / 思考强度下拉用它（用户不该手敲模型名）。
 
-核对于 2026-09。
+思考强度：模型条目带 efforts = 它认的 reasoning_effort 档位，effort_default = 不发这个
+参数时模型自己用哪档。没有 efforts 的模型不发这个参数，管理页也不给选。
+  DeepSeek V4 系：reasoning_effort ∈ low/high/max，默认 high
+  Kimi K3：reasoning_effort ∈ low/high/max，默认 max（思考关不掉）
+  Kimi K2.6：只有 thinking 开/关，没有强度档；reasoning_effort 发过去不报错，
+    但推理量不随档位变（实测），等于没设
+  Gemini：模型本身有 thinking_level（3.x）/ thinking_budget（2.5），但
+    google-generativeai 0.8.3 的 GenerationConfig 没有这个字段，发不出去
+
+核对于 2026-09（档位对真 API 逐档实测过）。
 """
+
+_EFFORTS = ["low", "high", "max"]
 
 PROVIDERS = {
     "gemini": {
@@ -21,8 +32,10 @@ PROVIDERS = {
         "key_attr": "DEEPSEEK_API_KEY",
         "base_url_attr": "DEEPSEEK_BASE_URL",
         "models": [
-            {"id": "deepseek-flash",  "label": "V4.1 Flash · 快且便宜"},
-            {"id": "deepseek-v4-pro", "label": "V4 Pro · 最强"},
+            {"id": "deepseek-flash",  "label": "V4.1 Flash · 快且便宜",
+             "efforts": _EFFORTS, "effort_default": "high"},
+            {"id": "deepseek-v4-pro", "label": "V4 Pro · 最强",
+             "efforts": _EFFORTS, "effort_default": "high"},
         ],
     },
     "kimi": {
@@ -30,7 +43,8 @@ PROVIDERS = {
         "key_attr": "KIMI_API_KEY",
         "base_url_attr": "KIMI_BASE_URL",
         "models": [
-            {"id": "kimi-k3",   "label": "K3 · 最强"},
+            {"id": "kimi-k3",   "label": "K3 · 最强",
+             "efforts": _EFFORTS, "effort_default": "max"},
             {"id": "kimi-k2.6", "label": "K2.6 · 便宜"},
         ],
     },
@@ -39,6 +53,14 @@ PROVIDERS = {
 
 def model_ids(provider: str) -> list:
     return [m["id"] for m in PROVIDERS.get(provider, {}).get("models", [])]
+
+
+def efforts(provider: str, model: str) -> list:
+    """该模型认的思考强度档位；清单外的模型、没有档位的模型都是 []。"""
+    for m in PROVIDERS.get(provider, {}).get("models", []):
+        if m["id"] == model:
+            return list(m.get("efforts", []))
+    return []
 
 
 def as_options() -> list:

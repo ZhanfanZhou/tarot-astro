@@ -108,8 +108,8 @@ class OpenAICompatProvider:
         self._client = AsyncOpenAI(base_url=base_url, api_key=api_key)
         # 工厂已经按配置里的 provider 名建的实例，直接用它，不必再去猜 base_url
         self._is_deepseek = label == "deepseek"
-        # 思考强度（Kimi 的 reasoning_effort）。工厂只在这家认的时候传进来，
-        # 所以这里不必再判 provider：有值就发，空就不发。
+        # 思考强度（reasoning_effort）。工厂只在这个模型认的时候传进来，
+        # 所以这里不必再判 provider / model：有值就发，空就不发。
         self._effort = reasoning_effort
 
     def open_session(self, system_prompt, history, tools):

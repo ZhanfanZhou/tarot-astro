@@ -132,10 +132,98 @@ def test_reasoning_effort_rejects_an_unknown_level(monkeypatch):
         config._reasoning_effort("OPENING_REASONING_EFFORT")
 
 
-def test_reasoning_effort_reads_the_agent_env_value(monkeypatch):
+def test_reasoning_effort_reads_the_agent_env_value(store, monkeypatch):
     import config
     from services.llm import agent_config
 
+    monkeypatch.setattr(config, "MEMORY_PROVIDER", "kimi")
+    monkeypatch.setattr(config, "MEMORY_MODEL", "kimi-k3")
     monkeypatch.setattr(config, "MEMORY_REASONING_EFFORT", "max")
     assert agent_config.reasoning_effort("memory") == "max"
-    assert agent_config.reasoning_effort("opening") == config.OPENING_REASONING_EFFORT
+
+
+def test_env_effort_is_dropped_when_the_model_has_no_levels(store, monkeypatch):
+    """.env 的档位对哪个模型都能填；模型不认（Gemini 走的旧 SDK 发不出、K2.6 没有档）就不发。"""
+    import config
+    from services.llm import agent_config
+
+    monkeypatch.setattr(config, "OPENING_PROVIDER", "gemini")
+    monkeypatch.setattr(config, "OPENING_MODEL", "gemini-3.1-flash-lite")
+    monkeypatch.setattr(config, "OPENING_REASONING_EFFORT", "low")
+    assert agent_config.reasoning_effort("opening") == ""
+
+
+# ── 思考强度的覆盖 ──────────────────────────────────────────────────────────
+
+def test_override_stores_the_reasoning_effort(store, monkeypatch):
+    import config
+    from services.llm import agent_config
+
+    monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "k")
+    monkeypatch.setattr(config, "READING_REASONING_EFFORT", "max")
+    agent_config.set_agent("reading", "deepseek", "deepseek-v4-pro", "low")
+
+    assert agent_config.reasoning_effort("reading") == "low"
+    assert json.loads(store.read_text(encoding="utf-8"))["reading"]["reasoning_effort"] == "low"
+
+
+def test_override_with_empty_effort_means_do_not_send(store, monkeypatch):
+    """覆盖条目里 reasoning_effort 为空串：压过 .env 的档位，这个参数不发。"""
+    import config
+    from services.llm import agent_config
+
+    monkeypatch.setattr(config, "KIMI_API_KEY", "k")
+    monkeypatch.setattr(config, "OPENING_REASONING_EFFORT", "low")
+    agent_config.set_agent("opening", "kimi", "kimi-k3", "")
+    assert agent_config.reasoning_effort("opening") == ""
+
+
+def test_override_written_before_effort_existed_keeps_the_env_effort(store, monkeypatch):
+    """管理页能设思考强度之前写下的条目只有 provider/model：沿用 .env 的档位，行为不变。"""
+    import config
+    from services.llm import agent_config
+
+    store.write_text(json.dumps({"opening": {"provider": "kimi", "model": "kimi-k3"}}), encoding="utf-8")
+    monkeypatch.setattr(config, "OPENING_REASONING_EFFORT", "low")
+    assert agent_config.reasoning_effort("opening") == "low"
+
+
+@pytest.mark.parametrize("provider,model,key_attr", [
+    ("kimi", "kimi-k2.6", "KIMI_API_KEY"),
+    ("gemini", "gemini-2.5-flash", "GEMINI_API_KEY"),
+])
+def test_rejects_effort_for_a_model_without_levels(store, monkeypatch, provider, model, key_attr):
+    import config
+    from services.llm import agent_config
+
+    monkeypatch.setattr(config, key_attr, "k")
+    with pytest.raises(ValueError) as exc:
+        agent_config.set_agent("reading", provider, model, "low")
+    assert model in str(exc.value)
+    assert not store.exists()
+
+
+def test_rejects_an_effort_level_the_model_does_not_have(store, monkeypatch):
+    import config
+    from services.llm import agent_config
+
+    monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "k")
+    with pytest.raises(ValueError) as exc:
+        agent_config.set_agent("reading", "deepseek", "deepseek-flash", "medium")
+    assert "low、high、max" in str(exc.value)
+    assert not store.exists()
+
+
+def test_describe_reports_effective_effort_and_the_levels(store, monkeypatch):
+    import config
+    from services.llm import agent_config
+
+    monkeypatch.setattr(config, "KIMI_API_KEY", "k")
+    agent_config.set_agent("opening", "kimi", "kimi-k3", "high")
+    d = agent_config.describe()
+    opening = next(a for a in d["agents"] if a["agent"] == "opening")
+    assert opening["reasoning_effort"] == "high"
+    kimi = next(p for p in d["providers"] if p["provider"] == "kimi")
+    k3 = next(m for m in kimi["models"] if m["id"] == "kimi-k3")
+    assert (k3["efforts"], k3["effort_default"]) == (["low", "high", "max"], "max")
+    assert "efforts" not in next(m for m in kimi["models"] if m["id"] == "kimi-k2.6")

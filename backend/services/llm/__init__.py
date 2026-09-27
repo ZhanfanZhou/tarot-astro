@@ -30,12 +30,10 @@ def get_provider(agent: str) -> LLMProvider:
     if provider == "gemini":
         return GeminiProvider(model)
 
-    # 思考强度只有 Kimi 有（reasoning_effort ∈ low/high/max，默认 max）。DeepSeek 不认
-    # 这个字段，发过去只会多一个它不认识的参数，不发。
-    effort = agent_config.reasoning_effort(agent) if provider == "kimi" else ""
+    # 思考强度按模型：catalog 里列了档位的模型才发（DeepSeek V4 系、Kimi K3），其余为空不发。
     return OpenAICompatProvider(
         model, getattr(config, meta["base_url_attr"]), api_key, provider,
-        reasoning_effort=effort,
+        reasoning_effort=agent_config.reasoning_effort(agent),
     )
 
 

@@ -74,11 +74,23 @@ def test_kimi_gets_the_configured_reasoning_effort():
         assert llm.get_provider("opening")._effort == "low"
 
 
-def test_reasoning_effort_is_not_sent_to_other_providers():
-    """DeepSeek 不认 reasoning_effort（它关思考用的是另一套字段）：配了也不发过去。"""
+def test_deepseek_gets_the_configured_reasoning_effort():
+    """DeepSeek V4 系也认 reasoning_effort（low/high/max），配了就发。"""
     import config
     from services import llm
     with patch.object(config, "READING_PROVIDER", "deepseek"), \
-         patch.object(config, "READING_REASONING_EFFORT", "low"), \
+         patch.object(config, "READING_MODEL", "deepseek-flash"), \
+         patch.object(config, "READING_REASONING_EFFORT", "max"), \
          patch.object(config, "DEEPSEEK_API_KEY", "k"):
-        assert llm.get_provider("reading")._effort == ""
+        assert llm.get_provider("reading")._effort == "max"
+
+
+def test_reasoning_effort_is_not_sent_to_a_model_without_levels():
+    """K2.6 只有思考开/关、没有强度档：.env 配了档位也不发过去。"""
+    import config
+    from services import llm
+    with patch.object(config, "MEMORY_PROVIDER", "kimi"), \
+         patch.object(config, "MEMORY_MODEL", "kimi-k2.6"), \
+         patch.object(config, "MEMORY_REASONING_EFFORT", "low"), \
+         patch.object(config, "KIMI_API_KEY", "k"):
+        assert llm.get_provider("memory")._effort == ""

@@ -99,7 +99,8 @@ async def main():
     print("配置（管理页覆盖优先，否则 .env）：")
     for agent in llm.AGENT_CONFIG:
         provider, model, source = agent_config.resolve(agent)
-        print(f"  {agent:8s} {provider:10s} {model:24s} [{source}]")
+        effort = agent_config.reasoning_effort(agent) or "模型默认"
+        print(f"  {agent:8s} {provider:10s} {model:24s} 思考强度 {effort:8s} [{source}]")
     print()
 
     failed = 0

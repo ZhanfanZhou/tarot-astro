@@ -258,6 +258,7 @@
   border-radius: 6px; padding: 8px 10px; font-size: 13px; box-sizing: border-box;
 }
 .models-card select:disabled { opacity: .5; }
+.models-na { display: block; font-size: 12px; font-style: normal; color: #6b6578; padding: 6px 0; }
 .models-warn {
   color: #d9b86c; font-size: 12px; line-height: 1.7; margin: 0 0 12px;
   border-left: 2px solid #d9b86c; padding-left: 8px;

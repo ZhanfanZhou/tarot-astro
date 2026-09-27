@@ -464,6 +464,26 @@ def test_set_and_reset_agent_round_trip(client, monkeypatch):
     assert next(a for a in r.json()["agents"] if a["agent"] == "reading")["source"] == "env"
 
 
+def test_set_agent_with_reasoning_effort(client, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "KIMI_API_KEY", "k")
+    h = _admin_headers(client)
+
+    r = client.put("/api/admin/llm/opening",
+                   json={"provider": "kimi", "model": "kimi-k3", "reasoning_effort": "low"}, headers=h)
+    assert r.status_code == 200
+    opening = next(a for a in r.json()["agents"] if a["agent"] == "opening")
+    assert opening["reasoning_effort"] == "low"
+
+    # 模型不认的档位：400，不落盘
+    r = client.put("/api/admin/llm/opening",
+                   json={"provider": "kimi", "model": "kimi-k2.6", "reasoning_effort": "low"}, headers=h)
+    assert r.status_code == 400 and "kimi-k2.6" in r.json()["detail"]
+    opening = next(a for a in client.get("/api/admin/llm", headers=h).json()["agents"]
+                   if a["agent"] == "opening")
+    assert (opening["model"], opening["reasoning_effort"]) == ("kimi-k3", "low")
+
+
 def test_set_agent_rejects_bad_input_with_400(client, monkeypatch):
     import config
     monkeypatch.setattr(config, "KIMI_API_KEY", "")

@@ -74,8 +74,18 @@ MEMORY_PROVIDER / MEMORY_MODEL
 未知 provider 抛 `ValueError`。管理页可在线覆盖（见 [后台管理](admin-panel.md) §4）。
 
 **思考强度** `OPENING_/READING_/MEMORY_REASONING_EFFORT` ∈ `low | high | max`，
-留空 = 不发这个参数。**目前只有 Kimi 认**：K3 的思考关不掉而默认就是 max，
-一句问候语它也要想两百多个 token、十几秒才回。这一项只在 `.env`，管理页不覆盖。
+留空 = 不发这个参数，用模型自己的默认档。管理页可按 Agent 覆盖（见 [后台管理](admin-panel.md) §4）。
+哪些模型认、默认哪档，写在 `catalog.py` 的 `efforts` / `effort_default`；
+**模型不认的档位不发**（`.env` 那一层对哪个模型都能填，配了也不起作用）。
+
+| 模型 | 思考强度 | 说明 |
+|---|---|---|
+| DeepSeek `deepseek-flash` / `deepseek-v4-pro` | low / high / max，默认 high | 顶层 `reasoning_effort` |
+| Kimi `kimi-k3` | low / high / max，默认 max | 思考关不掉；max 下一句问候语也要十几秒 |
+| Kimi `kimi-k2.6` | 不能设 | 只有 `thinking` 开/关；`reasoning_effort` 发过去不报错，推理量也不随档位变 |
+| Gemini 全部 | 不能设 | 模型本身有 `thinking_level`（3.x）/ `thinking_budget`（2.5），但 `google-generativeai` 0.8.3 的 GenerationConfig 没有这个字段 |
+
+以上 2026-09 对真 API 逐档实测。
 
 ---
 

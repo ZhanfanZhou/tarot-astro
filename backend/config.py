@@ -75,9 +75,10 @@ MEMORY_PROVIDER = os.getenv("MEMORY_PROVIDER", "gemini")
 MEMORY_MODEL = os.getenv("MEMORY_MODEL", "gemini-2.5-flash")
 
 
-# 思考强度：目前只有 Kimi 认（顶层参数 reasoning_effort ∈ low / high / max）。
+# 思考强度（顶层参数 reasoning_effort ∈ low / high / max）。哪些模型认见 services/llm/catalog.py
+# （DeepSeek V4 系、Kimi K3）；模型不认的档位不发。管理页可按 Agent 在线覆盖。
 # K3 的思考关不掉，而默认档就是 max —— 一句问候语它也要想两百多个 token、十几秒才回。
-# 留空 = 不发这个参数，用模型自己的默认值；provider 不是 kimi 时这一项不起作用。
+# 留空 = 不发这个参数，用模型自己的默认值。
 def _reasoning_effort(name: str) -> str:
     value = os.getenv(name, "").strip().lower()
     if value not in ("", "low", "high", "max"):
