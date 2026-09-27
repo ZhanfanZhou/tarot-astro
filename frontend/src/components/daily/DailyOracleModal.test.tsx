@@ -6,7 +6,7 @@ import { conversationApi, dailyApi } from '@/services/api';
 import { toast } from '@/stores/useToastStore';
 import type { DailyOverview } from '@/types';
 
-// 弹窗会去取当日解读全文;这里给一段固定的,不走网络
+// 往日的解读从对话里取;这里给一段固定的,不走网络
 vi.mock('@/services/api', () => ({
   conversationApi: {
     get: vi.fn().mockResolvedValue({ messages: [{ role: 'assistant', content: '今天适合把心放回原处。' }] }),
@@ -69,6 +69,7 @@ const overview = {
 
 describe('DailyOracleModal 牌面大图', () => {
   it('舞台上的牌面点开看大图', async () => {
+    vi.mocked(dailyApi.reading).mockResolvedValue({ reading: '今天适合把心放回原处。' });
     render(
       <DailyOracleModal
         isOpen
@@ -141,33 +142,81 @@ describe('DailyOracleModal 抽牌', () => {
     expect(screen.getByText('继续这段对话 ›')).toBeInTheDocument();
   });
 
-  it('解读没写成,牌照旧,可以再请一次', async () => {
+  it('服务端说写失败了:牌照旧,提示,舞台上可以再要一次', async () => {
     vi.mocked(dailyApi.draw).mockResolvedValue({ record, conversation_id: 'conv_x' });
     vi.mocked(dailyApi.reading).mockRejectedValueOnce({ response: { data: { detail: '占卜师暂时联系不上，请重试' } } });
-    vi.mocked(conversationApi.get).mockResolvedValueOnce({ messages: [] } as never);
     const toastError = vi.spyOn(toast, 'error');
     render(<Harness />);
 
     await drawOnce();
     const retry = await screen.findByText('重新解读');
     expect(toastError).toHaveBeenCalledWith('占卜师暂时联系不上，请重试');
-    expect(screen.getByLabelText('查看大图')).toBeInTheDocument();
+    expect(screen.getByText('星星 · 正位')).toBeInTheDocument();
 
     vi.mocked(dailyApi.reading).mockResolvedValueOnce({ reading: '星星说,先把心放回原处。' });
     fireEvent.click(retry);
     expect(await screen.findByText('星星说,先把心放回原处。')).toBeInTheDocument();
     expect(dailyApi.reading).toHaveBeenCalledTimes(2);
   });
+});
 
-  it('早先那次已经写好了(409):不报错,把写好的取回来', async () => {
-    vi.mocked(dailyApi.draw).mockResolvedValue({ record, conversation_id: 'conv_x' });
-    vi.mocked(dailyApi.reading).mockRejectedValueOnce({ response: { status: 409, data: { detail: '这一签已经解读过了' } } });
-    const toastError = vi.spyOn(toast, 'error');
-    render(<Harness />);
+describe('DailyOracleModal 刷新之后', () => {
+  const pendingToday: DailyOverview = {
+    ...overview,
+    history: [{ effective_date: TODAY, record, tagline: null, conversation_exists: true }],
+  };
+  const props = {
+    userId: 'u1',
+    onClose: () => {},
+    onRefreshOverview: async () => {},
+    onContinueConversation: () => {},
+    onOpenJourney: () => {},
+  };
 
-    await drawOnce();
-    expect(await screen.findByText('今天适合把心放回原处。')).toBeInTheDocument();
-    expect(toastError).not.toHaveBeenCalled();
+  it('今天的牌还没有解读:向 /reading 要,等服务端正在写的那一份,不当成失败', async () => {
+    let finish: (value: { reading: string }) => void = () => {};
+    vi.mocked(dailyApi.reading).mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    render(<DailyOracleModal isOpen overview={pendingToday} {...props} />);
+
+    expect(await screen.findByRole('status')).toHaveTextContent('正在解读');
     expect(screen.queryByText('重新解读')).not.toBeInTheDocument();
+    expect(dailyApi.reading).toHaveBeenCalledWith('u1', TODAY);
+    expect(conversationApi.get).not.toHaveBeenCalled();
+
+    await act(async () => finish({ reading: '今天适合把心放回原处。' }));
+    expect(screen.getByText('今天适合把心放回原处。')).toBeInTheDocument();
+    expect(dailyApi.reading).toHaveBeenCalledTimes(1);
+  });
+
+  it('弹窗关着时在后台要解读失败了:不弹提示,打开后舞台上给「重新解读」', async () => {
+    vi.mocked(dailyApi.reading).mockRejectedValueOnce({ response: { data: { detail: '占卜师暂时联系不上，请重试' } } });
+    const toastError = vi.spyOn(toast, 'error');
+    const { rerender } = render(<DailyOracleModal isOpen={false} overview={pendingToday} {...props} />);
+    await act(async () => {});
+    expect(dailyApi.reading).toHaveBeenCalledTimes(1);
+    expect(toastError).not.toHaveBeenCalled();
+
+    rerender(<DailyOracleModal isOpen overview={pendingToday} {...props} />);
+    expect(await screen.findByText('重新解读')).toBeInTheDocument();
+    expect(dailyApi.reading).toHaveBeenCalledTimes(1); // 失败了不自己反复重来
+  });
+
+  it('往日的牌只读对话里的解读,不去写', async () => {
+    const YESTERDAY = '2026-09-23';
+    const past = { ...record, effective_date: YESTERDAY, conversation_id: 'conv_past' };
+    const withPast: DailyOverview = {
+      ...overview,
+      today_record: null,
+      history: [
+        { effective_date: YESTERDAY, record: past, tagline: null, conversation_exists: true },
+        { effective_date: TODAY, record: null, tagline: null, conversation_exists: false },
+      ],
+    };
+    render(<DailyOracleModal isOpen overview={withPast} {...props} />);
+
+    fireEvent.click(screen.getByLabelText(`${YESTERDAY} 星星`));
+    expect(await screen.findByText('今天适合把心放回原处。')).toBeInTheDocument();
+    expect(conversationApi.get).toHaveBeenCalledWith('conv_past');
+    expect(dailyApi.reading).not.toHaveBeenCalled();
   });
 });

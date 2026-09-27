@@ -1,6 +1,8 @@
+import asyncio
 from datetime import date, timedelta
 import json
 import uuid
+import weakref
 
 from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
@@ -110,58 +112,72 @@ async def draw_daily(
     return DailyDrawResponse(record=record, conversation_id=conversation.conversation_id)
 
 
+# 同一场对话的今日解读一次只写一份。后来的请求（写的时候刷新了页面，重载后又来要）
+# 等前一个写完，再看库里有没有。线上是单个 uvicorn worker，锁放进程内就够了；
+# 没人再拿着的锁自动从表里消失
+_reading_locks: "weakref.WeakValueDictionary[str, asyncio.Lock]" = weakref.WeakValueDictionary()
+
+
+def _reading_lock(conversation_id: str) -> asyncio.Lock:
+    lock = _reading_locks.get(conversation_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _reading_locks[conversation_id] = lock
+    return lock
+
+
 @router.post("/{user_id}/reading", response_model=DailyReadingResponse)
 async def read_daily(
     user_id: str,
     body: DailyDrawRequest,
     current_user: User = Depends(get_current_user),
 ):
-    """今日解读：抽完牌之后前端接着调。
+    """保证这一日的牌有解读，并把它返回：写好了直接给；正在写就等那一份写完；都不是才开始写。
+
+    页面刷新过、请求断开过都不影响：服务端这次照样写完落库，页面重载后再来要，拿到的是同一份。
+    只有真正去写、并且写失败了才报错（503），这时对话里什么都不落，牌照旧，再要一次就是重写。
 
     牌已经在提示词里，模型没有工具可调，也没有用户发言要回——和开场白同一个道理，
-    一次生成、落成这场对话的第一条 assistant，当日的牌挂在它上面。生成失败则什么都不落，
-    牌照旧（记录在抽牌时已经落了），前端提示后可以再请一次。
+    一次生成、落成这场对话的第一条 assistant，当日的牌挂在它上面。
     """
     ensure_owner(current_user, user_id)
     record = await DailyService.get_record(user_id, body.effective_date)
     if not record:
         raise HTTPException(status_code=404, detail="这一日还没有抽签")
-    conversation = await ConversationService.get_conversation(record.conversation_id)
-    if not conversation:
-        raise HTTPException(status_code=404, detail="对话不存在")
-    if conversation.messages:
-        # 已经解读过、或者已经聊起来了：再生成一次就是凭空多一段台词
-        raise HTTPException(status_code=409, detail="这一签已经解读过了")
 
-    user = await UserService.get_user(user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
+    async with _reading_lock(record.conversation_id):
+        conversation = await ConversationService.get_conversation(record.conversation_id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="对话不存在")
+        if conversation.messages:
+            # 已经写好了（或者已经接着聊起来了）：解读就是首条 assistant
+            return DailyReadingResponse(reading=next(
+                (m.content for m in conversation.messages if m.role == MessageRole.ASSISTANT), ""))
 
-    # 解读是一次真实 LLM 调用，计一次；一日一签，不拦
-    await RateLimitService.consume(current_user)
+        user = await UserService.get_user(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="用户不存在")
 
-    prompt = await DailyService.render_daily_system_prompt(conversation, user)
-    try:
-        reading = (await llm.get_provider("reading").generate_text(
-            prompt, timeout=GENERATION_TIMEOUT_SECONDS,
-        )).strip()
-    except Exception as e:  # noqa: BLE001 —— 翻成一个前端认得的失败，让用户再请一次
-        print(f"[Daily] ⚠️ 今日解读生成失败: {e}")
-        raise HTTPException(status_code=503, detail="占卜师暂时联系不上，请重试")
-    if not reading:
-        raise HTTPException(status_code=503, detail="占卜师暂时联系不上，请重试")
+        # 解读是一次真实 LLM 调用，真去写才计一次；一日一签，不拦
+        await RateLimitService.consume(current_user)
 
-    # 生成要十几秒。这期间页面刷新过、又点了「重新解读」，另一次请求可能已经写好了：
-    # 用户断开不会打断服务端，头一次那段照样落库。以先写好的为准，不叠第二段
-    if (await ConversationService.get_conversation(conversation.conversation_id)).messages:
-        raise HTTPException(status_code=409, detail="这一签已经解读过了")
+        prompt = await DailyService.render_daily_system_prompt(conversation, user)
+        try:
+            reading = (await llm.get_provider("reading").generate_text(
+                prompt, timeout=GENERATION_TIMEOUT_SECONDS,
+            )).strip()
+        except Exception as e:  # noqa: BLE001 —— 翻成一个前端认得的失败，让用户再要一次
+            print(f"[Daily] ⚠️ 今日解读生成失败: {e}")
+            raise HTTPException(status_code=503, detail="占卜师暂时联系不上，请重试")
+        if not reading:
+            raise HTTPException(status_code=503, detail="占卜师暂时联系不上，请重试")
 
-    # 解读 + 当日的牌挂在同一条 assistant 上（没有工具调用，牌不是模型抽的）
-    await ConversationService.append_message(conversation.conversation_id, Message(
-        role=MessageRole.ASSISTANT, content=reading,
-        tarot_cards=[record.card], draw_request=DAILY_DRAW_REQUEST,
-    ))
-    return DailyReadingResponse(reading=reading)
+        # 解读 + 当日的牌挂在同一条 assistant 上（没有工具调用，牌不是模型抽的）
+        await ConversationService.append_message(conversation.conversation_id, Message(
+            role=MessageRole.ASSISTANT, content=reading,
+            tarot_cards=[record.card], draw_request=DAILY_DRAW_REQUEST,
+        ))
+        return DailyReadingResponse(reading=reading)
 
 
 @router.post("/{user_id}/feedback", response_model=DailyDrawRecord)

@@ -107,6 +107,11 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
   const [drawing, setDrawing] = useState(false);
   // 牌已翻开、正在等解读的那场对话和起始时刻;null = 没在等
   const [interpreting, setInterpreting] = useState<{ conversationId: string; startedAt: number } | null>(null);
+  // 服务端说解读写失败了的那场对话;只有这时才给「重新解读」
+  const [readingFailed, setReadingFailed] = useState<string | null>(null);
+  // 失败提示只在弹窗开着时弹:页面加载时在后台要解读,失败了等打开弹窗时舞台上自会说
+  const isOpenRef = useRef(isOpen);
+  isOpenRef.current = isOpen;
   // conversation_id → 解读全文;undefined=未加载,null=对话已删除,''=尚无解读
   const [readings, setReadings] = useState<Record<string, string | null>>({});
   // 印证表单(回顾态)
@@ -138,35 +143,18 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
       })
       .catch(() => setReadings((prev) => ({ ...prev, [conversationId]: null })));
 
-  // 选中某天:同步印证表单 + 懒取该日解读全文(正在写的那一场不取,写完直接放进来)
-  useEffect(() => {
-    const view = overview?.history.find((h) => h.effective_date === selectedDate);
-    setVerdict(view?.record?.feedback?.verdict ?? null);
-    setNote(view?.record?.feedback?.note ?? '');
-    const rec = view?.record;
-    if (!rec || readings[rec.conversation_id] !== undefined) return;
-    if (rec.conversation_id === interpreting?.conversationId) return;
-    if (!view?.conversation_exists) {
-      setReadings((prev) => ({ ...prev, [rec.conversation_id]: null }));
-      return;
-    }
-    loadReading(rec.conversation_id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDate, overview, isOpen]);
-
-  // 牌已落定,请占卜师写今日解读。失败了牌照旧,提示后舞台上可以再请一次
-  const requestReading = async (eff: string, conversationId: string) => {
+  // 今天那张牌的解读交给服务端保证:写好了直接给,正在写(比如刷新页面前那一次)就等那一份,
+  // 还没写才开始写。只有服务端说写失败了,舞台上才给「重新解读」,牌照旧
+  const ensureReading = async (eff: string, conversationId: string) => {
+    setReadingFailed(null);
     setInterpreting({ conversationId, startedAt: Date.now() });
     let reading: string;
     try {
       reading = (await dailyApi.reading(userId, eff)).reading;
     } catch (e) {
-      const err = e as { response?: { status?: number; data?: { detail?: string } } };
-      // 409 = 早先那次请求已经写好了(比如写的时候刷新过页面):不算失败,取回来就是
-      if (err?.response?.status !== 409) {
-        toast.error(err?.response?.data?.detail || '解读失败,请重试');
-      }
-      await loadReading(conversationId); // 以库里为准:没写成就是空的,舞台上给「重新解读」
+      const err = e as { response?: { data?: { detail?: string } } };
+      if (isOpenRef.current) toast.error(err?.response?.data?.detail || '解读失败,请重试');
+      setReadingFailed(conversationId);
       setInterpreting(null);
       return;
     }
@@ -175,6 +163,24 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
     await onRefreshOverview(); // 殿堂入口的签语是解读首句
   };
 
+  // 选中某天:同步印证表单 + 取该日解读。今天的牌向 /reading 要(见 ensureReading);
+  // 往日的只读对话里的首条 assistant
+  useEffect(() => {
+    const view = overview?.history.find((h) => h.effective_date === selectedDate);
+    setVerdict(view?.record?.feedback?.verdict ?? null);
+    setNote(view?.record?.feedback?.note ?? '');
+    const rec = view?.record;
+    if (!rec || readings[rec.conversation_id] !== undefined) return;
+    if (rec.conversation_id === interpreting?.conversationId || rec.conversation_id === readingFailed) return;
+    if (!view?.conversation_exists) {
+      setReadings((prev) => ({ ...prev, [rec.conversation_id]: null }));
+      return;
+    }
+    if (isToday) void ensureReading(rec.effective_date, rec.conversation_id);
+    else loadReading(rec.conversation_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDate, overview, isOpen]);
+
   const handleCardsDrawn = async () => {
     // 选牌器仪式完成 → 后端抽出真牌、落下记录 → 牌在弹窗里翻开 → 接着等今日解读
     setShowDrawer(false);
@@ -182,7 +188,7 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
     try {
       const eff = todayDate;
       const res = await dailyApi.draw(userId, eff);
-      void requestReading(eff, res.conversation_id);
+      void ensureReading(eff, res.conversation_id);
       await onRefreshOverview(); // 记录一到,舞台上的牌就翻开
       setSelectedDate(eff);
     } catch (e) {
@@ -379,6 +385,19 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
                     <div className="w-full mt-4 text-left">
                       {interpreting?.conversationId === record.conversation_id ? (
                         <ReadingPending startedAt={interpreting.startedAt} />
+                      ) : readingFailed === record.conversation_id ? (
+                        <div className="flex flex-col items-center text-center">
+                          <p className="text-sm italic" style={{ color: 'var(--ivory-dim)' }}>
+                            解读没能写出来
+                          </p>
+                          <button
+                            onClick={() => ensureReading(record.effective_date, record.conversation_id)}
+                            className="mt-3 px-5 py-2 rounded-xl font-display tracking-[0.12em] text-sm transition-all hover:bg-white/[0.04]"
+                            style={{ border: '1px solid var(--gold)', color: 'var(--gold)' }}
+                          >
+                            重新解读
+                          </button>
+                        </div>
                       ) : reading === undefined ? (
                         <p className="text-sm text-center" style={{ color: 'var(--ivory-dim)' }}>
                           正在取回解读……
@@ -387,19 +406,6 @@ const DailyOracleModal: React.FC<DailyOracleModalProps> = ({
                         <p className="text-sm text-center italic" style={{ color: 'var(--ivory-dim)' }}>
                           这段对话已随风而逝
                         </p>
-                      ) : reading === '' && isToday ? (
-                        <div className="flex flex-col items-center text-center">
-                          <p className="text-sm italic" style={{ color: 'var(--ivory-dim)' }}>
-                            解读还没写出来
-                          </p>
-                          <button
-                            onClick={() => requestReading(record.effective_date, record.conversation_id)}
-                            className="mt-3 px-5 py-2 rounded-xl font-display tracking-[0.12em] text-sm transition-all hover:bg-white/[0.04]"
-                            style={{ border: '1px solid var(--gold)', color: 'var(--gold)' }}
-                          >
-                            重新解读
-                          </button>
-                        </div>
                       ) : reading === '' ? (
                         <p className="text-sm text-center italic" style={{ color: 'var(--ivory-dim)' }}>
                           这一日没有留下解读

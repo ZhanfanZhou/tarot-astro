@@ -128,9 +128,10 @@ def test_reading_is_generated_and_stored_with_the_card(env, monkeypatch):
     overview = env.get(f"/api/daily/{USER_ID}/overview", params={"date": today}).json()
     assert overview["history"][-1]["tagline"] == "星星在今夜为你点灯"
 
-    # 解读过了就不再写第二段
+    # 写好了再来要（比如刷新了页面）：直接给写好的那段，不再调模型、不再计费
     again = env.post(f"/api/daily/{USER_ID}/reading", json={"effective_date": today})
-    assert again.status_code == 409 and len(prov.prompts) == 1
+    assert again.json() == {"reading": "星星在今夜为你点灯。它提醒你保持希望。"}
+    assert len(prov.prompts) == 1 and _usage() == 1
 
 
 def test_reading_failure_keeps_the_card_and_can_be_retried(env, monkeypatch):
@@ -158,27 +159,39 @@ def test_reading_failure_keeps_the_card_and_can_be_retried(env, monkeypatch):
         "reading": "星星在今夜为你点灯。"}
 
 
-def test_reading_written_meanwhile_is_not_doubled(env, monkeypatch):
-    """写解读的十几秒里另一次请求先写好了（刷新页面后又点了「重新解读」）：
-    后到的那段不落，对话里只有一条解读。"""
+def test_asking_while_it_is_being_written_waits_for_the_same_one(env, monkeypatch):
+    """写的时候页面刷新了，重载后又来要：等正在写的那一份写完一起拿，
+    不另起一份——模型只调一次、只计一次费、对话里只有一条解读。"""
+    import httpx
     from services import llm
-    from services.conversation_service import ConversationService
-    from models import Message
+    from main import app
 
     today = date.today().isoformat()
     conv_id = env.post(f"/api/daily/{USER_ID}/draw", json={"effective_date": today}).json()["conversation_id"]
 
     class _Slow:
+        calls = 0
+
         async def generate_text(self, *a, **k):
-            # 这一段还在写的时候，先到的那次已经落库
-            await ConversationService.append_message(
-                conv_id, Message(role=MessageRole.ASSISTANT, content="先写好的那段。"))
-            return "后写好的那段。"
+            _Slow.calls += 1
+            await asyncio.sleep(0.2)
+            return "星星在今夜为你点灯。"
 
     monkeypatch.setattr(llm, "get_provider", lambda agent: _Slow())
-    assert env.post(f"/api/daily/{USER_ID}/reading", json={"effective_date": today}).status_code == 409
+
+    async def ask_twice():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://test", headers=dict(env.headers)) as c:
+            return await asyncio.gather(*(
+                c.post(f"/api/daily/{USER_ID}/reading", json={"effective_date": today})
+                for _ in range(2)
+            ))
+
+    first, second = asyncio.run(ask_twice())
+    assert first.json() == second.json() == {"reading": "星星在今夜为你点灯。"}
+    assert _Slow.calls == 1 and _usage() == 1
     conv = env.get(f"/api/conversations/{conv_id}").json()
-    assert [m["content"] for m in conv["messages"]] == ["先写好的那段。"]
+    assert [m["content"] for m in conv["messages"]] == ["星星在今夜为你点灯。"]
 
 
 def test_followup_chat_in_a_daily_conversation_continues_from_the_reading(env, monkeypatch):
