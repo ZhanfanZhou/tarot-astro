@@ -481,3 +481,18 @@ def test_legacy_conversation_is_read_only(env, monkeypatch):
     assert _usage(env) == 0
     # 仍可查看
     assert env.get("/api/conversations/conv_legacy").status_code == 200
+
+
+def test_quota_rejection_does_not_close_pending_tool_or_change_conversation(env, monkeypatch):
+    import services.rate_limit_service as rl_mod
+    from services.storage_service import StorageService
+    from models import ToolCallRecord
+
+    pending = tool_turns.assistant_message("抽牌吧", [ToolCallRecord(
+        id="draw_pending", name="draw_tarot_cards", args={"spread_type": "single", "positions": ["指引"]})])
+    _save("conv_quota_pending", [pending])
+    before = asyncio.run(StorageService.get_conversation("conv_quota_pending"))
+    monkeypatch.setattr(rl_mod, "USER_DAILY_MESSAGE_LIMIT", 0)
+    response = env.post("/api/tarot/message", json={"conversation_id": "conv_quota_pending", "content": "先等等"})
+    assert response.status_code == 429
+    assert asyncio.run(StorageService.get_conversation("conv_quota_pending")) == before

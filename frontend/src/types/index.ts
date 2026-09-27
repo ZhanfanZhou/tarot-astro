@@ -95,6 +95,8 @@ export interface Conversation {
   updated_at: string;
   is_completed: boolean;
   has_drawn_cards: boolean;
+  /** 失败草稿不属于 messages，不会作为历史重新发给模型。 */
+  failed_turn?: { id: string; action: 'message' | 'resume' | 'greeting'; content?: string | null } | null;
 }
 
 // ── 每日一签 ──────────────────────────────────────────────────────

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 from models import (
-    Conversation, Message, MessageRole, SessionType,
+    Conversation, FailedTurn, Message, MessageRole, SessionType,
     TarotCard, DrawCardsRequest
 )
 from services import context_service
@@ -74,6 +74,23 @@ class ConversationService:
 
         await StorageService.save_conversation(conversation)
         return conversation
+
+    @staticmethod
+    async def fail_turn(before: Conversation, action: str, content: Optional[str] = None):
+        """撤回没完成的这一轮（含工具轮和相位变化），旧历史和真实抽牌结果保留。
+
+        只在后台已经停止生成时调用；失败草稿单独存，下一次发言不会把它当历史重送。
+        """
+        latest = await StorageService.get_conversation(before.conversation_id)
+        if latest is None:  # 用户已删除，不把会话重新建回来
+            return
+        latest.messages = before.messages
+        latest.phase = before.phase
+        latest.strategy = before.strategy
+        if content and latest.title == ConversationService._generate_title_from_message(content):
+            latest.title = before.title
+        latest.failed_turn = FailedTurn(id=uuid.uuid4().hex, action=action, content=content)
+        await StorageService.save_conversation(latest)
 
     @staticmethod
     async def add_message(
@@ -148,6 +165,5 @@ class ConversationService:
         else:
             await StorageService.delete_conversation(conversation.conversation_id)
     
-
 
 

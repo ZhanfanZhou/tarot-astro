@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Response
+from fastapi import APIRouter, HTTPException, Depends
 from typing import AsyncIterator, List
 from models import (
     Conversation, CreateConversationRequest, MessageFeedbackRequest, MessageRole,
@@ -60,7 +60,14 @@ async def stream_greeting(
             raise HTTPException(status_code=409, detail="这场对话已经开始了")
 
         RateLimitService.check(current_user)
-        turn = live_turns.start(conversation_id, 0, _greet(conversation, current_user))
+        before = conversation.model_copy(deep=True)
+        if conversation.failed_turn:
+            conversation.failed_turn = None
+            await StorageService.save_conversation(conversation)
+        turn = live_turns.start(
+            conversation_id, 0, _greet(conversation, current_user),
+            on_failure=lambda: ConversationService.fail_turn(before, "greeting"),
+        )
     return live_turns.sse(turn)
 
 
@@ -93,16 +100,20 @@ async def follow_live(
     """这场对话在服务端还有一段回复在生成（关过页面、刷新过、连接断过）：接上它。
 
     SSE 形状与 /message 一致：先 {"start": n}（这段回复从第 n 条记录开始，之前的照常显示），
-    再把已经出来的正文补上、后面的接着推，失败了一条 error，最后 [DONE]。没有在生成的 → 204。
+    再把已经出来的正文补上、后面的接着推，失败了一条 error，最后 [DONE]。
+    没有在生成的直接返回最新会话；读历史与检查生成状态在同一把锁里，避免读到结束前的旧历史。
     """
-    conversation = await ConversationService.get_conversation(conversation_id)
-    if not conversation:
-        raise HTTPException(status_code=404, detail="对话不存在")
-    ensure_owner(current_user, conversation.user_id)
-    turn = live_turns.running(conversation_id)
-    if turn is None:
-        return Response(status_code=204)
-    return live_turns.sse(turn)
+    async with live_turns.lock(conversation_id):
+        turn = live_turns.running(conversation_id)
+        conversation = await ConversationService.get_conversation(conversation_id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="对话不存在")
+        ensure_owner(current_user, conversation.user_id)
+        if turn is None:
+            return conversation
+        # 任务即使在读库期间完成，这个 turn 仍可回放；不能把旧会话误判成最终结果。
+        conversation.messages = conversation.messages[:turn.base]
+        return live_turns.sse(turn, conversation)
 
 
 @router.get("/{conversation_id}", response_model=Conversation)
@@ -324,4 +335,3 @@ async def get_pending_tasks():
         "tasks": task_scheduler.get_pending_tasks(),
         "count": len(task_scheduler.tasks)
     }
-

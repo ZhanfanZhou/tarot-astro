@@ -3,7 +3,8 @@ import { ArrowUp } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 interface ComposerProps {
-  /** resolve false = 这句没发出去（今日额度用完，后端没收），字回到输入框 */
+  message: string;
+  onMessageChange: (message: string) => void;
   onSend: (message: string) => void | Promise<boolean | void>;
   disabled?: boolean;
   placeholder?: string;
@@ -12,8 +13,7 @@ interface ComposerProps {
 const MAX_HEIGHT = 168; // ~6 lines, then internal scroll
 
 /** Auto-growing textarea composer. Enter = send, Shift+Enter = newline; IME-safe. */
-const Composer: React.FC<ComposerProps> = ({ onSend, disabled = false, placeholder = '输入你的问题...' }) => {
-  const [message, setMessage] = useState('');
+const Composer: React.FC<ComposerProps> = ({ message, onMessageChange, onSend, disabled = false, placeholder = '输入你的问题...' }) => {
   const [isFocused, setIsFocused] = useState(false);
   const composingRef = useRef(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -30,8 +30,8 @@ const Composer: React.FC<ComposerProps> = ({ onSend, disabled = false, placehold
   const send = async () => {
     if (!canSend) return;
     const text = message.trim();
-    setMessage('');
-    if ((await onSend(text)) === false) setMessage((current) => current || text);
+    onMessageChange('');
+    await onSend(text); // 退回由所属会话接收，不能由这个可能已经切到别场的输入框接收
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -69,7 +69,7 @@ const Composer: React.FC<ComposerProps> = ({ onSend, disabled = false, placehold
           ref={taRef}
           rows={1}
           value={message}
-          onChange={(e) => setMessage(e.target.value)}
+          onChange={(e) => onMessageChange(e.target.value)}
           onKeyDown={handleKeyDown}
           onCompositionStart={() => (composingRef.current = true)}
           onCompositionEnd={() => (composingRef.current = false)}

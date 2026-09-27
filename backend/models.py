@@ -129,6 +129,13 @@ class SessionType(str, Enum):
     DAILY = "daily"  # 每日一签
 
 
+class FailedTurn(BaseModel):
+    """结束的失败轮：供页面恢复草稿/继续解读，不是消息，不进入模型历史。"""
+    id: str
+    action: Literal["message", "resume", "greeting"]
+    content: Optional[str] = None
+
+
 class Conversation(BaseModel):
     conversation_id: str
     user_id: str
@@ -145,6 +152,7 @@ class Conversation(BaseModel):
     phase: str = "reading"
     # 策略单（前置 Agent 交付物）。None = 无策略增强，会话照常运转（存量会话即如此）。
     strategy: Optional[dict] = None
+    failed_turn: Optional[FailedTurn] = None
 
 
 class SendMessageRequest(BaseModel):
@@ -250,4 +258,3 @@ class DailyDrawResponse(BaseModel):
 
 class DailyReadingResponse(BaseModel):
     reading: str    # 今日解读：抽完牌之后单独生成，落成那场对话的第一条 assistant
-

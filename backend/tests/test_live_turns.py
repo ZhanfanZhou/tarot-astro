@@ -3,7 +3,7 @@
 锁住：
   1. 一轮对话跑到一半页面走了（观众断开）：这一轮照样跑完、逐条落库、扣额度；
      重新打开这场对话从 /live 接上，先补已经出来的正文，再接着收后面的
-  2. 这一轮还在跑时再发一句 → 409；没有在跑的 → /live 204
+  2. 这一轮还在跑时再发一句 → 409；没有在跑的 → /live 返回最终会话
   3. 模型出错、用户没拿到回复：流里一条 error，不扣额度（/message、/resume、心灵奇旅）
   4. 心灵奇旅写到一半关了卷宗：卷宗标着「正在写」，再要就接上同一份，只写一次、只扣一次
 """
@@ -139,7 +139,8 @@ def test_turn_keeps_running_after_the_page_goes_away_and_can_be_followed_again(e
     assert first == {"start": 2}
     assert second == {"content": "我先翻翻你的笔记。"}
     # 接上的观众：同一个起点，已经出来的正文补上，后面的接着收
-    assert followed[0] == {"start": 2}
+    assert followed[0]["start"] == 2
+    assert len(followed[0]["conversation"]["messages"]) == 2
     assert "".join(e.get("content", "") for e in followed) == "我先翻翻你的笔记。看完了，换工作这件事……"
     assert not any("error" in e for e in followed)
 
@@ -148,12 +149,12 @@ def test_turn_keeps_running_after_the_page_goes_away_and_can_be_followed_again(e
         MessageRole.ASSISTANT, MessageRole.USER, MessageRole.ASSISTANT, MessageRole.ASSISTANT]
     assert _usage() == 1
     # 跑完了：没有在跑的
-    assert env.get("/api/conversations/conv_live/live").status_code == 204
+    assert len(env.get("/api/conversations/conv_live/live").json()["messages"]) == 4
 
 
 def test_follow_needs_the_owner(env):
     _save("conv_idle", [Message(role=MessageRole.ASSISTANT, content="你想问什么？")])
-    assert env.get("/api/conversations/conv_idle/live").status_code == 204
+    assert env.get("/api/conversations/conv_idle/live").json()["messages"][0]["content"] == "你想问什么？"
     assert env.get("/api/conversations/nope/live").status_code == 404
 
 
@@ -248,3 +249,140 @@ def test_failed_journey_is_not_charged(env, monkeypatch):
     assert _events(resp.text)[-1] == {"error": "旅程生成失败，请重试"}
     assert _usage() == 0
     assert env.get(f"/api/daily/{USER_ID}/journeys", params={"date": today}).json()["entries"] == []
+
+
+def test_failed_message_is_removed_and_resending_sends_it_once(env, monkeypatch):
+    from services import gemini_service as gs
+
+    seen = []
+
+    async def reply(self, messages, *args, **kwargs):
+        seen.append([m.content for m in messages if m.role == MessageRole.USER])
+        if len(seen) == 1:
+            # 中途产出的工具轮也不能留成一段不完整的模型历史
+            yield {"message": tool_turns.assistant_message("我查一下。", [
+                ToolCallRecord(id="notes", name="read_divination_notes", args={})])}
+            raise RuntimeError("provider down")
+        yield {"content": "回答"}
+        yield {"message": tool_turns.assistant_message("回答")}
+        yield {"done": True}
+
+    monkeypatch.setattr(gs.GeminiService, "stream_response", reply)
+    _save("conv_retry", [Message(role=MessageRole.ASSISTANT, content="你想问什么？")])
+    body = {"conversation_id": "conv_retry", "content": "我该换工作吗？"}
+    env.post("/api/tarot/message", json=body)
+    assert [m.content for m in _stored("conv_retry")] == ["你想问什么？"]
+    assert _usage() == 0
+    idle = env.get("/api/conversations/conv_retry/live").json()
+    assert idle["failed_turn"]["content"] == body["content"]
+
+    env.post("/api/tarot/message", json=body)
+    assert seen == [[body["content"]], [body["content"]]]
+    assert env.get("/api/conversations/conv_retry/live").json()["failed_turn"] is None
+    assert _usage() == 1
+
+
+def test_failed_handoff_restores_phase_and_pending_interrupt(env, monkeypatch):
+    from services import gemini_service as gs
+    from services.storage_service import StorageService
+
+    pending = ToolCallRecord(id="profile", name="request_user_profile", args={})
+    original = Conversation(conversation_id="conv_phase", user_id=USER_ID,
+                            session_type=SessionType.TAROT, phase="opening",
+                            messages=[tool_turns.assistant_message("请补资料", [pending])])
+    asyncio.run(StorageService.save_conversation(original))
+
+    async def boom(self, messages, user, **kwargs):
+        latest = await StorageService.get_conversation("conv_phase")
+        latest.phase = "reading"
+        latest.strategy = {"question": "问题", "route": "astrology"}
+        await StorageService.save_conversation(latest)
+        yield {"message": tool_turns.assistant_message("我查一下。")}
+        raise RuntimeError("handoff failed")
+
+    monkeypatch.setattr(gs.GeminiService, "stream_response", boom)
+    env.post("/api/tarot/message", json={"conversation_id": "conv_phase", "content": "不用补，直接看吧"})
+    after = asyncio.run(StorageService.get_conversation("conv_phase"))
+    assert after.messages == original.messages
+    assert after.phase == "opening" and after.strategy is None
+    assert tool_turns.pending_interrupt(after).id == "profile"
+    assert _usage() == 0
+
+
+def test_failed_resume_preserves_cards_and_can_resume_without_redrawing(env, monkeypatch):
+    from services import gemini_service as gs
+    from models import DrawCardsRequest, TarotCard
+
+    call = ToolCallRecord(id="draw", name="draw_tarot_cards", args={"spread_type": "single", "positions": ["指引"]})
+    spread = DrawCardsRequest(**call.args)
+    cards = [TarotCard(card_id=0, card_name="愚者")]
+    original = [tool_turns.assistant_message("抽牌吧", [call]),
+                tool_turns.tool_message(call, tool_turns.cards_result(cards, spread), tarot_cards=cards, draw_request=spread)]
+    _save("conv_cards", original)
+    calls = []
+
+    async def reply(self, messages, *args, **kwargs):
+        calls.append(messages)
+        if len(calls) == 1:
+            raise RuntimeError("provider down")
+        yield {"message": tool_turns.assistant_message("这张牌的指引")}
+        yield {"done": True}
+
+    monkeypatch.setattr(gs.GeminiService, "stream_response", reply)
+    body = {"conversation_id": "conv_cards"}
+    env.post("/api/tarot/resume", json=body)
+    assert _stored("conv_cards") == original
+    idle = env.get("/api/conversations/conv_cards/live").json()
+    assert idle["failed_turn"]["action"] == "resume"
+    env.post("/api/tarot/resume", json=body)
+    assert [m.role for m in _stored("conv_cards")] == [MessageRole.ASSISTANT, MessageRole.TOOL, MessageRole.ASSISTANT]
+    assert _stored("conv_cards")[1].tarot_cards == cards
+    assert _usage() == 1
+
+
+def test_failure_during_context_preparation_also_returns_input(env, monkeypatch):
+    from services import opening_service
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("context unavailable")
+
+    monkeypatch.setattr(opening_service, "prepare_opening_context", boom)
+    _save("conv_context", [])
+    response = env.post("/api/tarot/message", json={"conversation_id": "conv_context", "content": "问题"})
+    assert _events(response.text)[-1].get("error")
+    assert _stored("conv_context") == []
+    assert env.get("/api/conversations/conv_context/live").json()["failed_turn"]["content"] == "问题"
+    assert _usage() == 0
+
+
+def test_live_keeps_turn_reference_if_it_finishes_while_history_is_read(env, monkeypatch):
+    """读取历史时任务结束，也不能把结束前的快照当最终历史返回。"""
+    from services import live_turns
+    from routers import conversations
+    from services.storage_service import StorageService
+
+    _save("conv_race", [Message(role=MessageRole.USER, content="问题")])
+
+    async def scenario():
+        release = asyncio.Event()
+
+        async def chunks():
+            await release.wait()
+            yield "最终回答"
+
+        turn = live_turns.start("conv_race", 1, chunks())
+        user = await StorageService.get_user(USER_ID)
+        stale = await StorageService.get_conversation("conv_race")
+
+        async def read_then_complete(_id):
+            release.set()
+            await turn.task
+            return stale
+
+        monkeypatch.setattr(conversations.ConversationService, "get_conversation", read_then_complete)
+        response = await conversations.follow_live("conv_race", current_user=user)
+        return await _drain(response)
+
+    events = asyncio.run(scenario())
+    assert events[0]["start"] == 1
+    assert events[1]["content"] == "最终回答"

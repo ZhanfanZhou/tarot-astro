@@ -19,11 +19,12 @@ const mockFetch = (response: Response) => vi.spyOn(globalThis, 'fetch').mockReso
 afterEach(() => vi.restoreAllMocks());
 
 describe('conversationApi.live', () => {
-  it('服务端没有在生成的 → false,什么都不回调', async () => {
-    mockFetch(new Response(null, { status: 204 }));
+  it('服务端没有在生成的 → 返回最终会话,什么都不回调', async () => {
+    const final = { conversation_id: 'c1', messages: [{ role: 'assistant', content: '已完成' }] };
+    mockFetch(Response.json(final));
     const onStart = vi.fn();
     const onChunk = vi.fn();
-    expect(await conversationApi.live('c1', onStart, onChunk)).toBe(false);
+    expect(await conversationApi.live('c1', onStart, onChunk)).toEqual(final);
     expect(onStart).not.toHaveBeenCalled();
     expect(onChunk).not.toHaveBeenCalled();
   });
@@ -36,8 +37,8 @@ describe('conversationApi.live', () => {
     ]));
     const onStart = vi.fn();
     const chunks: string[] = [];
-    expect(await conversationApi.live('c1', onStart, (c) => chunks.push(c))).toBe(true);
-    expect(onStart).toHaveBeenCalledWith(2);
+    expect(await conversationApi.live('c1', onStart, (c) => chunks.push(c))).toBeNull();
+    expect(onStart).toHaveBeenCalledWith(2, undefined);
     expect(chunks.join('')).toBe('我先翻翻你的笔记。');
   });
 

@@ -66,4 +66,13 @@ describe('rejectTurn', () => {
     expect(s.liveTurns).toEqual({});
     expect(s.currentConversation).toBe(before);
   });
+
+  it('等待期间刷新了会话列表，仍能准确撤回本地待处理消息', () => {
+    const sent = send('那我该什么时候辞职？');
+    const fresh = conv('a', [{ ...greeting }, { ...earlier }, { ...reply }]);
+    useConversationStore.getState().setConversations([fresh]);
+    expect(useConversationStore.getState().conversations[0].messages[3]).toBe(sent);
+    useConversationStore.getState().rejectTurn('a', sent);
+    expect(useConversationStore.getState().conversations[0].messages).toEqual([greeting, earlier, reply]);
+  });
 });

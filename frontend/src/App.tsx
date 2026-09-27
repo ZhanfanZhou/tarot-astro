@@ -22,7 +22,8 @@ import { toast } from './stores/useToastStore';
 import { confirmDialog } from './stores/useConfirmStore';
 import { useAuthStore } from './stores/useAuthStore';
 import { useConversationStore } from './stores/useConversationStore';
-import { userApi, conversationApi, tarotApi, astrologyApi, dailyApi, StreamCut } from './services/api';
+import { userApi, conversationApi, tarotApi, astrologyApi, dailyApi } from './services/api';
+import { attachConversationTurn, reconnectConversations, runConversationTurn } from './services/conversationTurns';
 import { getEffectiveDate } from './utils/dailyDate';
 import { energyPercent, quotaNotice } from './utils/quota';
 import { MessageRole, UserType } from './types';
@@ -51,10 +52,9 @@ const App: React.FC = () => {
     removeConversation,
     addMessageToCurrentConversation,
     liveTurns,
-    startTurn,
-    appendTurn,
-    finishTurn,
-    rejectTurn,
+    drafts,
+    setDraft,
+    turnNotices,
   } = useConversationStore();
 
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -151,6 +151,15 @@ const App: React.FC = () => {
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [refreshDailyOverview]);
+
+  useEffect(() => {
+    window.addEventListener('online', reconnectConversations);
+    window.addEventListener('focus', reconnectConversations);
+    return () => {
+      window.removeEventListener('online', reconnectConversations);
+      window.removeEventListener('focus', reconnectConversations);
+    };
+  }, []);
 
   // 能量剩余：落到殿堂时查一次（打开页面也是先落在殿堂），之后每回到殿堂再查一次；对话里不查，也不轮询
   useEffect(() => {
@@ -272,8 +281,7 @@ const App: React.FC = () => {
     if (!OPENING_PHASE_SESSIONS.includes(sessionType)) return;
     await runTurn(
       newConv,
-      (onChunk) => conversationApi.greeting(newConv.conversation_id, onChunk),
-      '占卜师暂时联系不上，请重试'
+      (onChunk) => conversationApi.greeting(newConv.conversation_id, onChunk)
     );
   };
 
@@ -309,12 +317,13 @@ const App: React.FC = () => {
       // 这场会话还有一轮在跑：服务端可能已经落了这一轮的前半段（先说一句、再调工具接着跑），
       // 而这段话还在流式气泡里。用本地这份（这一轮开始时的样子），这一轮结束时 finishTurn
       // 统一换成服务端的——和一直停在这场会话里看到的一样。
-      const running = conversation.conversation_id in liveTurns;
-      const fullConv = running ? conversation : await conversationApi.get(conversation.conversation_id);
+      const fullConv = useConversationStore.getState().conversations.find(
+        (c) => c.conversation_id === conversation.conversation_id
+      ) ?? conversation;
       setCurrentConversation(fullConv);
       previousConversationIdRef.current = fullConv.conversation_id;
       // 这个页面没在跟，服务端却可能还在生成（关过页面、刷新过）：接上它
-      if (!running) void attachLiveTurn(fullConv);
+      void attachConversationTurn(fullConv);
     } catch (error) {
       console.error('加载对话失败:', error);
       toast.error('加载对话失败，请重试');
@@ -417,80 +426,17 @@ const App: React.FC = () => {
     return false;
   };
 
-  /**
-   * 在某场会话里跑一轮：流式正文记在这场会话名下，结束后刷新这场会话。
-   * 刷新只在它仍是当前会话时替换当前视图——用户中途切走不会被拽回来。
-   * sent = 这一轮开始前先显示出去的那句用户发言（只有发消息有）。
-   * 返回 false = 今日额度用完、后端没收这一轮：什么都没落库，库里还是这一轮之前的样子，
-   * 所以不再拉会话，只在本地撤下 sent，其余消息原样不动。
-   */
-  const runTurn = async (
+  const runTurn = (
     conv: Conversation,
     start: (onChunk: (chunk: string) => void) => Promise<void>,
-    failMessage: string,
     sent?: Message
-  ): Promise<boolean> => {
-    const id = conv.conversation_id;
-    startTurn(id);
-    let cut = false;
-    try {
-      await start((chunk) => appendTurn(id, chunk));
-    } catch (error: any) {
-      console.error(failMessage, error);
-      if (error?.status === 429) {
-        rejectTurn(id, sent);
-        setEnergy(0); // 后端说今天用完了，能量条跟弹窗对上
-        showQuotaPrompt();
-        return false;
-      }
-      if (error instanceof StreamCut) cut = true;
-      else toast.error(error?.message || failMessage);
-    }
-    let refreshed: Conversation | null = null;
-    try {
-      refreshed = await conversationApi.get(id);
-    } catch (error) {
-      console.error('刷新对话失败:', error);
-    }
-    finishTurn(id, refreshed);
-    // 流断了（手机切走、网络晃了一下），服务端这一轮照样在跑：接上它
-    if (cut) await attachLiveTurn(refreshed ?? conv);
-    return true;
-  };
-
-  /**
-   * 这场会话在服务端还有一段回复在生成（关过页面、刷新过、连接断过）：接上它，和 ChatGPT 刷新后一样。
-   * 流里先说这段回复从第几条记录开始：之前的照常显示；从它开始的正文（可能已经落了一部分库）
-   * 都在流里，交给流式气泡，不显示两遍。没有在生成的就什么都不做。
-   */
-  const attachLiveTurn = async (conv: Conversation) => {
-    const id = conv.conversation_id;
-    if (id in useConversationStore.getState().liveTurns) return;
-    let attached = false;
-    try {
-      await conversationApi.live(
-        id,
-        (start) => {
-          attached = true;
-          updateConversation({ ...conv, messages: conv.messages.slice(0, start) });
-          startTurn(id);
-        },
-        (chunk) => appendTurn(id, chunk)
-      );
-    } catch (error: any) {
-      console.error('接上进行中的回复失败:', error);
-      // 生成失败给提示；又断了就停在库里的样子，不反复重连
-      if (attached && !(error instanceof StreamCut)) toast.error(error?.message || '回复没能写完，请重试');
-    }
-    if (!attached) return;
-    let refreshed: Conversation | null = null;
-    try {
-      refreshed = await conversationApi.get(id);
-    } catch (error) {
-      console.error('刷新对话失败:', error);
-    }
-    finishTurn(id, refreshed);
-  };
+  ) => runConversationTurn(conv, start, {
+    sent,
+    onQuota: () => {
+      setEnergy(0);
+      void showQuotaPrompt();
+    },
+  });
 
   const handleAstrologyProfileSubmit = async (profile: UserProfile) => {
     if (!user) return;
@@ -508,7 +454,7 @@ const App: React.FC = () => {
     // 资料表单，或者当前会话没在等资料，只保存资料。
     const conv = useConversationStore.getState().currentConversation;
     if (!conv || pendingInterrupt(conv)?.name !== 'request_user_profile') return;
-    await runTurn(conv, (onChunk) => turnApi(conv.session_type).resume(conv.conversation_id, onChunk), '解读失败，请重试');
+    await runTurn(conv, (onChunk) => turnApi(conv.session_type).resume(conv.conversation_id, onChunk));
   };
 
   const handleAstrologyProfileSkip = () => {
@@ -516,10 +462,10 @@ const App: React.FC = () => {
     setShowAstrologyProfileModal(false);
   };
 
-  /** 返回 false = 今日额度用完、这句没发出去：没落库，从对话里撤下，交回输入框 */
+  /** 拒收/失败由这一轮的协调器退回所属会话的草稿，切换会话不串台。 */
   const handleSendMessage = async (content: string): Promise<boolean | void> => {
     const conv = currentConversation;
-    if (!conv || conv.conversation_id in liveTurns) return;
+    if (!conv || conv.conversation_id in useConversationStore.getState().liveTurns) return;
 
     // 立即将用户消息添加到对话中（无需等待API响应）
     const sent: Message = {
@@ -528,7 +474,7 @@ const App: React.FC = () => {
       timestamp: new Date().toISOString(),
     };
     addMessageToCurrentConversation(sent);
-    return runTurn(conv, (onChunk) => turnApi(conv.session_type).sendMessage(conv.conversation_id, content, onChunk), '发送失败，请重试', sent);
+    return runTurn(conv, (onChunk) => turnApi(conv.session_type).sendMessage(conv.conversation_id, content, onChunk), sent);
   };
 
   const handleReadyToDraw = () => setShowCardDrawer(true);
@@ -572,7 +518,7 @@ const App: React.FC = () => {
         .catch((error) => console.error('刷新对话失败:', error));
 
       await api.resume(conv.conversation_id, onChunk);
-    }, '解读失败，请重试');
+    });
   };
 
   // 「继续这段对话」:关弹窗,把 daily 对话设为当前会话(后续消息走 tarot 链路)
@@ -584,7 +530,7 @@ const App: React.FC = () => {
       const conv = await conversationApi.get(conversationId);
       await loadUserConversations(); // 让新建的日运对话出现在最近的占卜里
       setCurrentConversation(conv);
-      void attachLiveTurn(conv);
+      void attachConversationTurn(conv);
     } catch (error) {
       console.error('[Daily] 打开日运对话失败:', error);
       toast.error('打开对话失败');
@@ -667,6 +613,11 @@ const App: React.FC = () => {
   // 当前会话的一切界面状态都从它自己的数据推出来，切换会话不会串台
   const liveText = currentConversation ? liveTurns[currentConversation.conversation_id] : undefined;
   const isTurnRunning = liveText !== undefined;
+  const turnNotice = currentConversation ? turnNotices[currentConversation.conversation_id] : undefined;
+  const tail = currentConversation?.messages[currentConversation.messages.length - 1];
+  const retryAction = currentConversation?.failed_turn?.action
+    ?? (tail?.role === 'tool' ? 'resume'
+      : currentConversation && !tail && OPENING_PHASE_SESSIONS.includes(currentConversation.session_type) ? 'greeting' : undefined);
   const pendingCall = currentConversation && !isTurnRunning ? pendingInterrupt(currentConversation) : undefined;
   const pendingDrawRequest =
     pendingCall?.name === 'draw_tarot_cards' ? (pendingCall.args as unknown as DrawCardsRequest) : null;
@@ -856,7 +807,7 @@ const App: React.FC = () => {
                     drawnCards={unansweredCards?.tarot_cards}
                     drawnRequest={unansweredCards?.draw_request}
                     sessionType={currentConversation.session_type}
-                    isStreaming
+                    isStreaming={isTurnRunning}
                   />
                 )}
 
@@ -894,7 +845,29 @@ const App: React.FC = () => {
                     onReplyClick={handleSendMessage}
                   />
                 )}
+                {(turnNotice || (!isTurnRunning && retryAction === 'resume')) && (
+                  <div role="status" className="text-xs flex items-center gap-3" style={{ color: 'var(--ivory-dim)' }}>
+                    <span>{turnNotice?.text ?? '可以继续这段解读。'}</span>
+                    {turnNotice?.kind === 'offline' && (
+                      <button className="text-mystic-gold shrink-0" onClick={() => void attachConversationTurn(currentConversation)}>
+                        重新连接
+                      </button>
+                    )}
+                    {!isTurnRunning && retryAction && retryAction !== 'message' && (
+                      <button className="text-mystic-gold shrink-0" onClick={() => {
+                        const conv = currentConversation;
+                        void runTurn(conv, (onChunk) => retryAction === 'greeting'
+                          ? conversationApi.greeting(conv.conversation_id, onChunk)
+                          : turnApi(conv.session_type).resume(conv.conversation_id, onChunk));
+                      }}>
+                        {turnNotice ? '重试' : '继续解读'}
+                      </button>
+                    )}
+                  </div>
+                )}
                 <Composer
+                  message={drafts[currentConversation.conversation_id] ?? ''}
+                  onMessageChange={(text) => setDraft(currentConversation.conversation_id, text)}
                   onSend={handleSendMessage}
                   disabled={isTurnRunning || isLegacyConversation}
                   placeholder={
@@ -991,7 +964,6 @@ const App: React.FC = () => {
 };
 
 export default App;
-
 
 
 

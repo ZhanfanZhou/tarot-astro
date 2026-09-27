@@ -10,7 +10,7 @@
 import asyncio
 import json
 import weakref
-from typing import AsyncIterator, Dict, List, Optional
+from typing import AsyncIterator, Awaitable, Callable, Dict, List, Optional
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
@@ -75,7 +75,10 @@ def running(key: str) -> Optional[LiveTurn]:
     return _running.get(key)
 
 
-def start(key: str, base: int, chunks: AsyncIterator[str]) -> LiveTurn:
+def start(
+    key: str, base: int, chunks: AsyncIterator[str],
+    on_failure: Optional[Callable[[], Awaitable[None]]] = None,
+) -> LiveTurn:
     """把一次生成交给后台任务。chunks 边产生正文边自己落库，成功跑完再扣额度；
     抛错就是失败，失败原因记在 turn.error。调用方要先拿着 lock(key)，并确认 running(key) 为空。"""
     assert key not in _running
@@ -92,19 +95,27 @@ def start(key: str, base: int, chunks: AsyncIterator[str]) -> LiveTurn:
             print(f"[LiveTurn] ⚠️ {key} 生成失败: {e!r}")
             turn.error = FAILED_DETAIL
         finally:
-            _running.pop(key, None)
-            turn.done.set()
-            turn._notify()
+            # 清理失败输入完成之前仍算正在处理，不让下一句接到残缺历史上。
+            try:
+                if turn.error and on_failure:
+                    await on_failure()
+            finally:
+                _running.pop(key, None)
+                turn.done.set()
+                turn._notify()
 
     turn.task = asyncio.create_task(run())
     return turn
 
 
-def sse(turn: LiveTurn) -> StreamingResponse:
+def sse(turn: LiveTurn, conversation=None) -> StreamingResponse:
     """把一次生成按 SSE 推给这一个观众。
     先一条 {"start": base}，然后正文块 {"content"}，失败了一条 {"error"}，最后 [DONE]。"""
     async def generate():
-        yield f"data: {json.dumps({'start': turn.base})}\n\n"
+        start = {"start": turn.base}
+        if conversation is not None:
+            start["conversation"] = conversation.model_dump()
+        yield f"data: {json.dumps(start, ensure_ascii=False)}\n\n"
         async for chunk in turn.follow():
             yield f"data: {json.dumps({'content': chunk})}\n\n"
         if turn.error:

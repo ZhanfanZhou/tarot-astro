@@ -74,13 +74,13 @@ async def stream_turn(
         # 用户开口说话才看额度；resume 是抽牌/补资料之后的那段解读，不拦。扣都在这一轮跑完之后
         if user_content is not None:
             RateLimitService.check(current_user)
+        before = conversation.model_copy(deep=True)
+        # 旧失败只用于恢复草稿；新一轮真正被接收后清掉，不改模型历史。
+        if conversation.failed_turn:
+            conversation.failed_turn = None
+            await StorageService.save_conversation(conversation)
         for msg in appended:
             conversation = await ConversationService.append_message(conversation_id, msg)
-
-        # 开场幕上下文：相位 + <称呼与来访次数>
-        phase, relationship_block = await opening_service.prepare_opening_context(
-            conversation, user
-        )
 
         async def execute_function(func_name: str, func_args: dict) -> dict:
             print(f"\n[Function Executor] 执行函数: {func_name} {func_args}")
@@ -93,12 +93,12 @@ async def stream_turn(
                 return _read_notes(user)
             return {"success": False, "error": f"未知的函数: {func_name}"}
 
-        # daily 对话：每次请求实时渲染日运系统提示词（模板热加载 + 近日旅程始终最新）
-        system_prompt_override = None
-        if conversation.session_type == SessionType.DAILY:
-            system_prompt_override = await DailyService.render_daily_system_prompt(conversation, user)
-
         async def run() -> AsyncIterator[str]:
+            # 准备上下文也属于这一轮，失败时同样撤回未处理的输入。
+            phase, relationship_block = await opening_service.prepare_opening_context(conversation, user)
+            system_prompt_override = None
+            if conversation.session_type == SessionType.DAILY:
+                system_prompt_override = await DailyService.render_daily_system_prompt(conversation, user)
             async for event in gemini_service.stream_response(
                 conversation.messages,
                 user,
@@ -119,7 +119,11 @@ async def stream_turn(
             await RateLimitService.consume(current_user)
 
         # 这一轮的输出从现在的末尾开始（用户这句已经落库，在它之前）
-        turn = live_turns.start(conversation_id, len(conversation.messages), run())
+        turn = live_turns.start(
+            conversation_id, len(conversation.messages), run(),
+            on_failure=lambda: ConversationService.fail_turn(
+                before, "message" if user_content is not None else "resume", user_content),
+        )
     return live_turns.sse(turn)
 
 
@@ -128,22 +132,25 @@ async def record_draw(conversation_id: str, current_user: User) -> DrawCardsResp
 
     牌阵和位置取自那次调用的参数，不收前端传来的：位置名会原样写进工具结果发给模型，
     由请求体决定的话，任何人都能直接调接口往里塞文字。"""
-    conversation = await _load(conversation_id, current_user)
-    pending = tool_turns.pending_interrupt(conversation)
-    if not pending or pending.name != "draw_tarot_cards":
-        raise HTTPException(status_code=409, detail="当前没有待抽的牌")
+    async with live_turns.lock(conversation_id):
+        conversation = await _load(conversation_id, current_user)
+        if live_turns.running(conversation_id):
+            raise HTTPException(status_code=409, detail="上一段回复还没说完，请稍候")
+        pending = tool_turns.pending_interrupt(conversation)
+        if not pending or pending.name != "draw_tarot_cards":
+            raise HTTPException(status_code=409, detail="当前没有待抽的牌")
 
-    draw_request = DrawCardsRequest(**pending.args)
-    cards = TarotService.draw_cards(draw_request)
-    await ConversationService.append_message(
-        conversation_id,
-        tool_turns.tool_message(
-            pending, tool_turns.cards_result(cards, draw_request),
-            tarot_cards=cards, draw_request=draw_request,
-        ),
-    )
-    await ConversationService.mark_cards_drawn(conversation_id)
-    return DrawCardsResponse(cards=cards, conversation_id=conversation_id)
+        draw_request = DrawCardsRequest(**pending.args)
+        cards = TarotService.draw_cards(draw_request)
+        await ConversationService.append_message(
+            conversation_id,
+            tool_turns.tool_message(
+                pending, tool_turns.cards_result(cards, draw_request),
+                tarot_cards=cards, draw_request=draw_request,
+            ),
+        )
+        await ConversationService.mark_cards_drawn(conversation_id)
+        return DrawCardsResponse(cards=cards, conversation_id=conversation_id)
 
 
 # ── Loop 内工具 ────────────────────────────────────────────────────

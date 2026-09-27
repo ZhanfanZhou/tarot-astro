@@ -196,7 +196,7 @@ spring 滑入；per-deck 的 accent 只驱动细微辉光。
 | store | 管什么 |
 |---|---|
 | `useAuthStore` | 当前用户 + token（持久化 localStorage） |
-| `useConversationStore` | 当前会话、会话列表、进行中的那一轮 |
+| `useConversationStore` | 当前会话、会话列表、进行中的那一轮、各会话草稿与连接状态 |
 | `useDeckWallet` | 钱包（余额 / 已拥有 / 当前牌组），**后端为唯一来源** |
 | `useToastStore` · `useConfirmStore` | 提示与确认 |
 
@@ -210,8 +210,11 @@ spring 滑入；per-deck 的 accent 只驱动细微辉光。
 `services/api.ts` 一处封装：axios 实例 + 拦截器（带 token、401 登出）+ SSE 解析。
 SSE 端点用原生 `fetch`，手动拼 `Authorization`，都走 `readStream` 一个读法：`start` / `content` / `error` / `[DONE]`，
 没等到 `[DONE]` 就断了抛 `StreamCut`（服务端照样在生成，不算失败）。
-打开一场会话、或者发起的那条流断了，`App.attachLiveTurn` 去 `/live` 接上服务端还在生成的那段回复
-（见 [会话核心](conversation-core.md) §2）。
+打开一场会话、或者发起的那条流断了，`services/conversationTurns.ts` 去 `/live` 接上服务端还在生成的那段回复
+（见 [会话核心](conversation-core.md) §2）。同一会话共用一个接收者，接回期间不撤掉气泡；
+`/live` 空闲时返回最终会话，失败输入从消息列表撤回到按会话保存的草稿。
+`Composer` 使用 store 的草稿，异步拒收发生在切换会话之后也不会把文字放到另一场。
+连接中断与生成终止在输入区分别显示；只有已确认终止才能重新提交生成请求。
 管理端另有 `services/adminApi.ts`，独立实例、独立 token。
 
 ---

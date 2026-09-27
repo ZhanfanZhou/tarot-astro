@@ -81,6 +81,9 @@ export class StreamCut extends Error {
   }
 }
 
+/** 后台已经结束的失败，和连接中断（后台可能仍在生成）分开处理。 */
+export class GenerationFailed extends Error {}
+
 /**
  * 读完一个生成流（/message /resume /greeting /live /journey 同一个形状）：
  * {"start": n} 这段回复从会话第 n 条记录开始；{"content"} 正文块；{"error"} 生成失败（抛出，文案直接给用户看）；
@@ -89,35 +92,40 @@ export class StreamCut extends Error {
 async function readStream(
   response: Response,
   onChunk: (chunk: string) => void,
-  onStart?: (start: number) => void
+  onStart?: (start: number, conversation?: Conversation) => void
 ): Promise<void> {
   const reader = response.body?.getReader();
   if (!reader) throw new Error('无法读取响应流');
   const decoder = new TextDecoder();
   let buffer = '';
 
-  while (true) {
-    let read: ReadableStreamReadResult<Uint8Array>;
-    try {
-      read = await reader.read();
-    } catch {
-      throw new StreamCut();
-    }
-    if (read.done) throw new StreamCut();
+  try {
+    while (true) {
+      let read: ReadableStreamReadResult<Uint8Array>;
+      try {
+        read = await reader.read();
+      } catch {
+        throw new StreamCut();
+      }
+      if (read.done) throw new StreamCut();
 
-    buffer += decoder.decode(read.value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
+      buffer += decoder.decode(read.value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
 
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6);
-      if (data === '[DONE]') return;
-      const parsed = JSON.parse(data);
-      if (parsed.error) throw new Error(parsed.error);
-      if (parsed.start !== undefined) onStart?.(parsed.start);
-      if (parsed.content) onChunk(parsed.content);
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6);
+        if (data === '[DONE]') return;
+        const parsed = JSON.parse(data);
+        if (parsed.error) throw new GenerationFailed(parsed.error);
+        if (parsed.start !== undefined) onStart?.(parsed.start, parsed.conversation);
+        if (parsed.content) onChunk(parsed.content);
+      }
     }
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
 }
 
@@ -222,20 +230,20 @@ export const conversationApi = {
 
   /**
    * 接上这场会话在服务端还在生成的那段回复（关过页面、刷新过、连接断过）：已经出来的正文先补上，
-   * 后面的接着流。onStart(n)：这段回复从第 n 条记录开始，之前的照常显示。没有在生成的 → 返回 false。
+   * 后面的接着流。没有在生成的直接返回最新会话，避免历史快照和生成状态错位。
    */
   live: async (
     conversationId: string,
-    onStart: (start: number) => void,
+    onStart: (start: number, conversation?: Conversation) => void,
     onChunk: (chunk: string) => void
-  ): Promise<boolean> => {
+  ): Promise<Conversation | null> => {
     const response = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}/live`, {
       headers: { ...authHeaders() },
     });
-    if (response.status === 204) return false;
     if (!response.ok) throw await streamError(response);
+    if (response.headers.get('Content-Type')?.includes('application/json')) return response.json();
     await readStream(response, onChunk, onStart);
-    return true;
+    return null;
   },
 
   /** 本人在这场里点过的赞 / 踩：消息下标 → up / down */
