@@ -6,12 +6,12 @@
 参数时模型自己用哪档。没有 efforts 的模型不发这个参数，管理页也不给选。
   DeepSeek V4 系：reasoning_effort ∈ low/high/max，默认 high
   Kimi K3：reasoning_effort ∈ low/high/max，默认 max（思考关不掉）
-  Kimi K2.6：只有 thinking 开/关，没有强度档；reasoning_effort 发过去不报错，
-    但推理量不随档位变（实测），等于没设
-  Gemini：模型本身有 thinking_level（3.x）/ thinking_budget（2.5），但
+  Gemini 3.8 Flash：模型本身有 thinking_level ∈ low/medium/high（默认 medium），但
     google-generativeai 0.8.3 的 GenerationConfig 没有这个字段，发不出去
 
-核对于 2026-09（档位对真 API 逐档实测过）。
+每家只列现役最新的：deepseek-flash = V4.1 Flash、deepseek-v4-pro = V4-Pro-0813（DeepSeek
+账号下只有这两个）；Kimi 只用 K3；Gemini 只用最新的 flash。
+核对于 2026-09（模型名对各家 /models 列表、档位对真 API 逐档实测过）。
 """
 
 _EFFORTS = ["low", "high", "max"]
@@ -22,9 +22,7 @@ PROVIDERS = {
         "key_attr": "GEMINI_API_KEY",
         "base_url_attr": None,          # 官方 SDK，不走 base_url
         "models": [
-            {"id": "gemini-3.1-flash-lite", "label": "3.1 Flash Lite · 快且便宜"},
-            {"id": "gemini-3-pro",          "label": "3 Pro · 最强"},
-            {"id": "gemini-2.5-flash",      "label": "2.5 Flash · 均衡"},
+            {"id": "gemini-3.8-flash", "label": "3.8 Flash · 最新"},
         ],
     },
     "deepseek": {
@@ -43,9 +41,8 @@ PROVIDERS = {
         "key_attr": "KIMI_API_KEY",
         "base_url_attr": "KIMI_BASE_URL",
         "models": [
-            {"id": "kimi-k3",   "label": "K3 · 最强",
+            {"id": "kimi-k3", "label": "K3 · 最强",
              "efforts": _EFFORTS, "effort_default": "max"},
-            {"id": "kimi-k2.6", "label": "K2.6 · 便宜"},
         ],
     },
 }

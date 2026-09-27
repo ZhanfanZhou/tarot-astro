@@ -476,9 +476,10 @@ def test_set_agent_with_reasoning_effort(client, monkeypatch):
     assert opening["reasoning_effort"] == "low"
 
     # 模型不认的档位：400，不落盘
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "k")
     r = client.put("/api/admin/llm/opening",
-                   json={"provider": "kimi", "model": "kimi-k2.6", "reasoning_effort": "low"}, headers=h)
-    assert r.status_code == 400 and "kimi-k2.6" in r.json()["detail"]
+                   json={"provider": "gemini", "model": "gemini-3.8-flash", "reasoning_effort": "low"}, headers=h)
+    assert r.status_code == 400 and "gemini-3.8-flash" in r.json()["detail"]
     opening = next(a for a in client.get("/api/admin/llm", headers=h).json()["agents"]
                    if a["agent"] == "opening")
     assert (opening["model"], opening["reasoning_effort"]) == ("kimi-k3", "low")

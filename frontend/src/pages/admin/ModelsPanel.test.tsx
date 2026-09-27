@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, fireEvent, within } from '@testing-library/react';
 import type { LlmAgentState, LlmConfig } from '@/services/adminApi';
 
-// 后端返回的形状（agent_config.describe()）：K3 有三档、K2.6 没有档位、Gemini 不能设
+// 后端返回的形状（agent_config.describe()）：K3、DeepSeek 有三档，Gemini 不能设
 const LEVELS = ['low', 'high', 'max'];
 const agent = (a: Partial<LlmAgentState>): LlmAgentState => ({
   agent: 'opening', label: '前置（开场）', provider: 'kimi', model: 'kimi-k3',
@@ -13,18 +13,17 @@ const agent = (a: Partial<LlmAgentState>): LlmAgentState => ({
 const CONFIG: LlmConfig = {
   agents: [
     agent({}),
-    agent({ agent: 'memory', label: '记忆（写笔记本）', provider: 'gemini', model: 'gemini-2.5-flash',
-            reasoning_effort: '', source: 'env', env_provider: 'gemini', env_model: 'gemini-2.5-flash',
+    agent({ agent: 'memory', label: '记忆（写笔记本）', provider: 'gemini', model: 'gemini-3.8-flash',
+            reasoning_effort: '', source: 'env', env_provider: 'gemini', env_model: 'gemini-3.8-flash',
             env_reasoning_effort: '' }),
   ],
   providers: [
-    { provider: 'gemini', label: 'Gemini', models: [{ id: 'gemini-2.5-flash', label: '2.5 Flash' }] },
+    { provider: 'gemini', label: 'Gemini', models: [{ id: 'gemini-3.8-flash', label: '3.8 Flash' }] },
     { provider: 'deepseek', label: 'DeepSeek', models: [
       { id: 'deepseek-flash', label: 'Flash', efforts: LEVELS, effort_default: 'high' },
     ] },
     { provider: 'kimi', label: 'Kimi', models: [
       { id: 'kimi-k3', label: 'K3', efforts: LEVELS, effort_default: 'max' },
-      { id: 'kimi-k2.6', label: 'K2.6' },
     ] },
   ],
 };
@@ -64,8 +63,8 @@ describe('ModelsPanel 思考强度', () => {
 
   it('换到没有档位的模型：思考强度清空，不发', async () => {
     const section = await card('前置（开场）');
-    fireEvent.change(selectOf(section, '模型'), { target: { value: 'kimi-k2.6' } });
-    expect(setLlmAgent).toHaveBeenCalledWith('opening', 'kimi', 'kimi-k2.6', '');
+    fireEvent.change(selectOf(section, 'Provider'), { target: { value: 'gemini' } });
+    expect(setLlmAgent).toHaveBeenCalledWith('opening', 'gemini', 'gemini-3.8-flash', '');
   });
 
   it('换 provider：新模型也认当前档位就留着', async () => {

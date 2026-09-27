@@ -66,13 +66,13 @@ KIMI_BASE_URL = os.getenv("KIMI_BASE_URL", "https://api.moonshot.cn/v1")
 # 每个 Agent 一组 provider + model，成对出现、各自写死默认值。
 # provider ∈ {gemini, deepseek, kimi}；model 必须是该 provider 下的模型名。
 # 换 provider 就要一起换 model —— 两行是一组，不要只改一行。
-# Gemini 备选：gemini-2.5-flash / gemini-3.1-flash-lite / gemini-3-pro
+# 可选模型见 services/llm/catalog.py
 OPENING_PROVIDER = os.getenv("OPENING_PROVIDER", "gemini")
-OPENING_MODEL = os.getenv("OPENING_MODEL", "gemini-3.1-flash-lite")
+OPENING_MODEL = os.getenv("OPENING_MODEL", "gemini-3.8-flash")
 READING_PROVIDER = os.getenv("READING_PROVIDER", "gemini")
-READING_MODEL = os.getenv("READING_MODEL", "gemini-3.1-flash-lite")
+READING_MODEL = os.getenv("READING_MODEL", "gemini-3.8-flash")
 MEMORY_PROVIDER = os.getenv("MEMORY_PROVIDER", "gemini")
-MEMORY_MODEL = os.getenv("MEMORY_MODEL", "gemini-2.5-flash")
+MEMORY_MODEL = os.getenv("MEMORY_MODEL", "gemini-3.8-flash")
 
 
 # 思考强度（顶层参数 reasoning_effort ∈ low / high / max）。哪些模型认见 services/llm/catalog.py

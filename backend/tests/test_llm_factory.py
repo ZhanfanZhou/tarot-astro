@@ -85,8 +85,8 @@ def test_deepseek_gets_the_configured_reasoning_effort():
         assert llm.get_provider("reading")._effort == "max"
 
 
-def test_reasoning_effort_is_not_sent_to_a_model_without_levels():
-    """K2.6 只有思考开/关、没有强度档：.env 配了档位也不发过去。"""
+def test_reasoning_effort_is_not_sent_to_a_model_outside_the_catalog():
+    """.env 里配了清单外的模型（比如已下架的 K2.6）：不知道它认不认档位，不发。"""
     import config
     from services import llm
     with patch.object(config, "MEMORY_PROVIDER", "kimi"), \

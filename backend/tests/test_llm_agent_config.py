@@ -56,7 +56,7 @@ def test_reset_falls_back_to_env(store):
     from services.llm import agent_config
 
     with patch.object(config, "KIMI_API_KEY", "k"):
-        agent_config.set_agent("memory", "kimi", "kimi-k2.6")
+        agent_config.set_agent("memory", "kimi", "kimi-k3")
     agent_config.reset_agent("memory")
 
     with patch.object(config, "MEMORY_PROVIDER", "gemini"), \
@@ -143,12 +143,12 @@ def test_reasoning_effort_reads_the_agent_env_value(store, monkeypatch):
 
 
 def test_env_effort_is_dropped_when_the_model_has_no_levels(store, monkeypatch):
-    """.env 的档位对哪个模型都能填；模型不认（Gemini 走的旧 SDK 发不出、K2.6 没有档）就不发。"""
+    """.env 的档位对哪个模型都能填；模型不认（Gemini 走的旧 SDK 发不出）就不发。"""
     import config
     from services.llm import agent_config
 
     monkeypatch.setattr(config, "OPENING_PROVIDER", "gemini")
-    monkeypatch.setattr(config, "OPENING_MODEL", "gemini-3.1-flash-lite")
+    monkeypatch.setattr(config, "OPENING_MODEL", "gemini-3.8-flash")
     monkeypatch.setattr(config, "OPENING_REASONING_EFFORT", "low")
     assert agent_config.reasoning_effort("opening") == ""
 
@@ -188,18 +188,14 @@ def test_override_written_before_effort_existed_keeps_the_env_effort(store, monk
     assert agent_config.reasoning_effort("opening") == "low"
 
 
-@pytest.mark.parametrize("provider,model,key_attr", [
-    ("kimi", "kimi-k2.6", "KIMI_API_KEY"),
-    ("gemini", "gemini-2.5-flash", "GEMINI_API_KEY"),
-])
-def test_rejects_effort_for_a_model_without_levels(store, monkeypatch, provider, model, key_attr):
+def test_rejects_effort_for_a_model_without_levels(store, monkeypatch):
     import config
     from services.llm import agent_config
 
-    monkeypatch.setattr(config, key_attr, "k")
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "k")
     with pytest.raises(ValueError) as exc:
-        agent_config.set_agent("reading", provider, model, "low")
-    assert model in str(exc.value)
+        agent_config.set_agent("reading", "gemini", "gemini-3.8-flash", "low")
+    assert "gemini-3.8-flash" in str(exc.value)
     assert not store.exists()
 
 
@@ -226,4 +222,5 @@ def test_describe_reports_effective_effort_and_the_levels(store, monkeypatch):
     kimi = next(p for p in d["providers"] if p["provider"] == "kimi")
     k3 = next(m for m in kimi["models"] if m["id"] == "kimi-k3")
     assert (k3["efforts"], k3["effort_default"]) == (["low", "high", "max"], "max")
-    assert "efforts" not in next(m for m in kimi["models"] if m["id"] == "kimi-k2.6")
+    gemini = next(p for p in d["providers"] if p["provider"] == "gemini")
+    assert all("efforts" not in m for m in gemini["models"])
