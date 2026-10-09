@@ -159,12 +159,14 @@ export const TextField: React.FC<React.InputHTMLAttributes<HTMLInputElement> & {
   </div>
 );
 
-/** 下拉：去掉系统箭头换成一枚金色折角；没选的时候字是淡的，和占位一样 */
+/** 下拉：去掉系统箭头换成一枚金色折角；没选的时候字是淡的，和占位一样。
+ *  Windows 的浏览器用 option 自己的底色/字色画弹出列表（select 那层近乎透明的底在那里成了白底），
+ *  所以 option 要给实色暗底 + 象牙字；Mac 走系统菜单，不看这两项。 */
 export const SelectField: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = ({ className = '', children, ...rest }) => (
   <div className="relative">
     <select
       {...rest}
-      className={`${FIELD} appearance-none pl-4 pr-9 cursor-pointer ${className}`}
+      className={`${FIELD} appearance-none pl-4 pr-9 cursor-pointer [&_option]:bg-[var(--panel-solid)] [&_option]:text-[color:var(--ivory)] ${className}`}
       style={{ color: rest.value === '' || rest.value === undefined ? 'var(--ivory-faint)' : 'var(--ivory)', colorScheme: 'dark' }}
     >
       {children}
